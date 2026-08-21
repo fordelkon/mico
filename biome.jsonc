@@ -1,0 +1,49 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.9/schema.json",
+  "vcs": {
+    "clientKind": "git",
+    "enabled": true,
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": false
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf",
+    // Vendored, not application source — don't reflow it to local style.
+    "includes": ["**", "!tools/oxlint/anti-slop/**"]
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "none"
+    }
+  },
+  "json": {
+    "parser": {
+      "allowComments": true
+    }
+  },
+  "linter": {
+    // Biome is used as the formatter here; oxlint + eslint own linting.
+    // Kept enabled (rather than off) so project-specific rules can be
+    // opted into later without restructuring this file.
+    "enabled": true,
+    "rules": {
+      "preset": "none"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

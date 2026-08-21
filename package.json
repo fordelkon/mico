@@ -1,0 +1,56 @@
+{
+  "name": "Mico",
+  "version": "1.0.0",
+  "description": "An Electron application with React and TypeScript",
+  "main": "./out/main/index.js",
+  "author": "example.com",
+  "homepage": "https://electron-vite.org",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "format": "biome format --write && biome lint --write",
+    "format:check": "biome format && biome lint",
+    "lint": "oxlint --fix && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --cache && pnpm format",
+    "test:lint": "oxlint --deny-warnings && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --cache",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "pnpm run typecheck && electron-vite build",
+    "postinstall": "electron-builder install-app-deps",
+    "build:unpack": "pnpm run build && electron-builder --dir",
+    "build:win": "pnpm run build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:linux": "electron-vite build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.9",
+    "@electron-toolkit/eslint-config-ts": "^3.1.0",
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@oxlint/plugins": "1.79.0",
+    "@types/node": "^22.19.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-oxlint": "^1.79.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "oxlint": "^1.79.0",
+    "oxlint-tsgolint": "^7.0.2001",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6"
+  }
+}
