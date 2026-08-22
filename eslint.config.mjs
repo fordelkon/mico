@@ -6,7 +6,15 @@ import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 import oxlint from 'eslint-plugin-oxlint'
 
 export default defineConfig(
-  { ignores: ['**/node_modules', '**/dist', '**/out', 'tools/oxlint/anti-slop/**'] },
+  {
+    ignores: [
+      '**/node_modules',
+      '**/dist',
+      '**/out',
+      '**/storybook-static',
+      'tools/oxlint/anti-slop/**'
+    ]
+  },
   tseslint.configs.recommended,
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat['jsx-runtime'],

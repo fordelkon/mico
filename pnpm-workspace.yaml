@@ -1,5 +1,8 @@
 engineStrict: true
 
+packages:
+  - packages/*
+
 allowBuilds:
   electron: true
   esbuild: true

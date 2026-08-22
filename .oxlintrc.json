@@ -8,6 +8,7 @@
     "out/**",
     "dist/**",
     "build/**",
+    "**/storybook-static/**",
     "resources/**",
     ".agent/**",
     ".agents/**",
