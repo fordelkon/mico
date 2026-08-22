@@ -2,6 +2,8 @@
   "recommendations": [
     "dbaeumer.vscode-eslint",
     "editorconfig.editorconfig",
+    "bradlc.vscode-tailwindcss",
+    "vitest.explorer",
     "oxc.oxc-vscode",
     "biomejs.biome"
   ]

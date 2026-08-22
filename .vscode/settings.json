@@ -1,4 +1,7 @@
 {
+  "[css]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
   "[typescript]": {
     "editor.defaultFormatter": "biomejs.biome"
   },
@@ -22,7 +25,9 @@
   },
   "editor.formatOnSave": true,
   "files.associations": {
+    "*.css": "tailwindcss",
     ".oxlintrc.json": "jsonc"
   },
-  "typescript.tsdk": "node_modules/typescript/lib"
+  "tailwindCSS.classFunctions": ["cva", "cn", "clsx"],
+  "js/ts.tsdk.path": "./node_modules/typescript/lib"
 }
