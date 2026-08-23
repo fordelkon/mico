@@ -1,19 +1,8 @@
 {
   "extends": "./tsconfig.json",
-  "include": [
-    ".storybook/**/*.ts",
-    ".storybook/**/*.tsx",
-    "stories",
-    "src/**/__tests__",
-    "src/**/*.test.ts",
-    "src/**/*.test.tsx",
-    "src/**/*.spec.ts",
-    "src/**/*.spec.tsx",
-    "test",
-    "vitest.config.ts"
-  ],
+  "include": [".storybook/**/*.ts", ".storybook/**/*.tsx", "stories"],
   "exclude": [],
   "compilerOptions": {
-    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
+    "types": ["node"]
   }
 }
