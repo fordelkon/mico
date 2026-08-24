@@ -9,6 +9,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  SidebarResizeHandle,
   SidebarTrigger
 } from '@mico/ui'
 import type { Meta, StoryObj } from '@storybook/react-vite'
@@ -32,9 +33,18 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-function SidebarExample({ defaultOpen = true }: { defaultOpen?: boolean }) {
+function SidebarExample({
+  defaultOpen = true,
+  resizable = false
+}: {
+  defaultOpen?: boolean
+  resizable?: boolean
+}) {
   return (
-    <SidebarProvider defaultOpen={defaultOpen}>
+    <SidebarProvider
+      defaultOpen={defaultOpen}
+      resize={resizable ? { defaultWidth: 256, maxWidth: 360, minWidth: 200 } : undefined}
+    >
       <Sidebar collapsible="icon">
         <SidebarContent>
           <SidebarGroup>
@@ -53,6 +63,7 @@ function SidebarExample({ defaultOpen = true }: { defaultOpen?: boolean }) {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
+        {resizable ? <SidebarResizeHandle /> : null}
       </Sidebar>
       <SidebarInset>
         <header className="flex h-12 items-center border-b px-4">
@@ -70,4 +81,8 @@ export const Default: Story = {
 
 export const Collapsed: Story = {
   render: () => <SidebarExample defaultOpen={false} />
+}
+
+export const Resizable: Story = {
+  render: () => <SidebarExample resizable />
 }

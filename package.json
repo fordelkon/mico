@@ -30,7 +30,8 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
-    "@mico/ui": "workspace:*"
+    "@mico/ui": "workspace:*",
+    "lucide-react": "^1.33.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.9",
