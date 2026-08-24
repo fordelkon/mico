@@ -1,0 +1,102 @@
+.window-control-group {
+  right: 12px;
+}
+
+.window-control-group .titlebar-button {
+  border-radius: 4px;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.window-control-group .titlebar-button:hover {
+  background: rgb(128 128 128 / 30%);
+  box-shadow: none;
+}
+
+.window-control-group .titlebar-button:active {
+  background: rgb(128 128 128 / 40%);
+  box-shadow: none;
+  transform: none;
+}
+
+.window-control-group .window-control-group__close:hover {
+  background: #e81123;
+  color: white;
+}
+
+.window-control-group .window-control-group__close:active {
+  background: #c50e1f;
+  color: white;
+}
+
+.window-control-group[data-platform="darwin"] {
+  right: auto;
+  left: 16px;
+  height: 26px;
+  align-items: center;
+  gap: 6px;
+}
+
+.window-control-group[data-platform="darwin"] .window-control-group__traffic-light {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 0.5px solid rgb(0 0 0 / 12%);
+  border-radius: 50%;
+  color: rgb(24 24 24 / 62%);
+  box-shadow:
+    inset 0 0.5px 0 rgb(255 255 255 / 30%),
+    inset 0 -0.5px 0 rgb(0 0 0 / 8%);
+  transition:
+    box-shadow 40ms linear,
+    filter 40ms linear;
+}
+
+.window-control-group[data-platform="darwin"] .window-control-group__traffic-light svg {
+  width: 5px;
+  height: 5px;
+  opacity: 0;
+  transition: opacity 40ms linear;
+}
+
+.window-control-group[data-platform="darwin"] .window-control-group__close {
+  background: #ff5f57;
+}
+
+.window-control-group[data-platform="darwin"] .window-control-group__minimize {
+  background: #febc2e;
+}
+
+.window-control-group[data-platform="darwin"] .window-control-group__zoom {
+  background: #28c840;
+}
+
+.window-control-group[data-platform="darwin"][data-window-focused="true"]
+  .window-control-group__traffic-light:hover {
+  filter: brightness(0.82);
+}
+
+.window-control-group[data-platform="darwin"][data-window-focused="true"]
+  .window-control-group__traffic-light:hover
+  svg {
+  opacity: 1;
+}
+
+.window-control-group[data-platform="darwin"][data-window-focused="true"]
+  .window-control-group__traffic-light:active {
+  filter: brightness(0.72);
+  box-shadow:
+    inset 0 1px 1px rgb(0 0 0 / 22%),
+    inset 0 -0.5px 0 rgb(255 255 255 / 14%);
+  transform: none;
+}
+
+.window-control-group[data-platform="darwin"][data-window-focused="false"]
+  .window-control-group__traffic-light {
+  border-color: color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+  background: color-mix(in srgb, var(--muted-foreground) 68%, var(--background));
+  box-shadow:
+    inset 0 0.5px 0 rgb(255 255 255 / 20%),
+    inset 0 -0.5px 0 color-mix(in srgb, var(--foreground) 6%, transparent);
+}

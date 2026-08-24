@@ -29,23 +29,23 @@ function AppSidebar(): React.JSX.Element {
         <SidebarResizeHandle className="app-sidebar__resize-handle" />
       </Sidebar>
 
-      <header className="app-sidebar__toolbar">
+      <header className="app-sidebar__toolbar titlebar-control-group">
         <IconTooltipButton
           aria-expanded={!collapsed}
-          className="app-sidebar__icon-button"
+          className="app-sidebar__icon-button titlebar-button"
           icon={<PanelLeft aria-hidden="true" className="app-sidebar__toggle-icon" />}
           label="Toggle sidebar"
           onClick={toggleSidebar}
           tooltip={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         />
         <IconTooltipButton
-          className="app-sidebar__icon-button"
+          className="app-sidebar__icon-button titlebar-button"
           icon={<Search aria-hidden="true" />}
           label="Search threads"
           tooltip="Search threads"
         />
         <IconTooltipButton
-          className="app-sidebar__icon-button"
+          className="app-sidebar__icon-button titlebar-button"
           icon={<SquarePen aria-hidden="true" />}
           label="New chat"
           tooltip="New chat"

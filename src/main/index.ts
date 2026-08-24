@@ -1,13 +1,76 @@
-import { app, shell, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  type BrowserWindowConstructorOptions,
+  type IpcMainInvokeEvent
+} from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import {
+  WINDOW_CLOSE_CHANNEL,
+  WINDOW_FULLSCREEN_CHANGED_CHANNEL,
+  WINDOW_IS_FULLSCREEN_CHANNEL,
+  WINDOW_IS_MAXIMIZED_CHANNEL,
+  WINDOW_MAXIMIZE_CHANNEL,
+  WINDOW_MAXIMIZED_CHANGED_CHANNEL,
+  WINDOW_MINIMIZE_CHANNEL,
+  WINDOW_TOGGLE_FULLSCREEN_CHANNEL,
+  WINDOW_UNMAXIMIZE_CHANNEL
+} from '../shared/window-controls'
+
+function isTrustedRendererUrl(url: string): boolean {
+  try {
+    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+      return new URL(url).origin === new URL(process.env['ELECTRON_RENDERER_URL']).origin
+    }
+
+    return url === pathToFileURL(join(__dirname, '../renderer/index.html')).toString()
+  } catch {
+    return false
+  }
+}
+
+function getCallingWindow(event: IpcMainInvokeEvent): BrowserWindow {
+  if (
+    event.senderFrame !== event.sender.mainFrame ||
+    !isTrustedRendererUrl(event.senderFrame.url)
+  ) {
+    throw new Error('Untrusted window control sender')
+  }
+
+  const window = BrowserWindow.fromWebContents(event.sender)
+
+  if (!window) {
+    throw new Error('Window not found')
+  }
+
+  return window
+}
+
+function registerWindowControlHandlers(): void {
+  ipcMain.handle(WINDOW_CLOSE_CHANNEL, (event) => getCallingWindow(event).close())
+  ipcMain.handle(WINDOW_IS_FULLSCREEN_CHANNEL, (event) => getCallingWindow(event).isFullScreen())
+  ipcMain.handle(WINDOW_IS_MAXIMIZED_CHANNEL, (event) => getCallingWindow(event).isMaximized())
+  ipcMain.handle(WINDOW_MAXIMIZE_CHANNEL, (event) => getCallingWindow(event).maximize())
+  ipcMain.handle(WINDOW_MINIMIZE_CHANNEL, (event) => getCallingWindow(event).minimize())
+  ipcMain.handle(WINDOW_TOGGLE_FULLSCREEN_CHANNEL, (event) => {
+    const window = getCallingWindow(event)
+    window.setFullScreen(!window.isFullScreen())
+  })
+  ipcMain.handle(WINDOW_UNMAXIMIZE_CHANNEL, (event) => getCallingWindow(event).unmaximize())
+}
 
 function createWindow(): void {
   // Create the browser window.
   const windowOptions: BrowserWindowConstructorOptions = {
     width: 900,
     height: 670,
+    minWidth: 800,
+    minHeight: 600,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -15,13 +78,40 @@ function createWindow(): void {
       sandbox: false
     }
   }
-  if (process.platform === 'linux') {
+  if (process.platform === 'win32') {
+    windowOptions.frame = false
+    windowOptions.roundedCorners = true
+  } else if (process.platform === 'darwin') {
+    windowOptions.acceptFirstMouse = true
+    windowOptions.titleBarStyle = 'hidden'
+  } else if (process.platform === 'linux') {
     windowOptions.icon = icon
   }
   const mainWindow = new BrowserWindow(windowOptions)
 
+  if (process.platform === 'darwin') {
+    mainWindow.setWindowButtonVisibility(false)
+  }
+
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow.webContents.send(WINDOW_FULLSCREEN_CHANGED_CHANNEL, true)
+  })
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow.webContents.send(WINDOW_FULLSCREEN_CHANGED_CHANNEL, false)
+  })
+  mainWindow.on('maximize', () => {
+    mainWindow.webContents.send(WINDOW_MAXIMIZED_CHANGED_CHANNEL, true)
+  })
+  mainWindow.on('unmaximize', () => {
+    mainWindow.webContents.send(WINDOW_MAXIMIZED_CHANGED_CHANNEL, false)
+  })
+
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedRendererUrl(url)) event.preventDefault()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -54,6 +144,7 @@ void app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+  registerWindowControlHandlers()
 
   createWindow()
 

@@ -23,6 +23,36 @@ button {
   font: inherit;
 }
 
+.titlebar-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.titlebar-control-group {
+  position: absolute;
+  top: 10px;
+  z-index: 30;
+  display: flex;
+  width: max-content;
+  justify-content: flex-start;
+  gap: 2px;
+  pointer-events: auto;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.home-workspace[data-platform="darwin"] .titlebar-control-group {
+  top: 12px;
+}
+
 .home-workspace {
   position: relative;
   width: calc(100% - 16px);
@@ -42,4 +72,46 @@ button {
   margin-left: 0;
   border-radius: 16px;
   background: var(--background);
+}
+
+.home-workspace__titlebar {
+  display: none;
+}
+
+.home-workspace[data-platform="win32"],
+.home-workspace[data-platform="darwin"] {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.home-workspace[data-platform="win32"] .home-workspace__content,
+.home-workspace[data-platform="darwin"] .home-workspace__content {
+  margin: 12px;
+  margin-left: 0;
+  border-radius: 12px;
+}
+
+.home-workspace[data-platform="win32"] .home-workspace__titlebar {
+  position: absolute;
+  top: env(titlebar-area-y, 0);
+  left: env(titlebar-area-x, 0);
+  z-index: 20;
+  display: block;
+  width: env(titlebar-area-width, 100%);
+  height: env(titlebar-area-height, 56px);
+  -webkit-app-region: drag;
+}
+
+.home-workspace[data-platform="darwin"] .home-workspace__titlebar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 80px;
+  z-index: 20;
+  display: block;
+  height: 56px;
+  -webkit-app-region: drag;
 }
