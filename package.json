@@ -6,7 +6,7 @@
   "author": "example.com",
   "homepage": "https://electron-vite.org",
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "format": "biome format --write && biome lint --write",
@@ -28,9 +28,11 @@
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
+    "@ai-sdk/react": "^4.0.80",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@mico/ui": "workspace:*",
+    "ai": "^7.0.77",
     "lucide-react": "^1.33.0"
   },
   "devDependencies": {
