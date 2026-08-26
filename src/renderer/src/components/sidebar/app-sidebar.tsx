@@ -19,7 +19,7 @@ type AppSidebarProps = {
   onDeleteConversation: (conversationId: string) => void
   onNewChat: () => void
   onRenameConversation: (conversationId: string, title: string) => void
-  onSelectConversation: (conversationId: string) => void
+  onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
 }
 
 function AppSidebar({
@@ -52,7 +52,7 @@ function AppSidebar({
                     selected={conversation.id === activeConversationId}
                     onDelete={() => onDeleteConversation(conversation.id)}
                     onRename={(title) => onRenameConversation(conversation.id, title)}
-                    onSelect={() => onSelectConversation(conversation.id)}
+                    onSelect={(options) => onSelectConversation(conversation.id, options)}
                   />
                 ))}
               </SidebarMenu>

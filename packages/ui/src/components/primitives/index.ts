@@ -1,4 +1,5 @@
 export * from './attachment'
+export * from './alert-dialog'
 export * from './bubble'
 export * from './button'
 export * from './dropdown-menu'

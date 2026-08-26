@@ -18,7 +18,7 @@ type ChatWorkspace = {
   response: ChatResponseState
   composerFocusKey: number
   startNewChat: () => void
-  selectConversation: (conversationId: string) => void
+  selectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
   renameConversation: (conversationId: string, title: string) => void
   deleteConversation: (conversationId: string) => void
   sendMessage: (content: string) => void
@@ -111,13 +111,16 @@ function useChatWorkspaceState(): ChatWorkspace {
     setComposerFocusKey((key) => key + 1)
   }, [])
 
-  const selectConversation = React.useCallback((conversationId: string): void => {
-    const session = sessionsRef.current.get(conversationId)
-    if (!session) return
+  const selectConversation = React.useCallback(
+    (conversationId: string, { focusComposer = true }: { focusComposer?: boolean } = {}): void => {
+      const session = sessionsRef.current.get(conversationId)
+      if (!session) return
 
-    setActiveSession({ conversationId, chat: session.chat })
-    setComposerFocusKey((key) => key + 1)
-  }, [])
+      setActiveSession({ conversationId, chat: session.chat })
+      if (focusComposer) setComposerFocusKey((key) => key + 1)
+    },
+    []
+  )
 
   const renameConversation = React.useCallback((conversationId: string, title: string): void => {
     const trimmedTitle = title.trim()
