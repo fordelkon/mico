@@ -1,0 +1,55 @@
+.chat-paper {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--chat-canvas);
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
+      transparent 1px
+    ),
+    radial-gradient(
+      circle,
+      color-mix(in oklab, var(--foreground) 5%, transparent) 0.55px,
+      transparent 0.65px
+    );
+  background-position:
+    12px 12px,
+    12px 12px,
+    0 0;
+  background-size:
+    32px 32px,
+    32px 32px,
+    5px 5px;
+}
+
+.chat-paper::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 20;
+  height: 30px;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 12%) 0%,
+    rgb(0 0 0 / 7%) 28%,
+    rgb(0 0 0 / 3%) 62%,
+    transparent 100%
+  );
+  mix-blend-mode: multiply;
+}
+
+.dark .chat-paper::before {
+  background: linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 38%) 0%,
+    rgb(0 0 0 / 22%) 32%,
+    rgb(0 0 0 / 8%) 68%,
+    transparent 100%
+  );
+  mix-blend-mode: normal;
+}

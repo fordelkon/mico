@@ -1,9 +1,8 @@
 import './window-controls.css'
 
+import { IconTooltipButton } from '@mico/ui'
 import { Copy, Minimize2, Minus, MoveDiagonal2, Plus, Square, X } from 'lucide-react'
 import * as React from 'react'
-
-import { IconTooltipButton } from '@mico/ui'
 
 function WindowControls(): React.JSX.Element | null {
   const platform = window.electron.process.platform

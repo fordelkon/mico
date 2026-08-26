@@ -1,0 +1,88 @@
+import { IconTooltipButton, Textarea } from '@mico/ui'
+import { ArrowUpIcon, SquareIcon } from 'lucide-react'
+import * as React from 'react'
+
+type ChatComposerMode = 'disabled' | 'send' | 'stop'
+
+type ChatComposerProps = {
+  focusKey: number
+  mode: ChatComposerMode
+  onSend: (content: string) => void
+  onStop: () => void
+}
+
+function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): React.JSX.Element {
+  const [draft, setDraft] = React.useState('')
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+  const previousFocusKeyRef = React.useRef(focusKey)
+  const previousModeRef = React.useRef(mode)
+  const isDisabled = mode === 'disabled'
+
+  React.useEffect(() => {
+    const focusKeyChanged = previousFocusKeyRef.current !== focusKey
+    const becameSendable = previousModeRef.current !== 'send' && mode === 'send'
+    previousFocusKeyRef.current = focusKey
+    previousModeRef.current = mode
+
+    if ((focusKeyChanged || becameSendable) && mode === 'send') textareaRef.current?.focus()
+  }, [focusKey, mode])
+
+  const submit = (): void => {
+    if (mode !== 'send' || !draft.trim()) return
+
+    onSend(draft)
+    setDraft('')
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submit()
+    }
+  }
+
+  return (
+    <form
+      className="shrink-0 bg-transparent px-4 pb-6 pt-3 sm:px-6"
+      onSubmit={(event) => {
+        event.preventDefault()
+        submit()
+      }}
+    >
+      <div className="mx-auto flex w-full max-w-[46rem] items-end gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-2 shadow-hairline transition-colors focus-within:border-border-strong">
+        <Textarea
+          className="min-h-14 max-h-40 resize-none border-0 bg-transparent px-3 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent"
+          ref={textareaRef}
+          disabled={isDisabled}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Message Mico"
+          value={draft}
+        />
+        {mode === 'stop' ? (
+          <IconTooltipButton
+            className="mb-0.5"
+            icon={<SquareIcon aria-hidden="true" />}
+            label="Stop response"
+            variant="secondary"
+            tooltip="Stop response"
+            type="button"
+            onClick={onStop}
+          />
+        ) : (
+          <IconTooltipButton
+            className="mb-0.5"
+            disabled={mode === 'disabled' || !draft.trim()}
+            icon={<ArrowUpIcon aria-hidden="true" />}
+            label="Send message"
+            tooltip="Send message"
+            type="submit"
+            variant="default"
+          />
+        )}
+      </div>
+    </form>
+  )
+}
+
+export { ChatComposer, type ChatComposerMode }

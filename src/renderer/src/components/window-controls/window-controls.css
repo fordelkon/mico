@@ -10,11 +10,11 @@
 }
 
 .window-control-group .titlebar-button:hover {
-  background: rgb(128 128 128 / 30%);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
 .window-control-group .titlebar-button:active {
-  background: rgb(128 128 128 / 40%);
+  background: color-mix(in srgb, var(--foreground) 15%, transparent);
   transform: none;
 }
 

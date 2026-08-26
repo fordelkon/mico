@@ -1,0 +1,122 @@
+import * as React from 'react'
+import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
+
+import {
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  IconMenuButton,
+  Input,
+  SidebarMenuButton,
+  SidebarMenuItem
+} from '@mico/ui'
+
+import type { Conversation } from '@renderer/lib/ai/chat-types'
+
+import './conversation-row.css'
+
+type ConversationRowProps = {
+  conversation: Conversation
+  selected: boolean
+  onSelect: () => void
+  onRename: (title: string) => void
+  onDelete: () => void
+}
+
+function ConversationRow({
+  conversation,
+  selected,
+  onSelect,
+  onRename,
+  onDelete
+}: ConversationRowProps): React.JSX.Element {
+  const [editing, setEditing] = React.useState(false)
+  const [draft, setDraft] = React.useState(conversation.title)
+  const inputRef = React.useRef<HTMLInputElement>(null)
+  const cancelledRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (!editing) return
+
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [editing])
+
+  const beginRename = (): void => {
+    cancelledRef.current = false
+    setDraft(conversation.title)
+    setEditing(true)
+  }
+
+  const commitRename = (): void => {
+    if (!cancelledRef.current) onRename(draft.trim())
+    setEditing(false)
+  }
+
+  return (
+    <SidebarMenuItem className="conversation-row">
+      {editing ? (
+        <div className="conversation-row__editor">
+          <Input
+            ref={inputRef}
+            aria-label="Conversation title"
+            value={draft}
+            onBlur={commitRename}
+            onChange={(event) => setDraft(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitRename()
+              }
+
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                cancelledRef.current = true
+                setDraft(conversation.title)
+                setEditing(false)
+              }
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          />
+        </div>
+      ) : (
+        <SidebarMenuButton
+          aria-pressed={selected}
+          isActive={selected}
+          onClick={onSelect}
+          tooltip={conversation.title}
+        >
+          <span>{conversation.title}</span>
+        </SidebarMenuButton>
+      )}
+      {!editing && (
+        <div
+          className="conversation-row__actions"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <IconMenuButton
+            className="conversation-row__action"
+            icon={<MoreHorizontalIcon aria-hidden="true" />}
+            label="More actions"
+            size="icon-xs"
+          >
+            <DropdownMenuItem onSelect={beginRename}>
+              <PencilIcon aria-hidden="true" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+              <Trash2Icon aria-hidden="true" />
+              Delete
+            </DropdownMenuItem>
+          </IconMenuButton>
+        </div>
+      )}
+    </SidebarMenuItem>
+  )
+}
+
+export { ConversationRow }
