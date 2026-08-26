@@ -1,16 +1,36 @@
-import { PanelLeft, Search, SquarePen } from 'lucide-react'
-
 import {
   IconTooltipButton,
   Sidebar,
   SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
   SidebarResizeHandle,
   useSidebar
 } from '@mico/ui'
+import type { Conversation } from '@renderer/lib/ai/chat-types'
+import { PanelLeft, Search, SquarePen } from 'lucide-react'
 
+import { ConversationRow } from './conversation-row'
 import './app-sidebar.css'
 
-function AppSidebar(): React.JSX.Element {
+type AppSidebarProps = {
+  conversations: Conversation[]
+  activeConversationId: string | null
+  onDeleteConversation: (conversationId: string) => void
+  onNewChat: () => void
+  onRenameConversation: (conversationId: string, title: string) => void
+  onSelectConversation: (conversationId: string) => void
+}
+
+function AppSidebar({
+  conversations,
+  activeConversationId,
+  onDeleteConversation,
+  onNewChat,
+  onRenameConversation,
+  onSelectConversation
+}: AppSidebarProps): React.JSX.Element {
   const { state, toggleSidebar } = useSidebar()
   const collapsed = state === 'collapsed'
 
@@ -23,8 +43,25 @@ function AppSidebar(): React.JSX.Element {
         variant="floating"
       >
         <SidebarContent className="app-sidebar__content">
-          <span>Clear History</span>
-          <span>New Chat</span>
+          <SidebarGroup>
+            <SidebarGroupLabel>Chats</SidebarGroupLabel>
+            {conversations.length > 0 ? (
+              <SidebarMenu>
+                {conversations.map((conversation) => (
+                  <ConversationRow
+                    key={conversation.id}
+                    conversation={conversation}
+                    selected={conversation.id === activeConversationId}
+                    onDelete={() => onDeleteConversation(conversation.id)}
+                    onRename={(title) => onRenameConversation(conversation.id, title)}
+                    onSelect={() => onSelectConversation(conversation.id)}
+                  />
+                ))}
+              </SidebarMenu>
+            ) : (
+              <p className="px-2 text-sm text-sidebar-foreground/70">No conversations yet</p>
+            )}
+          </SidebarGroup>
         </SidebarContent>
         <SidebarResizeHandle className="app-sidebar__resize-handle" />
       </Sidebar>
@@ -48,6 +85,7 @@ function AppSidebar(): React.JSX.Element {
           className="app-sidebar__icon-button titlebar-button"
           icon={<SquarePen aria-hidden="true" />}
           label="New chat"
+          onClick={onNewChat}
           tooltip="New chat"
         />
       </header>
@@ -55,4 +93,4 @@ function AppSidebar(): React.JSX.Element {
   )
 }
 
-export { AppSidebar }
+export { AppSidebar, type AppSidebarProps }

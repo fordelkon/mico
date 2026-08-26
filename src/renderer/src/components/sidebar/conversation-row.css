@@ -1,0 +1,70 @@
+.conversation-row {
+  margin: 1px 6px;
+}
+
+.conversation-row [data-slot="sidebar-menu-button"] {
+  height: 34px;
+  padding: 0 34px 0 10px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.conversation-row [data-slot="sidebar-menu-button"]:hover {
+  background: var(--sidebar-row-hover);
+  color: var(--text-secondary);
+}
+
+.conversation-row [data-slot="sidebar-menu-button"][data-active="true"] {
+  background: var(--sidebar-row-active);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.conversation-row__editor {
+  padding: 1px 6px;
+}
+
+.conversation-row__editor [data-slot="input"] {
+  height: 32px;
+  border-color: var(--border-subtle);
+  border-radius: 8px;
+  background: var(--sidebar-row-hover);
+  font-size: 13px;
+}
+
+.conversation-row__actions {
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--app-sidebar-motion-duration) var(--app-sidebar-motion-easing);
+}
+
+.conversation-row__action {
+  color: var(--text-tertiary);
+}
+
+.conversation-row__action:hover,
+.conversation-row__action[aria-expanded="true"] {
+  background: color-mix(in oklab, var(--sidebar-row-active) 78%, var(--sidebar));
+  color: var(--text-secondary);
+}
+
+.conversation-row:hover .conversation-row__actions,
+.conversation-row:focus-within .conversation-row__actions,
+.conversation-row:has([data-active="true"]) .conversation-row__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-row__actions {
+    transition: none;
+  }
+}

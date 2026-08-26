@@ -1,0 +1,54 @@
+import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
+
+import { ChatComposer, type ChatComposerMode } from './chat-composer'
+import { ChatMessageList } from './chat-message-list'
+import { EmptyConversation } from './empty-conversation'
+import './chat-main.css'
+
+type ChatMainProps = {
+  workspace: ChatWorkspace
+}
+
+function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
+  const composerMode: ChatComposerMode =
+    workspace.response.status === 'idle'
+      ? 'send'
+      : workspace.activeConversation?.id === workspace.response.conversationId
+        ? 'stop'
+        : 'disabled'
+  const isResponding =
+    workspace.response.status !== 'idle' &&
+    workspace.activeConversation?.id === workspace.response.conversationId
+  const composer = (
+    <ChatComposer
+      focusKey={workspace.composerFocusKey}
+      mode={composerMode}
+      onSend={workspace.sendMessage}
+      onStop={workspace.stopResponse}
+    />
+  )
+
+  return (
+    <div className="chat-paper flex min-h-0 flex-1 flex-col overflow-hidden">
+      {workspace.activeConversation ? (
+        <>
+          <div className="flex min-h-0 flex-1">
+            <ChatMessageList
+              conversationId={workspace.activeConversation.id}
+              isResponding={isResponding}
+              messages={workspace.activeMessages}
+            />
+          </div>
+          {composer}
+        </>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-20">
+          <EmptyConversation />
+          <div className="w-full">{composer}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export { ChatMain }

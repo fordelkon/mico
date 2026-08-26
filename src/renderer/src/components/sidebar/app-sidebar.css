@@ -32,35 +32,8 @@
 
 .app-sidebar [data-slot="sidebar-inner"] {
   position: relative;
-  border: 1px solid color-mix(in oklab, var(--border) 82%, white);
+  border: 1px solid var(--sidebar-border);
   border-radius: var(--app-sidebar-corner-radius);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 72%),
-    2px 0 10px color-mix(in oklab, var(--sidebar-ring) 10%, transparent);
-}
-
-.app-sidebar [data-slot="sidebar-inner"]::after {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 100%;
-  width: 32px;
-  content: "";
-  pointer-events: none;
-  background: linear-gradient(
-    to right,
-    color-mix(in oklab, var(--sidebar-ring) 18%, transparent),
-    transparent
-  );
-  opacity: 0.3;
-  filter: blur(3px);
-  mask-image: linear-gradient(
-    to bottom,
-    transparent,
-    black 16px,
-    black calc(100% - 16px),
-    transparent
-  );
 }
 
 .app-sidebar__toolbar {
@@ -102,12 +75,7 @@
 }
 
 .app-sidebar__content {
-  align-items: center;
-  gap: 4px;
   padding-top: 60px;
-  color: var(--app-sidebar-muted-foreground);
-  font-size: 0.875rem;
-  line-height: 1.25rem;
 }
 
 .app-sidebar__resize-handle {
