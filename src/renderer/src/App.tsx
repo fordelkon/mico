@@ -4,9 +4,22 @@ import { ChatMain } from './components/chat/chat-main'
 import { AppSidebar } from './components/sidebar/app-sidebar'
 import { WindowControls } from './components/window-controls/window-controls'
 import { useChatWorkspaceState } from './hooks/chat/use-chat-workspace-state'
+import { selectConversationWithPaperTransition } from './lib/conversation-paper-transition'
 
 function App(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
+
+  const handleSelectConversation = (
+    conversationId: string,
+    options?: { focusComposer?: boolean }
+  ): void => {
+    selectConversationWithPaperTransition({
+      activeConversationId: workspace.activeConversation?.id ?? null,
+      conversationId,
+      options,
+      selectConversation: workspace.selectConversation
+    })
+  }
 
   return (
     <SidebarProvider
@@ -21,7 +34,7 @@ function App(): React.JSX.Element {
         onDeleteConversation={workspace.deleteConversation}
         onNewChat={workspace.startNewChat}
         onRenameConversation={workspace.renameConversation}
-        onSelectConversation={workspace.selectConversation}
+        onSelectConversation={handleSelectConversation}
       />
       <WindowControls />
       <div aria-hidden="true" className="home-workspace__paper-feed">

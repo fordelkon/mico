@@ -32,7 +32,10 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
     <div className="chat-paper flex min-h-0 flex-1 flex-col overflow-hidden">
       {workspace.activeConversation ? (
         <>
-          <div className="flex min-h-0 flex-1">
+          <div
+            className="chat-paper__conversation flex min-h-0 flex-1"
+            key={workspace.activeConversation.id}
+          >
             <ChatMessageList
               conversationId={workspace.activeConversation.id}
               isResponding={isResponding}
