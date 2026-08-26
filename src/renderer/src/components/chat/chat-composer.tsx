@@ -43,25 +43,25 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
 
   return (
     <form
-      className="shrink-0 px-4 pb-6 pt-3 sm:px-6"
+      className="chat-composer shrink-0 px-4 pb-6 pt-3 sm:px-6"
       onSubmit={(event) => {
         event.preventDefault()
         submit()
       }}
     >
-      <div className="mx-auto flex w-full max-w-[46rem] items-end gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-2 shadow-hairline transition-colors focus-within:border-border-strong">
+      <div className="chat-composer__surface mx-auto flex w-full max-w-[46rem] flex-col gap-1.5 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-2.5 shadow-hairline transition-colors focus-within:border-border-strong">
         <Textarea
-          className="min-h-14 max-h-40 resize-none border-0 px-3 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent"
+          className="min-h-14 max-h-40 resize-none border-0 px-2.5 py-2 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent"
           ref={textareaRef}
           disabled={isDisabled}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message Mico"
+          placeholder="Message Mico Today"
           value={draft}
         />
         {mode === 'stop' ? (
           <IconTooltipButton
-            className="mb-0.5"
+            className="size-8 self-end"
             icon={<SquareIcon aria-hidden="true" />}
             label="Stop response"
             variant="secondary"
@@ -70,7 +70,7 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
           />
         ) : (
           <IconTooltipButton
-            className="mb-0.5"
+            className="size-8 self-end"
             disabled={mode === 'disabled' || !draft.trim()}
             icon={<ArrowUpIcon aria-hidden="true" />}
             label="Send message"
