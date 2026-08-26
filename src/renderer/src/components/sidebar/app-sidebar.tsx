@@ -3,7 +3,6 @@ import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarResizeHandle,
   useSidebar
@@ -42,9 +41,8 @@ function AppSidebar({
         collapsible="offcanvas"
         variant="floating"
       >
-        <SidebarContent className="app-sidebar__content">
+        <SidebarContent className="pt-[60px]">
           <SidebarGroup>
-            <SidebarGroupLabel>Chats</SidebarGroupLabel>
             {conversations.length > 0 ? (
               <SidebarMenu>
                 {conversations.map((conversation) => (
@@ -59,7 +57,15 @@ function AppSidebar({
                 ))}
               </SidebarMenu>
             ) : (
-              <p className="px-2 text-sm text-sidebar-foreground/70">No conversations yet</p>
+              <div
+                aria-label="Empty conversations"
+                className="flex flex-col items-center gap-0.5 px-2 py-3 text-center"
+              >
+                <span className="text-base leading-[1.35] text-text-secondary">Clear History</span>
+                <span className="font-lato text-[11px] leading-[1.4] text-text-tertiary">
+                  New Chat
+                </span>
+              </div>
             )}
           </SidebarGroup>
         </SidebarContent>
@@ -69,24 +75,22 @@ function AppSidebar({
       <header className="app-sidebar__toolbar titlebar-control-group">
         <IconTooltipButton
           aria-expanded={!collapsed}
-          className="app-sidebar__icon-button titlebar-button"
+          className="app-sidebar__toggle titlebar-button"
           icon={<PanelLeft aria-hidden="true" className="app-sidebar__toggle-icon" />}
           label="Toggle sidebar"
           onClick={toggleSidebar}
           tooltip={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         />
         <IconTooltipButton
-          className="app-sidebar__icon-button titlebar-button"
+          className="titlebar-button"
           icon={<Search aria-hidden="true" />}
           label="Search threads"
-          tooltip="Search threads"
         />
         <IconTooltipButton
-          className="app-sidebar__icon-button titlebar-button"
+          className="titlebar-button"
           icon={<SquarePen aria-hidden="true" />}
           label="New chat"
           onClick={onNewChat}
-          tooltip="New chat"
         />
       </header>
     </>

@@ -403,7 +403,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon-sm"
-      className={cn(className)}
+      className={className}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()

@@ -43,7 +43,7 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
 
   return (
     <form
-      className="shrink-0 bg-transparent px-4 pb-6 pt-3 sm:px-6"
+      className="shrink-0 px-4 pb-6 pt-3 sm:px-6"
       onSubmit={(event) => {
         event.preventDefault()
         submit()
@@ -51,7 +51,7 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
     >
       <div className="mx-auto flex w-full max-w-[46rem] items-end gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-2 shadow-hairline transition-colors focus-within:border-border-strong">
         <Textarea
-          className="min-h-14 max-h-40 resize-none border-0 bg-transparent px-3 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent"
+          className="min-h-14 max-h-40 resize-none border-0 px-3 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent"
           ref={textareaRef}
           disabled={isDisabled}
           onChange={(event) => setDraft(event.target.value)}
@@ -65,7 +65,6 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
             icon={<SquareIcon aria-hidden="true" />}
             label="Stop response"
             variant="secondary"
-            tooltip="Stop response"
             type="button"
             onClick={onStop}
           />
@@ -75,7 +74,6 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
             disabled={mode === 'disabled' || !draft.trim()}
             icon={<ArrowUpIcon aria-hidden="true" />}
             label="Send message"
-            tooltip="Send message"
             type="submit"
             variant="default"
           />

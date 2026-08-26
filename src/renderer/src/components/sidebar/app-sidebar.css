@@ -38,31 +38,19 @@
 
 .app-sidebar__toolbar {
   right: calc(100% - var(--sidebar-width) + 16px);
+  color: var(--app-sidebar-muted-foreground);
   transition-property: left, right;
 }
 
-.home-workspace[data-state="collapsed"] .app-sidebar__toolbar {
-  right: auto;
-  left: 12px;
-}
-
-.home-workspace[data-platform="darwin"][data-state="collapsed"] .app-sidebar__toolbar {
-  left: 84px;
-}
-
-.app-sidebar__icon-button {
-  color: var(--app-sidebar-muted-foreground);
-}
-
-.app-sidebar__icon-button:hover {
+.app-sidebar__toolbar .titlebar-button:hover {
   color: var(--sidebar-foreground);
 }
 
-.app-sidebar__icon-button[aria-expanded="true"] {
+.app-sidebar__toggle[aria-expanded="true"] {
   background: transparent;
 }
 
-.app-sidebar__icon-button[aria-expanded="true"]:hover {
+.app-sidebar__toggle[aria-expanded="true"]:hover {
   background: var(--muted);
 }
 
@@ -74,8 +62,13 @@
   transform: rotate(180deg);
 }
 
-.app-sidebar__content {
-  padding-top: 60px;
+.home-workspace[data-state="collapsed"] .app-sidebar__toolbar {
+  right: auto;
+  left: 12px;
+}
+
+.home-workspace[data-platform="darwin"][data-state="collapsed"] .app-sidebar__toolbar {
+  left: 84px;
 }
 
 .app-sidebar__resize-handle {

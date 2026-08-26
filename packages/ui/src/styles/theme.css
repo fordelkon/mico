@@ -20,10 +20,11 @@
   --danger: #7f2c28;
   --danger-surface: #f7ecec;
   --danger-border: #a73d39;
-  --font-ui: Outfit, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
-  --font-prose: "Noto Serif SC", "Songti SC", ui-serif, Georgia, Cambria,
-    "Times New Roman", Times, serif;
-  --font-code: "Geist Mono", ui-monospace, monospace;
+  --font-family-sans: Outfit, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-family-serif:
+    "Noto Serif SC", "Songti SC", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-family-mono: "Geist Mono", ui-monospace, monospace;
+  --font-family-lato: "Lato", sans-serif;
   --radius: 0.75rem;
   --radius-control: 0.5rem;
   --radius-panel: 0.75rem;
@@ -52,7 +53,7 @@
   --ring: var(--text-primary);
   --chart-1: oklch(0.5583 0.1276 42.9956);
   --chart-2: oklch(0.6898 0.1581 290.4107);
-  --chart-3: oklch(0.8816 0.0276 93.1280);
+  --chart-3: oklch(0.8816 0.0276 93.128);
   --chart-4: oklch(0.8822 0.0403 298.1792);
   --chart-5: oklch(0.5608 0.1348 42.0584);
   --sidebar: var(--surface-sidebar);
@@ -112,8 +113,8 @@
   --ring: var(--text-primary);
   --chart-1: oklch(0.5583 0.1276 42.9956);
   --chart-2: oklch(0.6898 0.1581 290.4107);
-  --chart-3: oklch(0.2130 0.0078 95.4245);
-  --chart-4: oklch(0.3074 0.0516 289.3230);
+  --chart-3: oklch(0.213 0.0078 95.4245);
+  --chart-4: oklch(0.3074 0.0516 289.323);
   --chart-5: oklch(0.5608 0.1348 42.0584);
   --sidebar: var(--surface-sidebar);
   --sidebar-foreground: var(--text-secondary);
@@ -189,9 +190,10 @@
   --color-sidebar-row-hover: var(--sidebar-row-hover);
   --color-sidebar-row-active: var(--sidebar-row-active);
 
-  --font-sans: var(--font-ui);
-  --font-serif: var(--font-prose);
-  --font-mono: var(--font-code);
+  --font-sans: var(--font-family-sans);
+  --font-serif: var(--font-family-serif);
+  --font-mono: var(--font-family-mono);
+  --font-lato: var(--font-family-lato);
 
   --radius-xs: 4px;
   --radius-sm: 6px;
@@ -202,12 +204,9 @@
   --radius-full: var(--radius-pill);
 
   --shadow-hairline: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.08),
-    0 1px 2px -1px rgb(0 0 0 / 0.08);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08),
-    0 2px 4px -2px rgb(0 0 0 / 0.08);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08),
-    0 4px 6px -4px rgb(0 0 0 / 0.08);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.08);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
 }
 
 @layer base {

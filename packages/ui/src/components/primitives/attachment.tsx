@@ -139,7 +139,7 @@ function AttachmentAction({
       data-slot="attachment-action"
       variant={variant ?? 'ghost'}
       size={size}
-      className={cn(className)}
+      className={className}
       {...props}
     />
   )

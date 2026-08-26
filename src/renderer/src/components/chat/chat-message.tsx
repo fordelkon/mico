@@ -53,7 +53,7 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
           <BubbleContent
             className={
               isUser
-                ? 'rounded-[var(--radius-message)] px-4 py-2.5 font-sans shadow-none'
+                ? 'rounded-[var(--radius-message)] px-4 py-2.5'
                 : 'max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
             }
           >

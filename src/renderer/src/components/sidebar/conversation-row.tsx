@@ -1,6 +1,3 @@
-import * as React from 'react'
-import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
-
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -9,8 +6,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem
 } from '@mico/ui'
-
 import type { Conversation } from '@renderer/lib/ai/chat-types'
+import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
+import * as React from 'react'
 
 import './conversation-row.css'
 
@@ -53,10 +51,11 @@ function ConversationRow({
   }
 
   return (
-    <SidebarMenuItem className="conversation-row">
+    <SidebarMenuItem className="conversation-row mx-1.5 my-px">
       {editing ? (
-        <div className="conversation-row__editor">
+        <div className="px-1.5 py-px">
           <Input
+            className="border-border-subtle bg-sidebar-row-hover text-[13px]"
             ref={inputRef}
             aria-label="Conversation title"
             value={draft}
@@ -84,6 +83,7 @@ function ConversationRow({
       ) : (
         <SidebarMenuButton
           aria-pressed={selected}
+          className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
           isActive={selected}
           onClick={onSelect}
           tooltip={conversation.title}
@@ -98,7 +98,7 @@ function ConversationRow({
           onPointerDown={(event) => event.stopPropagation()}
         >
           <IconMenuButton
-            className="conversation-row__action"
+            className="text-text-tertiary hover:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] hover:text-text-secondary aria-expanded:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] aria-expanded:text-text-secondary"
             icon={<MoreHorizontalIcon aria-hidden="true" />}
             label="More actions"
             size="icon-xs"
