@@ -43,11 +43,15 @@
 .app-sidebar [data-slot="sidebar-inner"] {
   position: relative;
   border-radius: var(--app-sidebar-corner-radius);
-  box-shadow: 0 1px 2px rgb(20 18 16 / 8%), 0 4px 10px -2px rgb(20 18 16 / 10%);
+  box-shadow:
+    0 1px 2px rgb(20 18 16 / 8%),
+    0 4px 10px -2px rgb(20 18 16 / 10%);
 }
 
 .dark .app-sidebar [data-slot="sidebar-inner"] {
-  box-shadow: 0 1px 2px rgb(0 0 0 / 24%), 0 4px 10px -2px rgb(0 0 0 / 20%);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 24%),
+    0 4px 10px -2px rgb(0 0 0 / 20%);
 }
 
 .app-sidebar__toolbar {

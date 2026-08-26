@@ -37,7 +37,7 @@ function AppSidebar({
     <>
       <Sidebar
         aria-label="Sidebar"
-        className="app-sidebar"
+        className="app-sidebar font-display"
         collapsible="offcanvas"
         variant="floating"
       >
@@ -62,9 +62,7 @@ function AppSidebar({
                 className="flex flex-col items-center gap-0.5 px-2 py-3 text-center"
               >
                 <span className="text-base leading-[1.35] text-text-secondary">Clear History</span>
-                <span className="font-lato text-[11px] leading-[1.4] text-text-tertiary">
-                  New Chat
-                </span>
+                <span className="text-[11px] leading-[1.4] text-text-tertiary">New Chat</span>
               </div>
             )}
           </SidebarGroup>
