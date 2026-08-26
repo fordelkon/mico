@@ -2,6 +2,16 @@
   --app-sidebar-motion-duration: 300ms;
   --app-sidebar-motion-easing: cubic-bezier(0.4, 0, 0.2, 1);
   --app-sidebar-muted-foreground: color-mix(in oklab, var(--sidebar-foreground) 70%, transparent);
+  --app-sidebar-resize-hint: color-mix(
+    in oklab,
+    var(--sidebar-border) 82%,
+    var(--sidebar-foreground)
+  );
+  --app-sidebar-resize-active: color-mix(
+    in oklab,
+    var(--sidebar-border) 58%,
+    var(--sidebar-foreground)
+  );
 }
 
 .app-sidebar {
@@ -32,8 +42,12 @@
 
 .app-sidebar [data-slot="sidebar-inner"] {
   position: relative;
-  border: 1px solid var(--sidebar-border);
   border-radius: var(--app-sidebar-corner-radius);
+  box-shadow: 0 1px 2px rgb(20 18 16 / 8%), 0 4px 10px -2px rgb(20 18 16 / 10%);
+}
+
+.dark .app-sidebar [data-slot="sidebar-inner"] {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 24%), 0 4px 10px -2px rgb(0 0 0 / 20%);
 }
 
 .app-sidebar__toolbar {
@@ -88,13 +102,13 @@
 }
 
 .home-workspace[data-resize-edge] .app-sidebar__resize-handle::after {
-  background: color-mix(in oklab, var(--sidebar-ring) 22%, transparent);
+  background: var(--app-sidebar-resize-hint);
 }
 
 .app-sidebar__resize-handle:hover::after,
 .app-sidebar__resize-handle:focus-visible::after,
 .home-workspace[data-resizing] .app-sidebar__resize-handle::after {
-  background: color-mix(in oklab, var(--sidebar-ring) 42%, transparent);
+  background: var(--app-sidebar-resize-active);
 }
 
 .home-workspace[data-resize-edge="min"] .app-sidebar__resize-handle {
