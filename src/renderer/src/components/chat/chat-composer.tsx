@@ -14,17 +14,23 @@ type ChatComposerProps = {
 function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): React.JSX.Element {
   const [draft, setDraft] = React.useState('')
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+  const mountedRef = React.useRef(false)
   const previousFocusKeyRef = React.useRef(focusKey)
   const previousModeRef = React.useRef(mode)
   const isDisabled = mode === 'disabled'
 
   React.useEffect(() => {
+    const isInitialMount = !mountedRef.current
     const focusKeyChanged = previousFocusKeyRef.current !== focusKey
     const becameSendable = previousModeRef.current !== 'send' && mode === 'send'
+    const shouldFocusOnMount = isInitialMount && focusKey > 0
+    mountedRef.current = true
     previousFocusKeyRef.current = focusKey
     previousModeRef.current = mode
 
-    if ((focusKeyChanged || becameSendable) && mode === 'send') textareaRef.current?.focus()
+    if ((focusKeyChanged || becameSendable || shouldFocusOnMount) && mode === 'send') {
+      textareaRef.current?.focus()
+    }
   }, [focusKey, mode])
 
   const submit = (): void => {
