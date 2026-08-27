@@ -41,7 +41,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   const [activeSession, setActiveSession] = React.useState<ActiveChatSession | null>(null)
   const [response, setResponse] = React.useState<ChatResponseState>(IDLE_CHAT_RESPONSE)
   const responseRef = React.useRef<ChatResponseState>(IDLE_CHAT_RESPONSE)
-  const [composerFocusKey, setComposerFocusKey] = React.useState(0)
+  const [composerFocusKey, setComposerFocusKey] = React.useState(1)
   const [idleChat] = React.useState(
     () =>
       new Chat<MicoUIMessage>({
