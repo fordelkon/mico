@@ -2,6 +2,13 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 import {
+  APPEARANCE_CHANGED_CHANNEL,
+  APPEARANCE_GET_PREFERENCE_CHANNEL,
+  APPEARANCE_GET_RESOLVED_CHANNEL,
+  APPEARANCE_SET_PREFERENCE_CHANNEL,
+  type AppearanceAPI
+} from '../shared/appearance'
+import {
   WINDOW_CLOSE_CHANNEL,
   WINDOW_FULLSCREEN_CHANGED_CHANNEL,
   WINDOW_IS_FULLSCREEN_CHANNEL,
@@ -43,7 +50,21 @@ const windowControls: WindowControlsAPI = {
   unmaximize: () => ipcRenderer.invoke(WINDOW_UNMAXIMIZE_CHANNEL)
 }
 
-const api = { windowControls }
+const appearance: AppearanceAPI = {
+  getPreference: () => ipcRenderer.invoke(APPEARANCE_GET_PREFERENCE_CHANNEL),
+  getResolvedAppearance: () => ipcRenderer.invoke(APPEARANCE_GET_RESOLVED_CHANNEL),
+  onAppearanceChange: (listener) => {
+    const wrappedListener = (_event: IpcRendererEvent, nextAppearance: 'light' | 'dark'): void => {
+      listener(nextAppearance)
+    }
+
+    ipcRenderer.on(APPEARANCE_CHANGED_CHANNEL, wrappedListener)
+    return () => ipcRenderer.removeListener(APPEARANCE_CHANGED_CHANNEL, wrappedListener)
+  },
+  setPreference: (preference) => ipcRenderer.invoke(APPEARANCE_SET_PREFERENCE_CHANNEL, preference)
+}
+
+const api = { appearance, windowControls }
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise

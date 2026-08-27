@@ -1,4 +1,11 @@
 import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
   IconTooltipButton,
   Kbd,
   Sidebar,
@@ -9,9 +16,10 @@ import {
   useSidebar
 } from '@mico/ui'
 import type { Conversation } from '@renderer/lib/ai/chat-types'
-import { PanelLeft, Search, SquarePen } from 'lucide-react'
+import { Moon, PanelLeft, Search, SquarePen } from 'lucide-react'
 import * as React from 'react'
 
+import { useAppearance } from '../appearance-provider'
 import { ConversationRow } from './conversation-row'
 import './app-sidebar.css'
 
@@ -24,6 +32,18 @@ type AppSidebarProps = {
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
 }
 
+const appearancePreferenceLabels = {
+  dark: 'Dark',
+  light: 'Light',
+  system: 'System'
+} as const
+
+function nextAppearancePreference(preference: keyof typeof appearancePreferenceLabels) {
+  if (preference === 'system') return 'light'
+  if (preference === 'light') return 'dark'
+  return 'system'
+}
+
 function AppSidebar({
   conversations,
   activeConversationId,
@@ -33,7 +53,9 @@ function AppSidebar({
   onSelectConversation
 }: AppSidebarProps): React.JSX.Element {
   const { state, toggleSidebar } = useSidebar()
+  const { preference, setPreference } = useAppearance()
   const collapsed = state === 'collapsed'
+  const [searchOpen, setSearchOpen] = React.useState(false)
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -99,6 +121,8 @@ function AppSidebar({
           className="titlebar-button"
           icon={<Search aria-hidden="true" />}
           label="Search threads"
+          onClick={() => setSearchOpen(true)}
+          tooltip="Search commands"
         />
         <IconTooltipButton
           className="titlebar-button"
@@ -113,6 +137,47 @@ function AppSidebar({
           }
         />
       </header>
+      <CommandDialog
+        className="app-sidebar__search-command-dialog"
+        description="Search threads and application actions"
+        onOpenChange={setSearchOpen}
+        open={searchOpen}
+        title="Search"
+      >
+        <CommandInput placeholder="Search threads and actions..." />
+        <CommandList>
+          <CommandEmpty>No results found.</CommandEmpty>
+          <CommandGroup heading="Quick Actions">
+            <CommandItem
+              onSelect={() => {
+                void setPreference(nextAppearancePreference(preference))
+              }}
+              value="theme system light dark"
+            >
+              <Moon aria-hidden="true" />
+              Theme
+              <CommandShortcut>{appearancePreferenceLabels[preference]}</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+        <div aria-hidden="true" className="app-sidebar__search-command-footer">
+          <span className="app-sidebar__search-command-hint">
+            <span className="app-sidebar__search-command-key-pair">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+            </span>
+            navigate
+          </span>
+          <span className="app-sidebar__search-command-hint">
+            <Kbd>↵</Kbd>
+            select
+          </span>
+          <span className="app-sidebar__search-command-hint">
+            <Kbd>esc</Kbd>
+            close
+          </span>
+        </div>
+      </CommandDialog>
     </>
   )
 }
