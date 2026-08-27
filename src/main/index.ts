@@ -9,7 +9,7 @@ import {
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import icon from '../../resources/icon.png?asset'
+import icon from '../../build/icon.png?asset'
 import {
   APPEARANCE_GET_PREFERENCE_CHANNEL,
   APPEARANCE_GET_RESOLVED_CHANNEL,
