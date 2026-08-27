@@ -11,7 +11,7 @@
   "scripts": {
     "format": "biome format --write && biome lint --write",
     "format:check": "biome format && biome lint",
-    "test": "pnpm --filter @mico/ui test",
+    "test": "vitest run && pnpm --filter @mico/ui test",
     "lint": "oxlint --fix && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --cache && pnpm format",
     "test:lint": "oxlint --deny-warnings && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --cache",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
@@ -44,6 +44,9 @@
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
     "@vitejs/plugin-react": "^5.1.1",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
@@ -57,8 +60,10 @@
     "oxlint-tsgolint": "^7.0.2001",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
+    "jsdom": "29.1.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
-    "vite": "^7.2.6"
+    "vite": "^7.2.6",
+    "vitest": "4.1.6"
   }
 }

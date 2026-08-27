@@ -1,4 +1,17 @@
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
   DropdownMenuItem,
   DropdownMenuSeparator,
   IconMenuButton,
@@ -15,7 +28,7 @@ import './conversation-row.css'
 type ConversationRowProps = {
   conversation: Conversation
   selected: boolean
-  onSelect: () => void
+  onSelect: (options?: { focusComposer?: boolean }) => void
   onRename: (title: string) => void
   onDelete: () => void
 }
@@ -28,6 +41,8 @@ function ConversationRow({
   onDelete
 }: ConversationRowProps): React.JSX.Element {
   const [editing, setEditing] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = React.useState(false)
   const [draft, setDraft] = React.useState(conversation.title)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const cancelledRef = React.useRef(false)
@@ -45,77 +60,151 @@ function ConversationRow({
     setEditing(true)
   }
 
+  const beginRenameFromContextMenu = (): void => {
+    window.requestAnimationFrame(beginRename)
+  }
+
+  const handleDoubleClick = (): void => {
+    onSelect({ focusComposer: false })
+    beginRename()
+  }
+
   const commitRename = (): void => {
     if (!cancelledRef.current) onRename(draft.trim())
     setEditing(false)
   }
 
+  const confirmDelete = (): void => {
+    if (deleting) return
+
+    setDeleteConfirmationOpen(false)
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      onDelete()
+      return
+    }
+
+    setDeleting(true)
+  }
+
+  const handleDeleteAnimationEnd = (event: React.AnimationEvent<HTMLLIElement>): void => {
+    if (
+      !deleting ||
+      event.currentTarget !== event.target ||
+      (event.animationName && event.animationName !== 'conversation-row-delete')
+    ) {
+      return
+    }
+
+    onDelete()
+  }
+
   return (
-    <SidebarMenuItem className="conversation-row mx-1.5 my-px">
-      {editing ? (
-        <div className="px-1.5 py-px">
-          <Input
-            className="border-border-subtle bg-sidebar-row-hover text-[13px]"
-            ref={inputRef}
-            aria-label="Conversation title"
-            value={draft}
-            onBlur={commitRename}
-            onChange={(event) => setDraft(event.target.value)}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              event.stopPropagation()
-
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                commitRename()
-              }
-
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                cancelledRef.current = true
-                setDraft(conversation.title)
-                setEditing(false)
-              }
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-          />
-        </div>
-      ) : (
-        <SidebarMenuButton
-          aria-pressed={selected}
-          className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
-          isActive={selected}
-          onClick={onSelect}
-          tooltip={conversation.title}
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={editing || deleting}>
+        <SidebarMenuItem
+          aria-busy={deleting || undefined}
+          className="conversation-row mx-1.5 my-px"
+          data-deleting={deleting || undefined}
+          onAnimationEnd={handleDeleteAnimationEnd}
         >
-          <span>{conversation.title}</span>
-        </SidebarMenuButton>
-      )}
-      {!editing && (
-        <div
-          className="conversation-row__actions"
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <IconMenuButton
-            className="text-text-tertiary hover:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] hover:text-text-secondary aria-expanded:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] aria-expanded:text-text-secondary"
-            icon={<MoreHorizontalIcon aria-hidden="true" />}
-            label="More actions"
-            size="icon-xs"
-          >
-            <DropdownMenuItem onSelect={beginRename}>
-              <PencilIcon aria-hidden="true" />
-              Rename
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={onDelete}>
-              <Trash2Icon aria-hidden="true" />
-              Delete
-            </DropdownMenuItem>
-          </IconMenuButton>
-        </div>
-      )}
-    </SidebarMenuItem>
+          {editing ? (
+            <div className="px-1.5 py-px">
+              <Input
+                className="border-border-subtle bg-sidebar-row-hover text-[13px]"
+                ref={inputRef}
+                aria-label="Conversation title"
+                value={draft}
+                onBlur={commitRename}
+                onChange={(event) => setDraft(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  event.stopPropagation()
+
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    commitRename()
+                  }
+
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    cancelledRef.current = true
+                    setDraft(conversation.title)
+                    setEditing(false)
+                  }
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+              />
+            </div>
+          ) : (
+            <SidebarMenuButton
+              aria-pressed={selected}
+              className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+              disabled={deleting}
+              isActive={selected}
+              onClick={() => onSelect()}
+              onDoubleClick={handleDoubleClick}
+              tooltip={conversation.title}
+            >
+              <span>{conversation.title}</span>
+            </SidebarMenuButton>
+          )}
+          {!editing && !deleting && (
+            <div
+              className="conversation-row__actions"
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <IconMenuButton
+                className="text-text-tertiary hover:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] hover:text-text-secondary aria-expanded:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] aria-expanded:text-text-secondary"
+                icon={<MoreHorizontalIcon aria-hidden="true" />}
+                label="More actions"
+                size="icon-xs"
+              >
+                <DropdownMenuItem onSelect={beginRename}>
+                  <PencilIcon aria-hidden="true" />
+                  Rename
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() => setDeleteConfirmationOpen(true)}
+                >
+                  <Trash2Icon aria-hidden="true" />
+                  Delete
+                </DropdownMenuItem>
+              </IconMenuButton>
+            </div>
+          )}
+          <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently deletes &ldquo;{conversation.title}&rdquo; and its messages.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </SidebarMenuItem>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={beginRenameFromContextMenu}>
+          <PencilIcon aria-hidden="true" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={() => setDeleteConfirmationOpen(true)}>
+          <Trash2Icon aria-hidden="true" />
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 

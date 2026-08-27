@@ -11,6 +11,12 @@ import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import {
+  APPEARANCE_GET_PREFERENCE_CHANNEL,
+  APPEARANCE_GET_RESOLVED_CHANNEL,
+  APPEARANCE_SET_PREFERENCE_CHANNEL,
+  isAppearancePreference
+} from '../shared/appearance'
+import {
   WINDOW_CLOSE_CHANNEL,
   WINDOW_FULLSCREEN_CHANGED_CHANNEL,
   WINDOW_IS_FULLSCREEN_CHANNEL,
@@ -21,6 +27,9 @@ import {
   WINDOW_TOGGLE_FULLSCREEN_CHANNEL,
   WINDOW_UNMAXIMIZE_CHANNEL
 } from '../shared/window-controls'
+import { PreferenceService } from './services/preference-service'
+
+const preferenceService = new PreferenceService()
 
 function isTrustedRendererUrl(url: string): boolean {
   try {
@@ -62,6 +71,23 @@ function registerWindowControlHandlers(): void {
     window.setFullScreen(!window.isFullScreen())
   })
   ipcMain.handle(WINDOW_UNMAXIMIZE_CHANNEL, (event) => getCallingWindow(event).unmaximize())
+}
+
+function registerAppearanceHandlers(): void {
+  ipcMain.handle(APPEARANCE_GET_PREFERENCE_CHANNEL, (event) => {
+    getCallingWindow(event)
+    return preferenceService.getAppearancePreference()
+  })
+  ipcMain.handle(APPEARANCE_GET_RESOLVED_CHANNEL, (event) => {
+    getCallingWindow(event)
+    return preferenceService.getResolvedAppearance()
+  })
+  ipcMain.handle(APPEARANCE_SET_PREFERENCE_CHANNEL, async (event, preference: string) => {
+    getCallingWindow(event)
+    if (!isAppearancePreference(preference)) throw new Error('Invalid appearance preference')
+
+    return preferenceService.setAppearancePreference(preference)
+  })
 }
 
 function createWindow(): void {
@@ -145,8 +171,8 @@ void app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
   registerWindowControlHandlers()
-
-  createWindow()
+  registerAppearanceHandlers()
+  void preferenceService.initialize().then(createWindow)
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
