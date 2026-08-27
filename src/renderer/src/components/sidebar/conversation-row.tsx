@@ -60,6 +60,10 @@ function ConversationRow({
     setEditing(true)
   }
 
+  const beginRenameFromContextMenu = (): void => {
+    window.requestAnimationFrame(beginRename)
+  }
+
   const handleDoubleClick = (): void => {
     onSelect({ focusComposer: false })
     beginRename()
@@ -190,7 +194,7 @@ function ConversationRow({
         </SidebarMenuItem>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={beginRename}>
+        <ContextMenuItem onSelect={beginRenameFromContextMenu}>
           <PencilIcon aria-hidden="true" />
           Rename
         </ContextMenuItem>
