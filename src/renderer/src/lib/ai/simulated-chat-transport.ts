@@ -40,7 +40,7 @@ class SimulatedChatTransport implements ChatTransport<MicoUIMessage> {
   readonly #responseText: string
 
   constructor({
-    delayMs = 20,
+    delayMs = 60,
     responseText = SIMULATED_RESPONSE_TEXT
   }: SimulatedChatTransportOptions = {}) {
     this.#delayMs = delayMs

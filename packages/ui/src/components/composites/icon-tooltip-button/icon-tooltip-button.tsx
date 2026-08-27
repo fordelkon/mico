@@ -41,7 +41,12 @@ function IconTooltipButton({
             {icon}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="top">{tooltip}</TooltipContent>
+        <TooltipContent
+          className="[--tw-enter-scale:.98] [--tw-exit-scale:.98] data-[state=delayed-open]:[animation-duration:150ms] data-[state=delayed-open]:[animation-timing-function:ease-out] data-[state=instant-open]:[animation-duration:150ms] data-[state=instant-open]:[animation-timing-function:ease-out] data-[state=closed]:[animation-duration:50ms] data-[state=closed]:[animation-timing-function:ease-out] motion-reduce:animate-none"
+          side="top"
+        >
+          {tooltip}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
