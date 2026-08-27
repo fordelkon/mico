@@ -1,5 +1,6 @@
 import {
   IconTooltipButton,
+  Kbd,
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -9,6 +10,7 @@ import {
 } from '@mico/ui'
 import type { Conversation } from '@renderer/lib/ai/chat-types'
 import { PanelLeft, Search, SquarePen } from 'lucide-react'
+import * as React from 'react'
 
 import { ConversationRow } from './conversation-row'
 import './app-sidebar.css'
@@ -32,6 +34,20 @@ function AppSidebar({
 }: AppSidebarProps): React.JSX.Element {
   const { state, toggleSidebar } = useSidebar()
   const collapsed = state === 'collapsed'
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      const isMacOS = window.electron.process.platform === 'darwin'
+      const modifierPressed = isMacOS ? event.metaKey : event.ctrlKey
+      if (!modifierPressed || event.key.toLowerCase() !== 'n') return
+
+      event.preventDefault()
+      onNewChat()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onNewChat])
 
   return (
     <>
@@ -89,6 +105,12 @@ function AppSidebar({
           icon={<SquarePen aria-hidden="true" />}
           label="New chat"
           onClick={onNewChat}
+          tooltip={
+            <>
+              <span>New chat</span>
+              <Kbd>⌘ N</Kbd>
+            </>
+          }
         />
       </header>
     </>
