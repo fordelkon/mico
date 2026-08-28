@@ -3,6 +3,9 @@ import {
   shell,
   BrowserWindow,
   ipcMain,
+  Menu,
+  nativeImage,
+  Tray,
   type BrowserWindowConstructorOptions,
   type IpcMainInvokeEvent
 } from 'electron'
@@ -10,6 +13,7 @@ import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../build/icon.png?asset'
+import trayTemplateIcon from '../../build/tray-template.png?asset'
 import windowsIcon from '../../build/icons/icon.ico?asset'
 import {
   APPEARANCE_GET_PREFERENCE_CHANNEL,
@@ -31,6 +35,9 @@ import {
 import { PreferenceService } from './services/preference-service'
 
 const preferenceService = new PreferenceService()
+let mainWindow: BrowserWindow | undefined
+let tray: Tray | undefined
+let isQuitting = false
 
 function isTrustedRendererUrl(url: string): boolean {
   try {
@@ -91,8 +98,54 @@ function registerAppearanceHandlers(): void {
   })
 }
 
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function createTray(): void {
+  const trayIcon = nativeImage.createFromPath(
+    process.platform === 'darwin'
+      ? trayTemplateIcon
+      : process.platform === 'win32'
+        ? windowsIcon
+        : icon
+  )
+
+  if (process.platform === 'darwin') trayIcon.setTemplateImage(true)
+  if (trayIcon.isEmpty()) {
+    console.error('Tray icon could not be loaded')
+    return
+  }
+
+  tray = new Tray(trayIcon)
+  tray.setToolTip('Mico')
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Open Mico', click: showMainWindow },
+    {
+      label: 'Quit Mico',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      }
+    }
+  ])
+
+  if (process.platform === 'darwin') {
+    tray.on('right-click', () => tray?.popUpContextMenu(contextMenu))
+  } else {
+    tray.setContextMenu(contextMenu)
+  }
+  tray.on('click', showMainWindow)
+}
+
 function createWindow(): void {
-  // Create the browser window.
   const windowOptions: BrowserWindowConstructorOptions = {
     width: 900,
     height: 670,
@@ -115,50 +168,53 @@ function createWindow(): void {
   } else if (process.platform === 'linux') {
     windowOptions.icon = icon
   }
-  const mainWindow = new BrowserWindow(windowOptions)
+  const window = new BrowserWindow(windowOptions)
+  mainWindow = window
+
+  window.on('close', (event) => {
+    if (isQuitting || !tray || tray.isDestroyed()) return
+
+    event.preventDefault()
+    window.hide()
+  })
 
   if (process.platform === 'darwin') {
-    mainWindow.setWindowButtonVisibility(false)
+    window.setWindowButtonVisibility(false)
   }
 
-  mainWindow.on('enter-full-screen', () => {
-    mainWindow.webContents.send(WINDOW_FULLSCREEN_CHANGED_CHANNEL, true)
+  window.on('enter-full-screen', () => {
+    window.webContents.send(WINDOW_FULLSCREEN_CHANGED_CHANNEL, true)
   })
-  mainWindow.on('leave-full-screen', () => {
-    mainWindow.webContents.send(WINDOW_FULLSCREEN_CHANGED_CHANNEL, false)
+  window.on('leave-full-screen', () => {
+    window.webContents.send(WINDOW_FULLSCREEN_CHANGED_CHANNEL, false)
   })
-  mainWindow.on('maximize', () => {
-    mainWindow.webContents.send(WINDOW_MAXIMIZED_CHANGED_CHANNEL, true)
+  window.on('maximize', () => {
+    window.webContents.send(WINDOW_MAXIMIZED_CHANGED_CHANNEL, true)
   })
-  mainWindow.on('unmaximize', () => {
-    mainWindow.webContents.send(WINDOW_MAXIMIZED_CHANGED_CHANNEL, false)
-  })
-
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  window.on('unmaximize', () => {
+    window.webContents.send(WINDOW_MAXIMIZED_CHANGED_CHANNEL, false)
   })
 
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  window.on('ready-to-show', () => {
+    window.show()
+  })
+
+  window.webContents.on('will-navigate', (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.webContents.setWindowOpenHandler((details) => {
     void shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    void window.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 void app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
@@ -174,27 +230,18 @@ void app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
   registerWindowControlHandlers()
   registerAppearanceHandlers()
+  createTray()
   void preferenceService.initialize().then(createWindow)
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    showMainWindow()
   })
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+app.on('before-quit', () => {
+  isQuitting = true
+  tray?.destroy()
+  tray = undefined
 })
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
