@@ -20,6 +20,7 @@ function selectConversationWithPaperTransition({
   selectConversation
 }: SelectConversationWithPaperTransitionOptions): void {
   const select = (): void => selectConversation(conversationId, options)
+  // Rename flows and reduced-motion preferences take priority over visual continuity.
   const shouldSkipTransition =
     activeConversationId === conversationId ||
     options?.focusComposer === false ||
@@ -32,6 +33,7 @@ function selectConversationWithPaperTransition({
   }
 
   document.startViewTransition(() => {
+    // Commit synchronously so both conversation papers belong to the same transition.
     flushSync(select)
   })
 }

@@ -9,6 +9,7 @@ import { selectConversationWithPaperTransition } from '@renderer/utils/conversat
 function App(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
 
+  // Keep every sidebar selection on the same conversation handoff path.
   const handleSelectConversation = (
     conversationId: string,
     options?: { focusComposer?: boolean }

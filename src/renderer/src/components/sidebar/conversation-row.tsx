@@ -47,6 +47,7 @@ function ConversationRow({
   const inputRef = React.useRef<HTMLInputElement>(null)
   const cancelledRef = React.useRef(false)
 
+  // Focus after edit mode renders its input; the row itself has no editable target.
   React.useEffect(() => {
     if (!editing) return
 
@@ -61,10 +62,12 @@ function ConversationRow({
   }
 
   const beginRenameFromContextMenu = (): void => {
+    // Let the menu release focus before the editing input claims it.
     window.requestAnimationFrame(beginRename)
   }
 
   const handleDoubleClick = (): void => {
+    // Keep focus on the title being edited instead of moving it to the composer.
     onSelect({ focusComposer: false })
     beginRename()
   }
@@ -79,6 +82,7 @@ function ConversationRow({
 
     setDeleteConfirmationOpen(false)
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Do not delay deletion behind an animation the user asked to suppress.
       onDelete()
       return
     }

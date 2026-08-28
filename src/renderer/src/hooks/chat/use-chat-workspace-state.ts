@@ -36,10 +36,12 @@ type ActiveChatSession = {
 }
 
 function useChatWorkspaceState(): ChatWorkspace {
+  // Keep sessions alive across selection changes so background responses can continue.
   const sessionsRef = React.useRef(new Map<string, ChatSession>())
   const [conversations, setConversations] = React.useState<Conversation[]>([])
   const [activeSession, setActiveSession] = React.useState<ActiveChatSession | null>(null)
   const [response, setResponse] = React.useState<ChatResponseState>(IDLE_CHAT_RESPONSE)
+  // Response actions can run before React commits, so they need the latest synchronous value.
   const responseRef = React.useRef<ChatResponseState>(IDLE_CHAT_RESPONSE)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
   const [idleChat] = React.useState(
@@ -89,6 +91,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   })
   const activeMessages = activeSession ? subscribedMessages : EMPTY_MESSAGES
 
+  // Do not let a newly selected session inherit the status of another conversation's response.
   React.useEffect(() => {
     const currentResponse = responseRef.current
 
@@ -108,6 +111,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const startNewChat = React.useCallback((): void => {
     setActiveSession(null)
+    // A new token requests focus without coupling the workspace to the textarea ref.
     setComposerFocusKey((key) => key + 1)
   }, [])
 
@@ -214,6 +218,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   React.useEffect(
     () => () => {
+      // Sessions may continue streaming after navigation; stop all of them when the workspace unmounts.
       for (const { chat } of sessionsRef.current.values()) {
         void chat.stop()
       }

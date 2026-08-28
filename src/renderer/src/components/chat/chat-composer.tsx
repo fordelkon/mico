@@ -19,6 +19,7 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
   const previousModeRef = React.useRef(mode)
   const isDisabled = mode === 'disabled'
 
+  // Restore typing readiness after a conversation becomes available for input.
   React.useEffect(() => {
     const isInitialMount = !mountedRef.current
     const focusKeyChanged = previousFocusKeyRef.current !== focusKey

@@ -29,6 +29,7 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
   const isUser = message.role === 'user'
   const canCopy = isUser || message.metadata?.completionState === 'complete'
 
+  // Keep copy confirmation transient so repeated copies retain clear feedback.
   React.useEffect(() => {
     if (copyState !== 'copied') return
 
@@ -36,6 +37,7 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
     return () => window.clearTimeout(timeoutId)
   }, [copyState])
 
+  // Wait until the added words mount before revealing them, preserving the stream-in animation.
   React.useEffect(() => {
     if (!isStreaming) return
 

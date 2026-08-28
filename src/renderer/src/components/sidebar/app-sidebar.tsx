@@ -57,6 +57,7 @@ function AppSidebar({
   const collapsed = state === 'collapsed'
   const [searchOpen, setSearchOpen] = React.useState(false)
 
+  // Keep the new-chat shortcut available while focus is inside any sidebar control.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       const isMacOS = window.electron.process.platform === 'darwin'
