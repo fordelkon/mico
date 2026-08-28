@@ -20,7 +20,7 @@
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web && pnpm run typecheck:ui",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
-    "icons": "pnpm dlx electron-icon-builder -i build/icon.png -o build --flatten",
+    "icons": "pnpm dlx electron-icon-builder -i build/icon.png -o build --flatten && node scripts/sync-electron-dev-icon.mjs",
     "build": "pnpm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "pnpm run build && electron-builder --dir",

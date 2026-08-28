@@ -10,6 +10,7 @@ import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../build/icon.png?asset'
+import windowsIcon from '../../build/icons/icon.ico?asset'
 import {
   APPEARANCE_GET_PREFERENCE_CHANNEL,
   APPEARANCE_GET_RESOLVED_CHANNEL,
@@ -107,6 +108,7 @@ function createWindow(): void {
   if (process.platform === 'win32') {
     windowOptions.frame = false
     windowOptions.roundedCorners = true
+    windowOptions.icon = windowsIcon
   } else if (process.platform === 'darwin') {
     windowOptions.acceptFirstMouse = true
     windowOptions.titleBarStyle = 'hidden'
@@ -160,6 +162,10 @@ function createWindow(): void {
 void app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
+
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(icon)
+  }
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
