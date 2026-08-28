@@ -9,7 +9,7 @@
     background-color 150ms ease;
 }
 
-.window-control-group .titlebar-button:hover {
+.window-control-group .titlebar-button[data-hovered="true"] {
   background: color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
@@ -18,7 +18,7 @@
   transform: none;
 }
 
-.window-control-group .window-control-group__close:hover {
+.window-control-group .window-control-group__close[data-hovered="true"] {
   background: #e81123;
   color: white;
 }
@@ -71,18 +71,18 @@
 }
 
 .window-control-group[data-platform="darwin"][data-window-focused="true"]
-  .window-control-group__traffic-light:hover {
+  .window-control-group__traffic-light[data-hovered="true"] {
   filter: brightness(0.82);
 }
 
 .window-control-group[data-platform="darwin"][data-window-focused="true"]
-  .window-control-group__traffic-light:hover
+  .window-control-group__traffic-light[data-hovered="true"]
   svg {
   opacity: 1;
 }
 
 .window-control-group[data-platform="darwin"][data-window-focused="true"]
-  .window-control-group__traffic-light:active {
+  .window-control-group__traffic-light[data-hovered="true"]:active {
   filter: brightness(0.72);
   box-shadow:
     inset 0 1px 1px rgb(0 0 0 / 22%),

@@ -4,6 +4,12 @@ import { IconTooltipButton } from '@mico/ui'
 import { Copy, Minimize2, Minus, MoveDiagonal2, Plus, Square, X } from 'lucide-react'
 import * as React from 'react'
 
+type WindowControl = 'close' | 'maximize' | 'minimize'
+
+function isWindowControl(value: string | null): value is WindowControl {
+  return value === 'close' || value === 'maximize' || value === 'minimize'
+}
+
 function WindowControls(): React.JSX.Element | null {
   const platform = window.electron.process.platform
   const isMac = platform === 'darwin'
@@ -11,6 +17,8 @@ function WindowControls(): React.JSX.Element | null {
   const [isFullScreen, setIsFullScreen] = React.useState(false)
   const [isMaximized, setIsMaximized] = React.useState(false)
   const [isOptionPressed, setIsOptionPressed] = React.useState(false)
+  // Frameless controls can retain CSS hover after tray restore, so visual hover uses fresh pointer events.
+  const [hoveredControl, setHoveredControl] = React.useState<WindowControl | null>(null)
   const [isWindowFocused, setIsWindowFocused] = React.useState(() => document.hasFocus())
 
   React.useEffect(() => {
@@ -30,15 +38,37 @@ function WindowControls(): React.JSX.Element | null {
   }, [isMac, isWindows])
 
   React.useEffect(() => {
+    const clearHover = (): void => setHoveredControl(null)
+    const handleBlur = (): void => {
+      clearHover()
+      setIsWindowFocused(false)
+    }
+    const handleFocus = (): void => setIsWindowFocused(true)
+    const handleVisibilityChange = (): void => {
+      // Hide/show does not guarantee pointerleave, so clear visual hover here.
+      if (document.visibilityState === 'hidden') {
+        clearHover()
+        setIsWindowFocused(false)
+      }
+    }
+
+    window.addEventListener('blur', handleBlur)
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('blur', handleBlur)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
+  React.useEffect(() => {
     if (!isMac) return undefined
 
     let isMounted = true
     const removeFullScreenListener = window.api.windowControls.onFullScreenChange(setIsFullScreen)
-    const handleBlur = (): void => {
-      setIsOptionPressed(false)
-      setIsWindowFocused(false)
-    }
-    const handleFocus = (): void => setIsWindowFocused(true)
+    const handleBlur = (): void => setIsOptionPressed(false)
     const handleKeyDown = (event: KeyboardEvent): void => setIsOptionPressed(event.altKey)
     const handleKeyUp = (event: KeyboardEvent): void => setIsOptionPressed(event.altKey)
 
@@ -47,7 +77,6 @@ function WindowControls(): React.JSX.Element | null {
     })
 
     window.addEventListener('blur', handleBlur)
-    window.addEventListener('focus', handleFocus)
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
 
@@ -55,7 +84,6 @@ function WindowControls(): React.JSX.Element | null {
       isMounted = false
       removeFullScreenListener()
       window.removeEventListener('blur', handleBlur)
-      window.removeEventListener('focus', handleFocus)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
     }
@@ -63,12 +91,41 @@ function WindowControls(): React.JSX.Element | null {
 
   if (!isMac && !isWindows) return null
 
+  const blurActiveControl = (): void => {
+    // Tooltips also open on focus, which persists when a window state change completes.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+  }
+
   const toggleMaximize = (): void => {
+    blurActiveControl()
     if (isMaximized) {
       void window.api.windowControls.unmaximize()
     } else {
       void window.api.windowControls.maximize()
     }
+  }
+
+  const closeWindow = (): void => {
+    blurActiveControl()
+    void window.api.windowControls.close()
+  }
+
+  const minimizeWindow = (): void => {
+    blurActiveControl()
+    void window.api.windowControls.minimize()
+  }
+
+  const toggleFullScreen = (): void => {
+    blurActiveControl()
+    void window.api.windowControls.toggleFullScreen()
+  }
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLElement>): void => {
+    if (!(event.target instanceof Element)) return
+
+    const control = event.target.closest('[data-window-control]')
+    const controlName = control?.getAttribute('data-window-control') ?? null
+    setHoveredControl(isWindowControl(controlName) ? controlName : null)
   }
 
   if (isMac) {
@@ -88,25 +145,33 @@ function WindowControls(): React.JSX.Element | null {
         className="window-control-group titlebar-control-group"
         data-platform={platform}
         data-window-focused={isWindowFocused}
+        onPointerLeave={() => setHoveredControl(null)}
+        onPointerMove={handlePointerMove}
       >
         <IconTooltipButton
           className="titlebar-button window-control-group__traffic-light window-control-group__close"
+          data-hovered={hoveredControl === 'close'}
+          data-window-control="close"
           icon={<X aria-hidden="true" />}
           label="Close"
-          onClick={() => void window.api.windowControls.close()}
+          onClick={closeWindow}
         />
         <IconTooltipButton
           className="titlebar-button window-control-group__traffic-light window-control-group__minimize"
+          data-hovered={hoveredControl === 'minimize'}
+          data-window-control="minimize"
           icon={<Minus aria-hidden="true" />}
           label="Minimize"
-          onClick={() => void window.api.windowControls.minimize()}
+          onClick={minimizeWindow}
         />
         <IconTooltipButton
           className="titlebar-button window-control-group__traffic-light window-control-group__zoom"
+          data-hovered={hoveredControl === 'maximize'}
+          data-window-control="maximize"
           icon={<FullScreenIcon aria-hidden="true" />}
           label={fullScreenLabel}
           onClick={
-            isZoomAction ? toggleMaximize : () => void window.api.windowControls.toggleFullScreen()
+            isZoomAction ? toggleMaximize : toggleFullScreen
           }
         />
       </header>
@@ -121,24 +186,32 @@ function WindowControls(): React.JSX.Element | null {
       aria-label="Window controls"
       className="window-control-group titlebar-control-group"
       data-platform={platform}
+      onPointerLeave={() => setHoveredControl(null)}
+      onPointerMove={handlePointerMove}
     >
       <IconTooltipButton
         className="titlebar-button"
+        data-hovered={hoveredControl === 'minimize'}
+        data-window-control="minimize"
         icon={<Minus aria-hidden="true" />}
         label="Minimize"
-        onClick={() => void window.api.windowControls.minimize()}
+        onClick={minimizeWindow}
       />
       <IconTooltipButton
         className="titlebar-button"
+        data-hovered={hoveredControl === 'maximize'}
+        data-window-control="maximize"
         icon={<MaximizeIcon aria-hidden="true" />}
         label={maximizeLabel}
         onClick={toggleMaximize}
       />
       <IconTooltipButton
         className="titlebar-button window-control-group__close"
+        data-hovered={hoveredControl === 'close'}
+        data-window-control="close"
         icon={<X aria-hidden="true" />}
         label="Close"
-        onClick={() => void window.api.windowControls.close()}
+        onClick={closeWindow}
       />
     </header>
   )
