@@ -1,6 +1,9 @@
 import * as React from 'react'
 
-import type { Appearance, AppearancePreference } from '../../../shared/appearance'
+import type { DataFor } from '@shared/data/types'
+
+type Appearance = DataFor<'appearance'>
+type AppearancePreference = DataFor<'appearancePreference'>
 
 type AppearanceContextValue = {
   appearance: Appearance
@@ -20,6 +23,7 @@ function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.El
   const [appearance, setAppearance] = React.useState<Appearance>('light')
   const [preference, setPreferenceState] = React.useState<AppearancePreference>('system')
 
+  // Subscribe before the initial read completes so a concurrent main-process update is not lost.
   React.useEffect(() => {
     let active = true
     const unsubscribe = window.api.appearance.onAppearanceChange((nextAppearance) => {
@@ -42,6 +46,7 @@ function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.El
     }
   }, [])
 
+  // Apply before paint to avoid briefly rendering controls in the previous appearance.
   React.useLayoutEffect(() => {
     applyAppearance(document.documentElement, appearance)
   }, [appearance])

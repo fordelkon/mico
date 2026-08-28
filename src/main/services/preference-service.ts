@@ -2,12 +2,12 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme } from 'electron'
 
-import {
-  APPEARANCE_CHANGED_CHANNEL,
-  type Appearance,
-  type AppearancePreference,
-  isAppearancePreference
-} from '../../shared/appearance'
+import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
+import type { DataFor } from '@shared/data/types'
+import { IpcChannel } from '@shared/IpcChannel'
+
+type Appearance = DataFor<'appearance'>
+type AppearancePreference = DataFor<'appearancePreference'>
 
 class PreferenceService {
   private appearancePreference: AppearancePreference = 'system'
@@ -42,7 +42,7 @@ class PreferenceService {
 
   private broadcastAppearance(appearance: Appearance): void {
     for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send(APPEARANCE_CHANGED_CHANNEL, appearance)
+      window.webContents.send(IpcChannel.Appearance_Changed, appearance)
     }
   }
 
@@ -53,7 +53,7 @@ class PreferenceService {
         contents
       )
 
-      return match && isAppearancePreference(match[1]) ? match[1] : 'system'
+      return AppearancePreferenceSchema.safeParse(match?.[1]).data ?? 'system'
     } catch {
       return 'system'
     }

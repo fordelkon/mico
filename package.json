@@ -34,7 +34,8 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@mico/ui": "workspace:*",
     "ai": "^7.0.77",
-    "lucide-react": "^1.33.0"
+    "lucide-react": "^1.33.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.9",
