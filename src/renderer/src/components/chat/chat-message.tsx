@@ -6,7 +6,7 @@ import {
   MessageContent,
   MessageFooter
 } from '@mico/ui'
-import type { MicoUIMessage } from '@renderer/lib/ai/chat-types'
+import type { MicoUIMessage } from '@renderer/types/chat'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import * as React from 'react'
 

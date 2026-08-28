@@ -4,7 +4,7 @@ import { ChatMain } from './components/chat/chat-main'
 import { AppSidebar } from './components/sidebar/app-sidebar'
 import { WindowControls } from './components/window-controls/window-controls'
 import { useChatWorkspaceState } from './hooks/chat/use-chat-workspace-state'
-import { selectConversationWithPaperTransition } from './lib/conversation-paper-transition'
+import { selectConversationWithPaperTransition } from '@renderer/utils/conversation-paper-transition'
 
 function App(): React.JSX.Element {
   const workspace = useChatWorkspaceState()

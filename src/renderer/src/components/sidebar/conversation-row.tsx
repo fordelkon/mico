@@ -19,7 +19,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem
 } from '@mico/ui'
-import type { Conversation } from '@renderer/lib/ai/chat-types'
+import type { Conversation } from '@renderer/types/chat'
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
 

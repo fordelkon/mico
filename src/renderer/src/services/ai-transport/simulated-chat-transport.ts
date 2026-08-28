@@ -1,6 +1,6 @@
 import { createUIMessageStream, type ChatTransport, type UIMessageChunk } from 'ai'
 
-import type { MicoUIMessage } from './chat-types'
+import type { MicoUIMessage } from '@renderer/types/chat'
 
 const SIMULATED_RESPONSE_TEXT =
   'Mico is ready. This response is generated locally through the same streaming interface a production model transport can use.'

@@ -6,8 +6,8 @@ import {
   type ChatResponseState,
   type Conversation,
   type MicoUIMessage
-} from '@renderer/lib/ai/chat-types'
-import { SimulatedChatTransport } from '@renderer/lib/ai/simulated-chat-transport'
+} from '@renderer/types/chat'
+import { SimulatedChatTransport } from '@renderer/services/ai-transport/simulated-chat-transport'
 
 const EMPTY_MESSAGES: MicoUIMessage[] = []
 
