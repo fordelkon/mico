@@ -29,11 +29,13 @@
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.39",
     "@ai-sdk/react": "^4.0.80",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@mico/ui": "workspace:*",
     "ai": "^7.0.77",
+    "dotenv": "^17.4.2",
     "lucide-react": "^1.33.0",
     "zod": "^4.4.3"
   },
