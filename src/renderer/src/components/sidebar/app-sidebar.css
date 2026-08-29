@@ -148,7 +148,7 @@
   gap: 2px;
 }
 
-.app-sidebar__search-command-footer [data-slot='kbd'] {
+.app-sidebar__search-command-footer [data-slot="kbd"] {
   min-width: 20px;
   height: 20px;
   padding-inline: 4px;

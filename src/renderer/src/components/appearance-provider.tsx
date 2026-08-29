@@ -51,11 +51,14 @@ function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.El
     applyAppearance(document.documentElement, appearance)
   }, [appearance])
 
-  const setPreference = React.useCallback(async (nextPreference: AppearancePreference): Promise<void> => {
-    setPreferenceState(nextPreference)
-    const nextAppearance = await window.api.appearance.setPreference(nextPreference)
-    setAppearance(nextAppearance)
-  }, [])
+  const setPreference = React.useCallback(
+    async (nextPreference: AppearancePreference): Promise<void> => {
+      setPreferenceState(nextPreference)
+      const nextAppearance = await window.api.appearance.setPreference(nextPreference)
+      setAppearance(nextAppearance)
+    },
+    []
+  )
 
   const value = React.useMemo(
     () => ({ appearance, preference, setPreference }),

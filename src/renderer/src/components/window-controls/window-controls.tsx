@@ -170,9 +170,7 @@ function WindowControls(): React.JSX.Element | null {
           data-window-control="maximize"
           icon={<FullScreenIcon aria-hidden="true" />}
           label={fullScreenLabel}
-          onClick={
-            isZoomAction ? toggleMaximize : toggleFullScreen
-          }
+          onClick={isZoomAction ? toggleMaximize : toggleFullScreen}
         />
       </header>
     )

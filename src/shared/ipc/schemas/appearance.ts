@@ -16,6 +16,9 @@ interface AppearanceAPI {
 const appearanceRequestSchemas = {
   'appearance.get-preference': defineRoute({ input: z.void(), output: AppearancePreferenceSchema }),
   'appearance.get-resolved': defineRoute({ input: z.void(), output: AppearanceSchema }),
-  'appearance.set-preference': defineRoute({ input: AppearancePreferenceSchema, output: AppearanceSchema })
+  'appearance.set-preference': defineRoute({
+    input: AppearancePreferenceSchema,
+    output: AppearanceSchema
+  })
 }
 export { appearanceRequestSchemas, type AppearanceAPI }

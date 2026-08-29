@@ -17,7 +17,8 @@ const windowControls: WindowControlsAPI = {
 
     ipcRenderer.on(IpcChannel.WindowControls_FullscreenChanged, wrappedListener)
 
-    return () => ipcRenderer.removeListener(IpcChannel.WindowControls_FullscreenChanged, wrappedListener)
+    return () =>
+      ipcRenderer.removeListener(IpcChannel.WindowControls_FullscreenChanged, wrappedListener)
   },
   onMaximizedChange: (listener) => {
     const wrappedListener = (_event: IpcRendererEvent, isMaximized: boolean): void => {
@@ -26,7 +27,8 @@ const windowControls: WindowControlsAPI = {
 
     ipcRenderer.on(IpcChannel.WindowControls_MaximizedChanged, wrappedListener)
 
-    return () => ipcRenderer.removeListener(IpcChannel.WindowControls_MaximizedChanged, wrappedListener)
+    return () =>
+      ipcRenderer.removeListener(IpcChannel.WindowControls_MaximizedChanged, wrappedListener)
   },
   toggleFullScreen: () => ipcRenderer.invoke(IpcChannel.WindowControls_ToggleFullscreen),
   unmaximize: () => ipcRenderer.invoke(IpcChannel.WindowControls_Unmaximize)

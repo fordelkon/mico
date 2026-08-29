@@ -49,9 +49,7 @@ class PreferenceService {
   private async readAppearancePreference(): Promise<AppearancePreference> {
     try {
       const contents = await readFile(this.preferencesPath, 'utf8')
-      const match = /^\s*\{\s*"appearance"\s*:\s*"(system|light|dark)"\s*}\s*$/.exec(
-        contents
-      )
+      const match = /^\s*\{\s*"appearance"\s*:\s*"(system|light|dark)"\s*}\s*$/.exec(contents)
 
       return AppearancePreferenceSchema.safeParse(match?.[1]).data ?? 'system'
     } catch {

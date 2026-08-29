@@ -61,13 +61,16 @@ function registerIpc({ mainWindow, preference }: IpcServices): void {
     getCallingWindow(event)
     return preference.getResolvedAppearance()
   })
-  ipcMain.handle(IpcChannel.Appearance_SetPreference, async (event, input: AppearancePreference) => {
-    getCallingWindow(event)
-    const result = AppearancePreferenceSchema.safeParse(input)
-    if (!result.success) throw new Error('Invalid appearance preference')
+  ipcMain.handle(
+    IpcChannel.Appearance_SetPreference,
+    async (event, input: AppearancePreference) => {
+      getCallingWindow(event)
+      const result = AppearancePreferenceSchema.safeParse(input)
+      if (!result.success) throw new Error('Invalid appearance preference')
 
-    return preference.setAppearancePreference(result.data)
-  })
+      return preference.setAppearancePreference(result.data)
+    }
+  )
 }
 
 export { registerIpc }
