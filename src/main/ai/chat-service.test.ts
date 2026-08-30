@@ -50,7 +50,7 @@ function pendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk> {
 describe('ChatService', () => {
   it('emits every chunk followed by one finish for a normal run', async () => {
     const events: ChatStreamEvent[] = []
-    const factory: ChatStreamFactory = () => streamFrom([textChunk])
+    const factory: ChatStreamFactory = async () => streamFrom([textChunk])
     const service = new ChatService(factory)
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
@@ -66,7 +66,7 @@ describe('ChatService', () => {
   it('aborts only the matching owner and request without a finish event', async () => {
     const events: ChatStreamEvent[] = []
     const signals = new Map<string, AbortSignal>()
-    const factory: ChatStreamFactory = (_messages: ChatMessage[], signal) => {
+    const factory: ChatStreamFactory = async (_messages: ChatMessage[], signal) => {
       signals.set(String(signals.size + 1), signal)
       return pendingStream(signal)
     }
@@ -89,7 +89,7 @@ describe('ChatService', () => {
 
   it('keeps requests with the same ID isolated by owner during abortAll', async () => {
     const signals: AbortSignal[] = []
-    const factory: ChatStreamFactory = (_messages, signal) => {
+    const factory: ChatStreamFactory = async (_messages, signal) => {
       signals.push(signal)
       return pendingStream(signal)
     }
@@ -107,7 +107,7 @@ describe('ChatService', () => {
 
   it('aborts every active run when disposed', async () => {
     const signals: AbortSignal[] = []
-    const factory: ChatStreamFactory = (_messages, signal) => {
+    const factory: ChatStreamFactory = async (_messages, signal) => {
       signals.push(signal)
       return pendingStream(signal)
     }
@@ -127,7 +127,7 @@ describe('ChatService', () => {
 
   it('emits a generic provider error without finishing when the stream fails', async () => {
     const events: ChatStreamEvent[] = []
-    const factory = vi.fn<ChatStreamFactory>(() => {
+    const factory = vi.fn<ChatStreamFactory>(async () => {
       throw new Error('upstream credential details')
     })
     const service = new ChatService(factory)

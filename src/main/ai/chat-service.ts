@@ -4,7 +4,7 @@ import type { UIMessageChunk } from 'ai'
 type ChatStreamFactory = (
   messages: ChatMessage[],
   signal: AbortSignal
-) => AsyncIterable<UIMessageChunk>
+) => Promise<AsyncIterable<UIMessageChunk>>
 
 type ChatRun = {
   controller: AbortController
@@ -56,7 +56,8 @@ class ChatService {
     emit: (event: ChatStreamEvent) => void
   }): Promise<void> {
     try {
-      for await (const chunk of this.createStream(request.messages, run.controller.signal)) {
+      const stream = await this.createStream(request.messages, run.controller.signal)
+      for await (const chunk of stream) {
         if (!run.controller.signal.aborted) {
           emit({ type: 'chunk', requestId: request.requestId, chunk })
         }
