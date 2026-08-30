@@ -1,7 +1,10 @@
 import { app } from 'electron'
-import { electronApp, optimizer } from '@electron-toolkit/utils'
+import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 
 import icon from '../../build/icon.png?asset'
+import { ChatService } from './ai/chat-service'
+import { readChatConfiguration } from './ai/config'
+import { createOpenAICompatibleChatStream } from './ai/providers/openai-compatible-provider'
 import { registerIpc } from './ipc'
 import { MainWindowService } from './services/main-window-service'
 import { PreferenceService } from './services/preference-service'
@@ -9,6 +12,7 @@ import { TrayService } from './services/tray-service'
 
 const preferenceService = new PreferenceService()
 let trayService: TrayService
+let chatService: ChatService | undefined
 const mainWindowService = new MainWindowService(() => trayService.shouldKeepWindowOpen())
 trayService = new TrayService(mainWindowService)
 
@@ -24,9 +28,11 @@ void app.whenReady().then(async () => {
   })
 
   await preferenceService.initialize()
+  const chatConfiguration = readChatConfiguration({ isDevelopment: is.dev, env: process.env })
+  chatService = new ChatService(createOpenAICompatibleChatStream(chatConfiguration))
   mainWindowService.initialize()
   trayService.initialize()
-  registerIpc({ mainWindow: mainWindowService, preference: preferenceService })
+  registerIpc({ chat: chatService, mainWindow: mainWindowService, preference: preferenceService })
 
   app.on('activate', () => {
     mainWindowService.show()
@@ -34,6 +40,7 @@ void app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  chatService?.dispose()
   trayService.beginQuit()
   trayService.dispose()
 })
