@@ -58,7 +58,7 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
     >
       <div className="chat-composer__surface mx-auto flex w-full max-w-[46rem] flex-col gap-1.5 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-2.5 shadow-hairline transition-colors focus-within:border-border-strong">
         <Textarea
-          className="min-h-14 max-h-40 resize-none border-0 px-2.5 py-2 font-display text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent"
+          className="min-h-14 max-h-40 resize-none border-0 px-2.5 py-2 font-display text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
           ref={textareaRef}
           disabled={isDisabled}
           onChange={(event) => setDraft(event.target.value)}

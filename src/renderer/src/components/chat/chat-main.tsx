@@ -10,15 +10,29 @@ type ChatMainProps = {
 }
 
 function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
+  const isActiveResponse =
+    (workspace.response.status === 'submitted' ||
+      workspace.response.status === 'streaming' ||
+      workspace.response.status === 'retrying') &&
+    workspace.activeConversation?.id === workspace.response.conversationId
   const composerMode: ChatComposerMode =
-    workspace.response.status === 'idle'
-      ? 'send'
-      : workspace.activeConversation?.id === workspace.response.conversationId
+    workspace.response.status === 'submitted' ||
+    workspace.response.status === 'streaming' ||
+    workspace.response.status === 'retrying'
+      ? isActiveResponse
         ? 'stop'
         : 'disabled'
-  const isResponding =
-    workspace.response.status !== 'idle' &&
+      : 'send'
+  const errorMessage =
+    workspace.response.status === 'error' &&
     workspace.activeConversation?.id === workspace.response.conversationId
+      ? workspace.response.message
+      : undefined
+  const retry =
+    workspace.response.status === 'retrying' &&
+    workspace.activeConversation?.id === workspace.response.conversationId
+      ? workspace.response
+      : undefined
   const composer = (
     <ChatComposer
       focusKey={workspace.composerFocusKey}
@@ -38,8 +52,11 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
           >
             <ChatMessageList
               conversationId={workspace.activeConversation.id}
-              isResponding={isResponding}
+              errorMessage={errorMessage}
+              isResponding={isActiveResponse}
               messages={workspace.activeMessages}
+              onRetry={errorMessage ? workspace.retryResponse : undefined}
+              retry={retry}
             />
           </div>
           {composer}

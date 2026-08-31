@@ -8,6 +8,13 @@ type MicoMessageMetadata = {
 
 type MicoUIMessage = UIMessage<MicoMessageMetadata>
 
+type ChatRetryState = {
+  attempt: number
+  maxAttempts: number
+  retryDelayMs: number
+  startedAt: number
+}
+
 type Conversation = {
   id: string
   title: string
@@ -15,6 +22,8 @@ type Conversation = {
 
 type ChatResponseState =
   | { status: 'idle' }
+  | { status: 'error'; conversationId: string; message: string }
+  | ({ status: 'retrying'; conversationId: string } & ChatRetryState)
   | {
       status: 'submitted' | 'streaming'
       conversationId: string
@@ -26,6 +35,7 @@ export {
   IDLE_CHAT_RESPONSE,
   type AssistantCompletionState,
   type ChatResponseState,
+  type ChatRetryState,
   type Conversation,
   type MicoMessageMetadata,
   type MicoUIMessage

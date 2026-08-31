@@ -4,4 +4,5 @@ out
 storybook-static
 .DS_Store
 .eslintcache
+.env
 *.log*

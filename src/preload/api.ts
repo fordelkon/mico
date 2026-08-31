@@ -1,6 +1,7 @@
 import { ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
+import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
 import { IpcChannel } from '@shared/IpcChannel'
 
@@ -48,7 +49,23 @@ const appearance: AppearanceAPI = {
   setPreference: (preference) => ipcRenderer.invoke(IpcChannel.Appearance_SetPreference, preference)
 }
 
-const api = { appearance, windowControls }
+const chat: ChatAPI = {
+  abort: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_Abort, requestId),
+  onEvent: (listener) => {
+    const wrappedListener = (
+      _event: IpcRendererEvent,
+      chatEvent: Parameters<typeof listener>[0]
+    ): void => {
+      listener(chatEvent)
+    }
+
+    ipcRenderer.on(IpcChannel.Chat_Event, wrappedListener)
+    return () => ipcRenderer.removeListener(IpcChannel.Chat_Event, wrappedListener)
+  },
+  start: (request) => ipcRenderer.invoke(IpcChannel.Chat_Start, request)
+}
+
+const api = { appearance, chat, windowControls }
 
 export { api, type WindowApiType }
 
