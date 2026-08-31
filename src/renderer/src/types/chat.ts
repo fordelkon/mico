@@ -15,6 +15,7 @@ type Conversation = {
 
 type ChatResponseState =
   | { status: 'idle' }
+  | { status: 'error'; conversationId: string; message: string }
   | {
       status: 'submitted' | 'streaming'
       conversationId: string

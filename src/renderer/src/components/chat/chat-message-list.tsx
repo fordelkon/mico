@@ -13,12 +13,14 @@ import { ChatMessage } from './chat-message'
 
 type ChatMessageListProps = {
   conversationId: string
+  errorMessage?: string
   messages: MicoUIMessage[]
   isResponding: boolean
 }
 
 function ChatMessageList({
   conversationId,
+  errorMessage,
   messages,
   isResponding
 }: ChatMessageListProps): React.JSX.Element {
@@ -46,6 +48,14 @@ function ChatMessageList({
                 />
               </MessageScrollerItem>
             ))}
+            {errorMessage && (
+              <p
+                className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                role="alert"
+              >
+                {errorMessage}
+              </p>
+            )}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton className="bottom-5 size-8 rounded-full border-border-subtle bg-surface-primary shadow-sm" />

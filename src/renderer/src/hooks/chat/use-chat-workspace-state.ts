@@ -7,7 +7,7 @@ import {
   type Conversation,
   type MicoUIMessage
 } from '@renderer/types/chat'
-import { SimulatedChatTransport } from '@renderer/services/ai-transport/simulated-chat-transport'
+import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
 
 const EMPTY_MESSAGES: MicoUIMessage[] = []
 
@@ -48,7 +48,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     () =>
       new Chat<MicoUIMessage>({
         id: 'empty-chat',
-        transport: new SimulatedChatTransport()
+        transport: new ElectronChatTransport(window.api.chat)
       })
   )
 
@@ -73,16 +73,23 @@ function useChatWorkspaceState(): ChatWorkspace {
     (conversation: Conversation): ChatSession => {
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
-        transport: new SimulatedChatTransport(),
-        onFinish: () => settleResponse(conversation.id),
-        onError: () => settleResponse(conversation.id)
+        transport: new ElectronChatTransport(window.api.chat),
+        onFinish: ({ isError }) => {
+          if (!isError) settleResponse(conversation.id)
+        },
+        onError: (error) =>
+          setResponseState({
+            status: 'error',
+            conversationId: conversation.id,
+            message: error.message
+          })
       })
 
       const session = { conversation, chat }
       sessionsRef.current.set(conversation.id, session)
       return session
     },
-    [settleResponse]
+    [setResponseState, settleResponse]
   )
 
   const subscribedChat = activeSession?.chat ?? idleChat
@@ -162,7 +169,13 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const sendMessage = React.useCallback(
     (content: string): void => {
-      if (!content.trim() || responseRef.current.status !== 'idle') return
+      if (
+        !content.trim() ||
+        responseRef.current.status === 'submitted' ||
+        responseRef.current.status === 'streaming'
+      ) {
+        return
+      }
 
       let session = activeSession
         ? sessionsRef.current.get(activeSession.conversationId)
