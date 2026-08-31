@@ -30,6 +30,13 @@ const ChatStreamEventSchema = defineSchema(
       requestId: ChatRequestIdSchema,
       message: z.string().min(1)
     }),
+    z.object({
+      type: z.literal('retry'),
+      requestId: ChatRequestIdSchema,
+      attempt: z.number().int().min(2),
+      maxAttempts: z.number().int().min(2),
+      retryDelayMs: z.number().int().min(0)
+    }),
     z.object({ type: z.literal('finish'), requestId: ChatRequestIdSchema })
   ])
 )

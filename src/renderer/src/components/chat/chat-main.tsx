@@ -11,10 +11,14 @@ type ChatMainProps = {
 
 function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
   const isActiveResponse =
-    (workspace.response.status === 'submitted' || workspace.response.status === 'streaming') &&
+    (workspace.response.status === 'submitted' ||
+      workspace.response.status === 'streaming' ||
+      workspace.response.status === 'retrying') &&
     workspace.activeConversation?.id === workspace.response.conversationId
   const composerMode: ChatComposerMode =
-    workspace.response.status === 'submitted' || workspace.response.status === 'streaming'
+    workspace.response.status === 'submitted' ||
+    workspace.response.status === 'streaming' ||
+    workspace.response.status === 'retrying'
       ? isActiveResponse
         ? 'stop'
         : 'disabled'
@@ -23,6 +27,11 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
     workspace.response.status === 'error' &&
     workspace.activeConversation?.id === workspace.response.conversationId
       ? workspace.response.message
+      : undefined
+  const retry =
+    workspace.response.status === 'retrying' &&
+    workspace.activeConversation?.id === workspace.response.conversationId
+      ? workspace.response
       : undefined
   const composer = (
     <ChatComposer
@@ -46,6 +55,8 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
               errorMessage={errorMessage}
               isResponding={isActiveResponse}
               messages={workspace.activeMessages}
+              onRetry={errorMessage ? workspace.retryResponse : undefined}
+              retry={retry}
             />
           </div>
           {composer}

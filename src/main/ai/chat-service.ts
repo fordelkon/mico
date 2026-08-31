@@ -1,6 +1,8 @@
 import type { ChatMessage, ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
 import type { UIMessageChunk } from 'ai'
 
+import { describeChatError } from './chat-error'
+
 type ChatStreamFactory = (
   messages: ChatMessage[],
   signal: AbortSignal
@@ -11,10 +13,45 @@ type ChatRun = {
   ownerId: string
 }
 
+type ChatRetryOptions = {
+  maxAttempts?: number
+  retryDelayMs?: number
+}
+
+const DEFAULT_MAX_ATTEMPTS = 5
+const DEFAULT_RETRY_DELAY_MS = 1_000
+
+function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted || delayMs === 0) return Promise.resolve()
+
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(resolve, delayMs)
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timeoutId)
+        resolve()
+      },
+      { once: true }
+    )
+  })
+}
+
 class ChatService {
   private readonly runs = new Map<string, ChatRun>()
+  private readonly maxAttempts: number
+  private readonly retryDelayMs: number
 
-  constructor(private readonly createStream: ChatStreamFactory) {}
+  constructor(
+    private readonly createStream: ChatStreamFactory,
+    {
+      maxAttempts = DEFAULT_MAX_ATTEMPTS,
+      retryDelayMs = DEFAULT_RETRY_DELAY_MS
+    }: ChatRetryOptions = {}
+  ) {
+    this.maxAttempts = maxAttempts
+    this.retryDelayMs = retryDelayMs
+  }
 
   start(
     { ownerId, request }: { ownerId: string; request: ChatStartRequest },
@@ -55,23 +92,53 @@ class ChatService {
     run: ChatRun
     emit: (event: ChatStreamEvent) => void
   }): Promise<void> {
+    let receivedChunk = false
+
     try {
-      const stream = await this.createStream(request.messages, run.controller.signal)
-      for await (const chunk of stream) {
-        if (!run.controller.signal.aborted) {
-          emit({ type: 'chunk', requestId: request.requestId, chunk })
+      for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+        try {
+          const stream = await this.createStream(request.messages, run.controller.signal)
+          for await (const chunk of stream) {
+            if (!run.controller.signal.aborted) {
+              receivedChunk = true
+              emit({ type: 'chunk', requestId: request.requestId, chunk })
+            }
+          }
+
+          if (!run.controller.signal.aborted) {
+            emit({ type: 'finish', requestId: request.requestId })
+          }
+          return
+        } catch (error) {
+          const providerError =
+            error instanceof Error ? error : new Error('Unknown chat provider error')
+          const canRetry =
+            !run.controller.signal.aborted &&
+            !receivedChunk &&
+            attempt < this.maxAttempts &&
+            describeChatError(providerError).retryable
+
+          if (!canRetry) throw providerError
+
+          const retryDelayMs = this.retryDelayMs * 2 ** (attempt - 1)
+          emit({
+            type: 'retry',
+            requestId: request.requestId,
+            attempt: attempt + 1,
+            maxAttempts: this.maxAttempts,
+            retryDelayMs
+          })
+          await waitForRetry(retryDelayMs, run.controller.signal)
         }
       }
-
-      if (!run.controller.signal.aborted) {
-        emit({ type: 'finish', requestId: request.requestId })
-      }
-    } catch {
+    } catch (error) {
       if (!run.controller.signal.aborted) {
         emit({
           type: 'error',
           requestId: request.requestId,
-          message: 'Unable to get a response from the chat provider'
+          message: describeChatError(
+            error instanceof Error ? error : new Error('Unknown chat provider error')
+          ).message
         })
       }
     } finally {

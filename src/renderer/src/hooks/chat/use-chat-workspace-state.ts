@@ -22,6 +22,7 @@ type ChatWorkspace = {
   renameConversation: (conversationId: string, title: string) => void
   deleteConversation: (conversationId: string) => void
   sendMessage: (content: string) => void
+  retryResponse: () => void
   stopResponse: () => void
 }
 
@@ -73,7 +74,29 @@ function useChatWorkspaceState(): ChatWorkspace {
     (conversation: Conversation): ChatSession => {
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
-        transport: new ElectronChatTransport(window.api.chat),
+        transport: new ElectronChatTransport(window.api.chat, {
+          onStatusChange: (status) => {
+            const currentResponse = responseRef.current
+            if (
+              currentResponse.status === 'idle' ||
+              currentResponse.status === 'error' ||
+              currentResponse.conversationId !== conversation.id
+            ) {
+              return
+            }
+
+            if (status.type === 'retrying') {
+              setResponseState({
+                status: 'retrying',
+                conversationId: conversation.id,
+                ...status,
+                startedAt: Date.now()
+              })
+            } else if (currentResponse.status === 'retrying') {
+              setResponseState({ status: 'streaming', conversationId: conversation.id })
+            }
+          }
+        }),
         onFinish: ({ isError }) => {
           if (!isError) settleResponse(conversation.id)
         },
@@ -104,7 +127,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
     if (
       activeSession &&
-      currentResponse.status !== 'idle' &&
+      (currentResponse.status === 'submitted' || currentResponse.status === 'streaming') &&
       currentResponse.conversationId === activeSession.conversationId &&
       (subscribedStatus === 'submitted' || subscribedStatus === 'streaming') &&
       currentResponse.status !== subscribedStatus
@@ -172,7 +195,8 @@ function useChatWorkspaceState(): ChatWorkspace {
       if (
         !content.trim() ||
         responseRef.current.status === 'submitted' ||
-        responseRef.current.status === 'streaming'
+        responseRef.current.status === 'streaming' ||
+        responseRef.current.status === 'retrying'
       ) {
         return
       }
@@ -229,6 +253,22 @@ function useChatWorkspaceState(): ChatWorkspace {
     )
   }, [activeSession, settleResponse])
 
+  const retryResponse = React.useCallback((): void => {
+    const currentResponse = responseRef.current
+    if (
+      currentResponse.status !== 'error' ||
+      currentResponse.conversationId !== activeSession?.conversationId
+    ) {
+      return
+    }
+
+    const session = sessionsRef.current.get(currentResponse.conversationId)
+    if (!session) return
+
+    setResponseState({ status: 'submitted', conversationId: currentResponse.conversationId })
+    void session.chat.regenerate()
+  }, [activeSession, setResponseState])
+
   React.useEffect(
     () => () => {
       // Sessions may continue streaming after navigation; stop all of them when the workspace unmounts.
@@ -261,6 +301,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       renameConversation,
       deleteConversation,
       sendMessage,
+      retryResponse,
       stopResponse
     }),
     [
@@ -271,6 +312,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       deleteConversation,
       renameConversation,
       response,
+      retryResponse,
       selectConversation,
       sendMessage,
       startNewChat,

@@ -30,7 +30,17 @@ describe('createOpenAICompatibleChatStream', () => {
     const convertToModelMessagesSpy = vi.fn().mockResolvedValue(convertedMessages)
     const providerStream = new ReadableStream<never>()
     const streamTextSpy = vi.fn(() => ({ stream: providerStream }))
-    const toUIMessageStreamSpy = vi.fn(async function* () {})
+    let uiStreamOptions:
+      | Parameters<OpenAICompatibleDependencies['toUIMessageStream']>[0]
+      | undefined
+    const toUIMessageStreamSpy = vi.fn(
+      (input: Parameters<OpenAICompatibleDependencies['toUIMessageStream']>[0]) => {
+        uiStreamOptions = input
+        return (async function* () {
+          yield* []
+        })()
+      }
+    )
 
     const dependencies = {
       createOpenAICompatible: createOpenAICompatibleSpy,
@@ -57,8 +67,13 @@ describe('createOpenAICompatibleChatStream', () => {
       })
     )
     expect(toUIMessageStreamSpy).toHaveBeenCalledWith({
-      stream: providerStream
+      stream: providerStream,
+      onError: expect.any(Function)
     })
+    const onError = uiStreamOptions?.onError
+    expect(onError?.(new TypeError('fetch failed'))).toBe(
+      "Couldn't connect to the API endpoint. Check the API URL, network, VPN, or proxy."
+    )
     expect(stream).toBe(toUIMessageStreamSpy.mock.results[0]?.value)
   })
 })

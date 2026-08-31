@@ -125,7 +125,7 @@ describe('ChatService', () => {
     expect(signals.map((signal) => signal.aborted)).toEqual([true, true])
   })
 
-  it('emits a generic provider error without finishing when the stream fails', async () => {
+  it('emits a safe generic error without finishing when the stream fails', async () => {
     const events: ChatStreamEvent[] = []
     const factory = vi.fn<ChatStreamFactory>(async () => {
       throw new Error('upstream credential details')
@@ -139,7 +139,62 @@ describe('ChatService', () => {
         {
           type: 'error',
           requestId: 'request-1',
-          message: 'Unable to get a response from the chat provider'
+          message: "Couldn't generate a response. Please try again."
+        }
+      ])
+    })
+  })
+
+  it('retries a connection failure before any response content is sent', async () => {
+    const events: ChatStreamEvent[] = []
+    let calls = 0
+    const factory: ChatStreamFactory = async () => {
+      calls += 1
+      if (calls === 1) throw new TypeError('fetch failed')
+      return streamFrom([textChunk])
+    }
+    const service = new ChatService(factory, {
+      maxAttempts: 2,
+      retryDelayMs: 0
+    })
+
+    service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
+
+    await waitFor(() => {
+      expect(events).toEqual([
+        {
+          type: 'retry',
+          requestId: 'request-1',
+          attempt: 2,
+          maxAttempts: 2,
+          retryDelayMs: 0
+        },
+        { type: 'chunk', requestId: 'request-1', chunk: textChunk },
+        { type: 'finish', requestId: 'request-1' }
+      ])
+    })
+  })
+
+  it('keeps partial content and reports a connection failure without retrying', async () => {
+    const events: ChatStreamEvent[] = []
+    const factory: ChatStreamFactory = async () => ({
+      async *[Symbol.asyncIterator](): AsyncIterator<UIMessageChunk> {
+        yield textChunk
+        throw new TypeError('fetch failed')
+      }
+    })
+    const service = new ChatService(factory, { maxAttempts: 2, retryDelayMs: 0 })
+
+    service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
+
+    await waitFor(() => {
+      expect(events).toEqual([
+        { type: 'chunk', requestId: 'request-1', chunk: textChunk },
+        {
+          type: 'error',
+          requestId: 'request-1',
+          message:
+            "Couldn't connect to the API endpoint. Check the API URL, network, VPN, or proxy."
         }
       ])
     })

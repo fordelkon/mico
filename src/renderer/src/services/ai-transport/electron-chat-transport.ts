@@ -14,11 +14,21 @@ function toChatMessages(messages: MicoUIMessage[]): ChatMessage[] {
   })
 }
 
+type ChatTransportStatus =
+  | { type: 'retrying'; attempt: number; maxAttempts: number; retryDelayMs: number }
+  | { type: 'streaming' }
+
+type ElectronChatTransportOptions = {
+  onStatusChange?: (status: ChatTransportStatus) => void
+}
+
 class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   readonly #api: ChatAPI
+  readonly #onStatusChange?: ElectronChatTransportOptions['onStatusChange']
 
-  constructor(api: ChatAPI) {
+  constructor(api: ChatAPI, { onStatusChange }: ElectronChatTransportOptions = {}) {
     this.#api = api
+    this.#onStatusChange = onStatusChange
   }
 
   async reconnectToStream(): Promise<ReadableStream<UIMessageChunk> | null> {
@@ -39,7 +49,18 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
           if (!active || event.requestId !== requestId) return
 
           if (event.type === 'chunk') {
+            this.#onStatusChange?.({ type: 'streaming' })
             controller.enqueue(event.chunk)
+            return
+          }
+
+          if (event.type === 'retry') {
+            this.#onStatusChange?.({
+              type: 'retrying',
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              retryDelayMs: event.retryDelayMs
+            })
             return
           }
 
@@ -80,4 +101,4 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   }
 }
 
-export { ElectronChatTransport }
+export { ElectronChatTransport, type ChatTransportStatus }
