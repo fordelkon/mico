@@ -19,10 +19,6 @@ type ChatMessageProps = {
 
 function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Element {
   const [copyState, setCopyState] = React.useState<'idle' | 'copied'>('idle')
-  const [visibleStreamedWords, setVisibleStreamedWords] = React.useState({
-    messageId: '',
-    count: 0
-  })
   const text = message.parts
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
@@ -30,7 +26,6 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
   const reasoningParts = message.parts.filter(
     (part): part is Extract<typeof part, { type: 'reasoning' }> => part.type === 'reasoning'
   )
-  const streamedWords = text.match(/\S+\s*/g) ?? []
   const isUser = message.role === 'user'
   const canCopy = isUser || message.metadata?.completionState === 'complete'
 
@@ -41,17 +36,6 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
     const timeoutId = window.setTimeout(() => setCopyState('idle'), 2_000)
     return () => window.clearTimeout(timeoutId)
   }, [copyState])
-
-  // Wait until the added words mount before revealing them, preserving the stream-in animation.
-  React.useEffect(() => {
-    if (!isStreaming) return
-
-    const frameId = window.requestAnimationFrame(() => {
-      setVisibleStreamedWords({ messageId: message.id, count: streamedWords.length })
-    })
-
-    return () => window.cancelAnimationFrame(frameId)
-  }, [isStreaming, message.id, streamedWords.length])
 
   const handleCopy = (): void => {
     void navigator.clipboard.writeText(text).then(
@@ -64,14 +48,17 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
     <Message align={isUser ? 'end' : 'start'}>
       <MessageContent className="gap-1.5">
         {!isUser &&
-          reasoningParts.map((part, index) => (
-            <ThinkingBlock
-              id={`${message.id}-${index}`}
-              isStreaming={isStreaming}
-              key={`${message.id}-${index}`}
-              text={part.text}
-            />
-          ))}
+          (reasoningParts.length > 0
+            ? reasoningParts.map((part, index) => (
+                <ThinkingBlock
+                  id={`${message.id}-${index}`}
+                  isAnswerStreaming={isStreaming && Boolean(text)}
+                  isStreaming={isStreaming}
+                  key={`${message.id}-${index}`}
+                  text={part.text}
+                />
+              ))
+            : isStreaming && !text && <ThinkingBlock id={message.id} isStreaming text="" />)}
         <Bubble
           align={isUser ? 'end' : 'start'}
           variant={isUser ? 'secondary' : 'ghost'}
@@ -89,21 +76,7 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
             }
           >
             <p className="whitespace-pre-wrap" data-testid="answer-content">
-              {isStreaming && !isUser
-                ? streamedWords.map((word, index) => (
-                    <span
-                      className={
-                        visibleStreamedWords.messageId === message.id &&
-                        index < visibleStreamedWords.count
-                          ? 'chat-message__stream-word is-in'
-                          : 'chat-message__stream-word'
-                      }
-                      key={`${index}-${word}`}
-                    >
-                      {word}
-                    </span>
-                  ))
-                : text}
+              {text}
             </p>
             {isStreaming && (
               <span

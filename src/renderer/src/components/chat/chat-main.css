@@ -28,17 +28,105 @@
   view-transition-name: conversation-paper;
 }
 
-.chat-message__stream-word {
-  opacity: 0;
-  filter: blur(1px);
-  transition:
-    opacity 350ms cubic-bezier(0.22, 1, 0.36, 1),
-    filter 350ms cubic-bezier(0.22, 1, 0.36, 1);
+.thinking-block__icon-swap {
+  position: relative;
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
 }
 
-.chat-message__stream-word.is-in {
+.thinking-block__icon {
+  grid-area: 1 / 1;
+  align-self: center;
+  justify-self: center;
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.thinking-block__icon-swap[data-state="thinking"] .thinking-block__orb,
+.thinking-block__icon-swap[data-state="complete"] .thinking-block__brain {
   opacity: 1;
-  filter: blur(0);
+  transform: scale(1);
+}
+
+.thinking-block__icon-swap[data-state="thinking"] .thinking-block__brain,
+.thinking-block__icon-swap[data-state="complete"] .thinking-block__orb {
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+.thinking-block__label {
+  position: relative;
+  display: inline-block;
+}
+
+.thinking-block__label--active {
+  color: color-mix(in oklab, var(--foreground) 58%, transparent);
+}
+
+.thinking-block__label--active::before {
+  position: absolute;
+  inset: 0;
+  content: attr(data-text);
+  pointer-events: none;
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--foreground) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 400% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-block-shimmer 2s linear infinite;
+}
+
+.thinking-block__chevron {
+  display: inline-flex;
+  margin-left: 0.125rem;
+  transform: scaleY(1);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.thinking-block[data-open="true"] .thinking-block__chevron {
+  transform: scaleY(-1);
+}
+
+.thinking-block__panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.thinking-block[data-open="true"] .thinking-block__panel {
+  grid-template-rows: 1fr;
+}
+
+.thinking-block__panel-inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.thinking-block[data-open="true"] .thinking-block__panel-inner {
+  opacity: 1;
+}
+
+@keyframes thinking-block-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: 0 0;
+  }
 }
 
 ::view-transition-old(conversation-paper) {
@@ -98,11 +186,16 @@
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(conversation-paper),
   ::view-transition-new(conversation-paper),
-  .chat-message__stream-word {
+  .thinking-block__icon,
+  .thinking-block__chevron,
+  .thinking-block__panel,
+  .thinking-block__panel-inner {
     animation: none;
-    opacity: 1;
-    filter: none;
     transition: none;
+  }
+
+  .thinking-block__label--active::before {
+    animation: none;
   }
 }
 
