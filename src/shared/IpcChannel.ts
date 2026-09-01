@@ -5,6 +5,7 @@ export enum IpcChannel {
   Appearance_Changed = 'appearance:changed',
   Chat_Abort = 'chat:abort',
   Chat_Event = 'chat:event',
+  Chat_GetCapabilities = 'chat:get-capabilities',
   Chat_Start = 'chat:start',
   WindowControls_Close = 'window-controls:close',
   WindowControls_FullscreenChanged = 'window-controls:fullscreen-changed',

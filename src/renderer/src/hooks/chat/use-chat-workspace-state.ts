@@ -8,14 +8,30 @@ import {
   type MicoUIMessage
 } from '@renderer/types/chat'
 import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
+import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 
 const EMPTY_MESSAGES: MicoUIMessage[] = []
+
+class ThinkingEffortStore {
+  #value: ThinkingSelection = 'default'
+
+  get(): ThinkingSelection {
+    return this.#value
+  }
+
+  set(value: ThinkingSelection): void {
+    this.#value = value
+  }
+}
 
 type ChatWorkspace = {
   conversations: Conversation[]
   activeConversation: Conversation | null
   activeMessages: MicoUIMessage[]
   response: ChatResponseState
+  reasoningCapabilities: ModelReasoningCapabilities | null
+  thinkingEffort: ThinkingSelection
+  setThinkingEffort: (thinkingEffort: ThinkingSelection) => void
   composerFocusKey: number
   startNewChat: () => void
   selectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
@@ -42,6 +58,14 @@ function useChatWorkspaceState(): ChatWorkspace {
   const [conversations, setConversations] = React.useState<Conversation[]>([])
   const [activeSession, setActiveSession] = React.useState<ActiveChatSession | null>(null)
   const [response, setResponse] = React.useState<ChatResponseState>(IDLE_CHAT_RESPONSE)
+  const [reasoningCapabilities, setReasoningCapabilities] =
+    React.useState<ModelReasoningCapabilities | null>(null)
+  const [thinkingEffort, setThinkingEffortState] = React.useState<ThinkingSelection>('default')
+  const [thinkingEffortStore] = React.useState(() => new ThinkingEffortStore())
+  const getThinkingEffort = React.useCallback(
+    () => thinkingEffortStore.get(),
+    [thinkingEffortStore]
+  )
   // Response actions can run before React commits, so they need the latest synchronous value.
   const responseRef = React.useRef<ChatResponseState>(IDLE_CHAT_RESPONSE)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
@@ -49,9 +73,46 @@ function useChatWorkspaceState(): ChatWorkspace {
     () =>
       new Chat<MicoUIMessage>({
         id: 'empty-chat',
-        transport: new ElectronChatTransport(window.api.chat)
+        transport: new ElectronChatTransport(window.api.chat, {
+          conversationId: 'empty-chat',
+          getThinkingEffort
+        })
       })
   )
+
+  const setThinkingEffort = React.useCallback(
+    (next: ThinkingSelection): void => {
+      thinkingEffortStore.set(next)
+      setThinkingEffortState(next)
+    },
+    [thinkingEffortStore]
+  )
+
+  React.useEffect(() => {
+    let active = true
+
+    void window.api.chat.getCapabilities().then(
+      (capabilities) => {
+        if (!active || !capabilities) return
+
+        setReasoningCapabilities(capabilities)
+        if (
+          thinkingEffortStore.get() === 'default' ||
+          !capabilities.selectableEfforts.includes(thinkingEffortStore.get())
+        ) {
+          thinkingEffortStore.set(capabilities.defaultEffort)
+          setThinkingEffortState(capabilities.defaultEffort)
+        }
+      },
+      () => {
+        if (active) setReasoningCapabilities(null)
+      }
+    )
+
+    return () => {
+      active = false
+    }
+  }, [thinkingEffortStore])
 
   const setResponseState = React.useCallback((next: ChatResponseState): void => {
     responseRef.current = next
@@ -75,6 +136,8 @@ function useChatWorkspaceState(): ChatWorkspace {
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
         transport: new ElectronChatTransport(window.api.chat, {
+          conversationId: conversation.id,
+          getThinkingEffort,
           onStatusChange: (status) => {
             const currentResponse = responseRef.current
             if (
@@ -112,7 +175,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       sessionsRef.current.set(conversation.id, session)
       return session
     },
-    [setResponseState, settleResponse]
+    [getThinkingEffort, setResponseState, settleResponse]
   )
 
   const subscribedChat = activeSession?.chat ?? idleChat
@@ -295,6 +358,9 @@ function useChatWorkspaceState(): ChatWorkspace {
       activeConversation,
       activeMessages,
       response,
+      reasoningCapabilities,
+      thinkingEffort,
+      setThinkingEffort,
       composerFocusKey,
       startNewChat,
       selectConversation,
@@ -312,11 +378,14 @@ function useChatWorkspaceState(): ChatWorkspace {
       deleteConversation,
       renameConversation,
       response,
+      reasoningCapabilities,
       retryResponse,
       selectConversation,
       sendMessage,
+      setThinkingEffort,
       startNewChat,
-      stopResponse
+      stopResponse,
+      thinkingEffort
     ]
   )
 }

@@ -14,7 +14,7 @@ type IpcDependencies = {
 }
 
 interface IpcServices {
-  chat: Pick<ChatService, 'abort' | 'abortAll' | 'start'>
+  chat: Pick<ChatService, 'abort' | 'abortAll' | 'getModelCapabilities' | 'start'>
   mainWindow: Pick<
     MainWindowService,
     | 'close'
@@ -112,6 +112,10 @@ function registerIpc(
     chat.start({ ownerId, request: result.data }, (chatEvent) => {
       event.sender.send(IpcChannel.Chat_Event, chatEvent)
     })
+  })
+  dependencies.ipcMain.handle(IpcChannel.Chat_GetCapabilities, (event) => {
+    getCallingWindow(event)
+    return chat.getModelCapabilities()
   })
   dependencies.ipcMain.handle(IpcChannel.Chat_Abort, (event, input) => {
     getCallingWindow(event)

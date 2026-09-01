@@ -20,6 +20,9 @@ function createWorkspace(): ChatWorkspace {
       retryDelayMs: 2_000,
       startedAt: Date.now()
     },
+    reasoningCapabilities: null,
+    thinkingEffort: 'medium',
+    setThinkingEffort: vi.fn(),
     composerFocusKey: 1,
     startNewChat: vi.fn(),
     selectConversation: vi.fn(),

@@ -1,9 +1,10 @@
-import type { UIMessage } from 'ai'
+import type { ProviderMetadata, UIMessage } from 'ai'
 
 type AssistantCompletionState = 'complete' | 'streaming' | 'stopped'
 
 type MicoMessageMetadata = {
   completionState?: AssistantCompletionState
+  providerMetadata?: ProviderMetadata
 }
 
 type MicoUIMessage = UIMessage<MicoMessageMetadata>

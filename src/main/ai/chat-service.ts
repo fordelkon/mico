@@ -1,12 +1,7 @@
-import type { ChatMessage, ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
-import type { UIMessageChunk } from 'ai'
+import type { ChatProvider } from '@mico/ai-providers'
+import type { ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
 
 import { describeChatError } from './chat-error'
-
-type ChatStreamFactory = (
-  messages: ChatMessage[],
-  signal: AbortSignal
-) => Promise<AsyncIterable<UIMessageChunk>>
 
 type ChatRun = {
   controller: AbortController
@@ -43,7 +38,7 @@ class ChatService {
   private readonly retryDelayMs: number
 
   constructor(
-    private readonly createStream: ChatStreamFactory,
+    private readonly provider: Pick<ChatProvider, 'getModelCapabilities' | 'stream'>,
     {
       maxAttempts = DEFAULT_MAX_ATTEMPTS,
       retryDelayMs = DEFAULT_RETRY_DELAY_MS
@@ -51,6 +46,10 @@ class ChatService {
   ) {
     this.maxAttempts = maxAttempts
     this.retryDelayMs = retryDelayMs
+  }
+
+  getModelCapabilities(): ReturnType<ChatProvider['getModelCapabilities']> {
+    return this.provider.getModelCapabilities()
   }
 
   start(
@@ -97,7 +96,12 @@ class ChatService {
     try {
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
-          const stream = await this.createStream(request.messages, run.controller.signal)
+          const stream = await this.provider.stream({
+            conversationKey: `${run.ownerId}:${request.conversationId}`,
+            messages: request.messages,
+            thinkingEffort: request.thinkingEffort ?? 'default',
+            signal: run.controller.signal
+          })
           for await (const chunk of stream) {
             if (!run.controller.signal.aborted) {
               receivedChunk = true
@@ -151,4 +155,4 @@ class ChatService {
   }
 }
 
-export { ChatService, type ChatStreamFactory }
+export { ChatService }

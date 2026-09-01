@@ -1,16 +1,25 @@
 import type { ChatTransport, UIMessageChunk } from 'ai'
 
-import type { ChatMessage } from '@shared/data/schemas/chat'
+import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { MicoUIMessage } from '@renderer/types/chat'
 
 function toChatMessages(messages: MicoUIMessage[]): ChatMessage[] {
   return messages.flatMap((message) => {
-    const parts = message.parts.flatMap((part) =>
-      part.type === 'text' && part.text.trim() ? [{ type: 'text' as const, text: part.text }] : []
-    )
-
-    return parts.length > 0 ? [{ role: message.role, parts }] : []
+    const parts: ChatMessage['parts'] = []
+    for (const part of message.parts) {
+      if (part.type === 'text' && part.text.trim()) parts.push({ type: 'text', text: part.text })
+      if (part.type === 'reasoning' && part.text) {
+        const reasoningPart: ChatMessage['parts'][number] = { type: 'reasoning', text: part.text }
+        if (part.providerMetadata) reasoningPart.providerMetadata = part.providerMetadata
+        parts.push(reasoningPart)
+      }
+    }
+    if (!parts.length) return []
+    const chatMessage: ChatMessage = { role: message.role, parts }
+    if (message.metadata?.providerMetadata)
+      chatMessage.providerMetadata = message.metadata.providerMetadata
+    return [chatMessage]
   })
 }
 
@@ -19,15 +28,24 @@ type ChatTransportStatus =
   | { type: 'streaming' }
 
 type ElectronChatTransportOptions = {
+  conversationId: string
+  getThinkingEffort: () => ThinkingSelection
   onStatusChange?: (status: ChatTransportStatus) => void
 }
 
 class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   readonly #api: ChatAPI
+  readonly #conversationId: string
+  readonly #getThinkingEffort: () => ThinkingSelection
   readonly #onStatusChange?: ElectronChatTransportOptions['onStatusChange']
 
-  constructor(api: ChatAPI, { onStatusChange }: ElectronChatTransportOptions = {}) {
+  constructor(
+    api: ChatAPI,
+    { conversationId, getThinkingEffort, onStatusChange }: ElectronChatTransportOptions
+  ) {
     this.#api = api
+    this.#conversationId = conversationId
+    this.#getThinkingEffort = getThinkingEffort
     this.#onStatusChange = onStatusChange
   }
 
@@ -39,6 +57,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
     options: Parameters<ChatTransport<MicoUIMessage>['sendMessages']>[0]
   ): Promise<ReadableStream<UIMessageChunk>> {
     const requestId = crypto.randomUUID()
+    const thinkingEffort = this.#getThinkingEffort()
     let stop: (() => void) | undefined
 
     return new ReadableStream<UIMessageChunk>({
@@ -88,7 +107,12 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
         if (options.abortSignal?.aborted) abort()
         else {
           void this.#api
-            .start({ requestId, messages: toChatMessages(options.messages) })
+            .start({
+              conversationId: this.#conversationId,
+              requestId,
+              messages: toChatMessages(options.messages),
+              thinkingEffort
+            })
             .catch(() => {
               if (!active) return
 

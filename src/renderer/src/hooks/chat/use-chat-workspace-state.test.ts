@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { ChatStreamEvent } from '@shared/data/schemas/chat'
+import type { ChatStreamEvent, ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import { useChatWorkspaceState } from './use-chat-workspace-state'
 
@@ -10,6 +10,10 @@ class FakeChatAPI implements ChatAPI {
   readonly listeners = new Set<Parameters<ChatAPI['onEvent']>[0]>()
 
   async abort(): Promise<void> {}
+
+  async getCapabilities(): Promise<ModelReasoningCapabilities | null> {
+    return null
+  }
 
   onEvent(listener: Parameters<ChatAPI['onEvent']>[0]): () => void {
     this.listeners.add(listener)
@@ -33,6 +37,43 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('resets a selection that is absent from loaded capabilities', async () => {
+    const api = new FakeChatAPI()
+    let resolveCapabilities: (capabilities: ModelReasoningCapabilities | null) => void
+    const capabilities = new Promise<ModelReasoningCapabilities | null>((resolve) => {
+      resolveCapabilities = resolve
+    })
+    api.getCapabilities = () => capabilities
+    Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    act(() => result.current.setThinkingEffort('high'))
+    await act(async () => {
+      resolveCapabilities({ selectableEfforts: ['low', 'medium'], defaultEffort: 'low' })
+      await capabilities
+    })
+
+    expect(result.current.reasoningCapabilities).toEqual({
+      selectableEfforts: ['low', 'medium'],
+      defaultEffort: 'low'
+    })
+    expect(result.current.thinkingEffort).toBe('low')
+  })
+
+  it('uses default when capability loading fails without blocking a send', async () => {
+    const api = new FakeChatAPI()
+    api.getCapabilities = async () => {
+      throw new Error('offline')
+    }
+    Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() => expect(result.current.reasoningCapabilities).toBeNull())
+
+    act(() => result.current.sendMessage('Hello'))
+    await waitFor(() => expect(api.startedRequests[0]?.thinkingEffort).toBe('default'))
+  })
+
   it('keeps a provider error on its conversation and clears it when the next send begins', async () => {
     const api = new FakeChatAPI()
     Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })

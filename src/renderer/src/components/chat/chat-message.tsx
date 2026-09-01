@@ -10,6 +10,8 @@ import type { MicoUIMessage } from '@renderer/types/chat'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import * as React from 'react'
 
+import { ThinkingBlock } from './thinking-block'
+
 type ChatMessageProps = {
   message: MicoUIMessage
   isStreaming: boolean
@@ -25,6 +27,9 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('')
+  const reasoningParts = message.parts.filter(
+    (part): part is Extract<typeof part, { type: 'reasoning' }> => part.type === 'reasoning'
+  )
   const streamedWords = text.match(/\S+\s*/g) ?? []
   const isUser = message.role === 'user'
   const canCopy = isUser || message.metadata?.completionState === 'complete'
@@ -58,6 +63,15 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
   return (
     <Message align={isUser ? 'end' : 'start'}>
       <MessageContent className="gap-1.5">
+        {!isUser &&
+          reasoningParts.map((part, index) => (
+            <ThinkingBlock
+              id={`${message.id}-${index}`}
+              isStreaming={isStreaming}
+              key={`${message.id}-${index}`}
+              text={part.text}
+            />
+          ))}
         <Bubble
           align={isUser ? 'end' : 'start'}
           variant={isUser ? 'secondary' : 'ghost'}
@@ -74,7 +88,7 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
                 : 'max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
             }
           >
-            <p className="whitespace-pre-wrap">
+            <p className="whitespace-pre-wrap" data-testid="answer-content">
               {isStreaming && !isUser
                 ? streamedWords.map((word, index) => (
                     <span

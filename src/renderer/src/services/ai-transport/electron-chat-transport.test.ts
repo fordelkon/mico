@@ -2,6 +2,7 @@ import type { ChatTransport } from 'ai'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatStreamEvent } from '@shared/data/schemas/chat'
+import type { ThinkingSelection } from '@shared/data/schemas/chat'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { MicoUIMessage } from '@renderer/types/chat'
 import { ElectronChatTransport } from './electron-chat-transport'
@@ -14,6 +15,10 @@ class FakeChatAPI implements ChatAPI {
 
   async abort(requestId: string): Promise<void> {
     this.abortedRequestIds.push(requestId)
+  }
+
+  async getCapabilities(): Promise<null> {
+    return null
   }
 
   onEvent(listener: Parameters<ChatAPI['onEvent']>[0]): () => void {
@@ -43,10 +48,78 @@ const sendOptions: Parameters<ChatTransport<MicoUIMessage>['sendMessages']>[0] =
 }
 
 describe('ElectronChatTransport', () => {
+  it('takes the selection once when sendMessages starts', async () => {
+    const api = new FakeChatAPI()
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+    let effort: ThinkingSelection = 'low'
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => effort
+    })
+
+    const stream = await transport.sendMessages(sendOptions)
+    effort = 'high'
+
+    expect(api.startedRequests[0]).toMatchObject({
+      conversationId: 'conversation-1',
+      thinkingEffort: 'low'
+    })
+
+    await stream.cancel()
+    uuid.mockRestore()
+  })
+
+  it('preserves reasoning parts and replay metadata in the next provider request', async () => {
+    const api = new FakeChatAPI()
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => 'default'
+    })
+
+    const stream = await transport.sendMessages({
+      ...sendOptions,
+      messages: [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'reasoning',
+              text: 'Inspect the request.',
+              providerMetadata: { anthropic: { signature: 'sig-1' } }
+            },
+            { type: 'text', text: 'Done.' }
+          ]
+        }
+      ]
+    })
+
+    expect(api.startedRequests[0]?.messages).toEqual([
+      {
+        role: 'assistant',
+        parts: [
+          {
+            type: 'reasoning',
+            text: 'Inspect the request.',
+            providerMetadata: { anthropic: { signature: 'sig-1' } }
+          },
+          { type: 'text', text: 'Done.' }
+        ]
+      }
+    ])
+
+    await stream.cancel()
+    uuid.mockRestore()
+  })
+
   it('forwards matching chunks and closes when the matching request finishes', async () => {
     const api = new FakeChatAPI()
     const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
-    const transport = new ElectronChatTransport(api)
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => 'default'
+    })
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
 
@@ -65,7 +138,9 @@ describe('ElectronChatTransport', () => {
     const finishRead = reader.read()
     api.emit({ type: 'finish', requestId })
     await expect(finishRead).resolves.toEqual({ done: true, value: undefined })
-    expect(api.startedRequests).toEqual([{ requestId, messages: [] }])
+    expect(api.startedRequests).toEqual([
+      { conversationId: 'conversation-1', requestId, messages: [], thinkingEffort: 'default' }
+    ])
     expect(api.unsubscribeCount).toBe(1)
 
     uuid.mockRestore()
@@ -74,7 +149,10 @@ describe('ElectronChatTransport', () => {
   it('ignores events for a different request ID', async () => {
     const api = new FakeChatAPI()
     const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
-    const transport = new ElectronChatTransport(api)
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => 'medium'
+    })
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
 
@@ -102,7 +180,10 @@ describe('ElectronChatTransport', () => {
     const api = new FakeChatAPI()
     const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
     const controller = new AbortController()
-    const transport = new ElectronChatTransport(api)
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => 'medium'
+    })
 
     await transport.sendMessages({ ...sendOptions, abortSignal: controller.signal })
     controller.abort()

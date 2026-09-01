@@ -1,6 +1,14 @@
-import { IconTooltipButton, Textarea } from '@mico/ui'
-import { ArrowUpIcon, SquareIcon } from 'lucide-react'
+import {
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  IconMenuButton,
+  IconTooltipButton,
+  Textarea
+} from '@mico/ui'
+import { ArrowUpIcon, BrainIcon, SquareIcon } from 'lucide-react'
 import * as React from 'react'
+
+import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
@@ -9,9 +17,31 @@ type ChatComposerProps = {
   mode: ChatComposerMode
   onSend: (content: string) => void
   onStop: () => void
+  reasoningCapabilities: ModelReasoningCapabilities | null
+  thinkingEffort: ThinkingSelection
+  onThinkingEffortChange: (selection: ThinkingSelection) => void
 }
 
-function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): React.JSX.Element {
+const thinkingEffortLabels = {
+  none: 'Off',
+  auto: 'On',
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max'
+} satisfies Record<Exclude<ThinkingSelection, 'default'>, string>
+
+function ChatComposer({
+  focusKey,
+  mode,
+  onSend,
+  onStop,
+  reasoningCapabilities,
+  thinkingEffort,
+  onThinkingEffortChange
+}: ChatComposerProps): React.JSX.Element {
   const [draft, setDraft] = React.useState('')
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const mountedRef = React.useRef(false)
@@ -66,25 +96,53 @@ function ChatComposer({ focusKey, mode, onSend, onStop }: ChatComposerProps): Re
           placeholder="Message Mico Today"
           value={draft}
         />
-        {mode === 'stop' ? (
-          <IconTooltipButton
-            className="size-8 self-end"
-            icon={<SquareIcon aria-hidden="true" />}
-            label="Stop response"
-            variant="secondary"
-            type="button"
-            onClick={onStop}
-          />
-        ) : (
-          <IconTooltipButton
-            className="size-8 self-end"
-            disabled={mode === 'disabled' || !draft.trim()}
-            icon={<ArrowUpIcon aria-hidden="true" />}
-            label="Send message"
-            type="submit"
-            variant="default"
-          />
-        )}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            {reasoningCapabilities ? (
+              <IconMenuButton
+                className="size-8"
+                disabled={mode !== 'send'}
+                icon={<BrainIcon aria-hidden="true" />}
+                label="Thinking effort"
+                type="button"
+                variant="secondary"
+              >
+                <DropdownMenuRadioGroup
+                  value={thinkingEffort}
+                  // SAFETY: Every selectable item is rendered with a canonical thinking-effort value.
+                  onValueChange={(selection) =>
+                    onThinkingEffortChange(selection as ThinkingSelection)
+                  }
+                >
+                  {reasoningCapabilities.selectableEfforts.map((selection) => (
+                    <DropdownMenuRadioItem key={selection} value={selection}>
+                      {thinkingEffortLabels[selection]}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </IconMenuButton>
+            ) : null}
+          </div>
+          {mode === 'stop' ? (
+            <IconTooltipButton
+              className="size-8"
+              icon={<SquareIcon aria-hidden="true" />}
+              label="Stop response"
+              variant="secondary"
+              type="button"
+              onClick={onStop}
+            />
+          ) : (
+            <IconTooltipButton
+              className="size-8"
+              disabled={mode === 'disabled' || !draft.trim()}
+              icon={<ArrowUpIcon aria-hidden="true" />}
+              label="Send message"
+              type="submit"
+              variant="default"
+            />
+          )}
+        </div>
       </div>
     </form>
   )

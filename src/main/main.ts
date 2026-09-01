@@ -4,7 +4,7 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../build/icon.png?asset'
 import { ChatService } from './ai/chat-service'
 import { readChatConfiguration } from './ai/config'
-import { createOpenAICompatibleChatStream } from './ai/providers/openai-compatible-provider'
+import { createChatProvider } from '@mico/ai-providers'
 import { registerIpc } from './ipc'
 import { MainWindowService } from './services/main-window-service'
 import { PreferenceService } from './services/preference-service'
@@ -29,7 +29,7 @@ void app.whenReady().then(async () => {
 
   await preferenceService.initialize()
   const chatConfiguration = readChatConfiguration({ isDevelopment: is.dev, env: process.env })
-  chatService = new ChatService(createOpenAICompatibleChatStream(chatConfiguration))
+  chatService = new ChatService(createChatProvider(chatConfiguration))
   mainWindowService.initialize()
   trayService.initialize()
   registerIpc({ chat: chatService, mainWindow: mainWindowService, preference: preferenceService })

@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ChatMessage, ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
+import type { ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
+import type { ChatProvider } from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
-import { ChatService, type ChatStreamFactory } from './chat-service'
+import { ChatService } from './chat-service'
 
 const request: ChatStartRequest = {
+  conversationId: 'chat-1',
   requestId: 'request-1',
   messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }]
 }
@@ -50,8 +52,8 @@ function pendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk> {
 describe('ChatService', () => {
   it('emits every chunk followed by one finish for a normal run', async () => {
     const events: ChatStreamEvent[] = []
-    const factory: ChatStreamFactory = async () => streamFrom([textChunk])
-    const service = new ChatService(factory)
+    const provider = createProvider(async () => streamFrom([textChunk]))
+    const service = new ChatService(provider)
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
 
@@ -66,11 +68,11 @@ describe('ChatService', () => {
   it('aborts only the matching owner and request without a finish event', async () => {
     const events: ChatStreamEvent[] = []
     const signals = new Map<string, AbortSignal>()
-    const factory: ChatStreamFactory = async (_messages: ChatMessage[], signal) => {
+    const provider = createProvider(async ({ signal }) => {
       signals.set(String(signals.size + 1), signal)
       return pendingStream(signal)
-    }
-    const service = new ChatService(factory)
+    })
+    const service = new ChatService(provider)
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
     service.start(
@@ -89,11 +91,11 @@ describe('ChatService', () => {
 
   it('keeps requests with the same ID isolated by owner during abortAll', async () => {
     const signals: AbortSignal[] = []
-    const factory: ChatStreamFactory = async (_messages, signal) => {
+    const provider = createProvider(async ({ signal }) => {
       signals.push(signal)
       return pendingStream(signal)
-    }
-    const service = new ChatService(factory)
+    })
+    const service = new ChatService(provider)
 
     service.start({ ownerId: 'window-1', request }, () => undefined)
     service.start({ ownerId: 'window-2', request }, () => undefined)
@@ -107,11 +109,11 @@ describe('ChatService', () => {
 
   it('aborts every active run when disposed', async () => {
     const signals: AbortSignal[] = []
-    const factory: ChatStreamFactory = async (_messages, signal) => {
+    const provider = createProvider(async ({ signal }) => {
       signals.push(signal)
       return pendingStream(signal)
-    }
-    const service = new ChatService(factory)
+    })
+    const service = new ChatService(provider)
 
     service.start({ ownerId: 'window-1', request }, () => undefined)
     service.start(
@@ -127,10 +129,10 @@ describe('ChatService', () => {
 
   it('emits a safe generic error without finishing when the stream fails', async () => {
     const events: ChatStreamEvent[] = []
-    const factory = vi.fn<ChatStreamFactory>(async () => {
+    const stream = vi.fn(async () => {
       throw new Error('upstream credential details')
     })
-    const service = new ChatService(factory)
+    const service = new ChatService(createProvider(stream))
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
 
@@ -148,12 +150,12 @@ describe('ChatService', () => {
   it('retries a connection failure before any response content is sent', async () => {
     const events: ChatStreamEvent[] = []
     let calls = 0
-    const factory: ChatStreamFactory = async () => {
+    const stream = async () => {
       calls += 1
       if (calls === 1) throw new TypeError('fetch failed')
       return streamFrom([textChunk])
     }
-    const service = new ChatService(factory, {
+    const service = new ChatService(createProvider(stream), {
       maxAttempts: 2,
       retryDelayMs: 0
     })
@@ -177,13 +179,13 @@ describe('ChatService', () => {
 
   it('keeps partial content and reports a connection failure without retrying', async () => {
     const events: ChatStreamEvent[] = []
-    const factory: ChatStreamFactory = async () => ({
+    const provider = createProvider(async () => ({
       async *[Symbol.asyncIterator](): AsyncIterator<UIMessageChunk> {
         yield textChunk
         throw new TypeError('fetch failed')
       }
-    })
-    const service = new ChatService(factory, { maxAttempts: 2, retryDelayMs: 0 })
+    }))
+    const service = new ChatService(provider, { maxAttempts: 2, retryDelayMs: 0 })
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
 
@@ -199,4 +201,29 @@ describe('ChatService', () => {
       ])
     })
   })
+
+  it('passes a sender-scoped conversation key and the request effort to the provider', async () => {
+    const stream = vi.fn(async () => streamFrom([]))
+    const service = new ChatService(createProvider(stream))
+
+    service.start(
+      {
+        ownerId: '42',
+        request: { ...request, conversationId: 'chat-1', thinkingEffort: 'high' }
+      },
+      () => undefined
+    )
+
+    await waitFor(() =>
+      expect(stream).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationKey: '42:chat-1', thinkingEffort: 'high' })
+      )
+    )
+  })
 })
+
+function createProvider(
+  stream: ChatProvider['stream']
+): Pick<ChatProvider, 'getModelCapabilities' | 'stream'> {
+  return { getModelCapabilities: vi.fn(async () => null), stream }
+}

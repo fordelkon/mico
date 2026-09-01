@@ -51,6 +51,7 @@ const appearance: AppearanceAPI = {
 
 const chat: ChatAPI = {
   abort: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_Abort, requestId),
+  getCapabilities: () => ipcRenderer.invoke(IpcChannel.Chat_GetCapabilities),
   onEvent: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,

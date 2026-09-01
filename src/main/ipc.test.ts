@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { IpcChannel } from '@shared/IpcChannel'
-import type { ChatStreamEvent } from '@shared/data/schemas/chat'
+import type { ChatStreamEvent, ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { registerIpc } from './ipc'
 
@@ -12,6 +12,7 @@ function createHarness() {
   const chat = {
     abort: vi.fn(),
     abortAll: vi.fn(),
+    getModelCapabilities: vi.fn(),
     start: vi.fn()
   }
   const mainWindow = {
@@ -69,10 +70,29 @@ function createEvent({
 }
 
 describe('registerIpc chat handlers', () => {
+  it('returns capabilities only to a trusted renderer', async () => {
+    const { chat, handlers, mainWindow } = createHarness()
+    const capabilities: ModelReasoningCapabilities = {
+      selectableEfforts: ['medium', 'high'],
+      defaultEffort: 'medium'
+    }
+    chat.getModelCapabilities.mockResolvedValue(capabilities)
+    const trusted = createEvent({ id: 42 })
+    const untrusted = createEvent({ id: 43, trusted: false })
+    mainWindow.isTrustedRendererUrl.mockReturnValueOnce(true).mockReturnValueOnce(false)
+
+    await expect(handlers.get(IpcChannel.Chat_GetCapabilities)?.(trusted.event)).resolves.toEqual(
+      capabilities
+    )
+    expect(chat.getModelCapabilities).toHaveBeenCalledOnce()
+    expect(() => handlers.get(IpcChannel.Chat_GetCapabilities)?.(untrusted.event)).toThrow()
+  })
+
   it('starts a trusted request under its sender ID and sends events only to that sender', () => {
     const { chat, handlers } = createHarness()
     const { event, sender } = createEvent({ id: 42 })
     const request = {
+      conversationId: 'chat-1',
       requestId: 'request-1',
       messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }]
     }
@@ -100,7 +120,11 @@ describe('registerIpc chat handlers', () => {
     const { event } = createEvent({ id: 42, isMainFrame, trusted })
 
     expect(() =>
-      handlers.get(IpcChannel.Chat_Start)?.(event, { requestId: 'request-1', messages: [] })
+      handlers.get(IpcChannel.Chat_Start)?.(event, {
+        conversationId: 'chat-1',
+        requestId: 'request-1',
+        messages: []
+      })
     ).toThrow()
     expect(chat.start).not.toHaveBeenCalled()
   })
@@ -110,8 +134,16 @@ describe('registerIpc chat handlers', () => {
     const first = createEvent({ id: 42 })
     const second = createEvent({ id: 43 })
 
-    handlers.get(IpcChannel.Chat_Start)?.(first.event, { requestId: 'request-1', messages: [] })
-    handlers.get(IpcChannel.Chat_Start)?.(second.event, { requestId: 'request-1', messages: [] })
+    handlers.get(IpcChannel.Chat_Start)?.(first.event, {
+      conversationId: 'chat-1',
+      requestId: 'request-1',
+      messages: []
+    })
+    handlers.get(IpcChannel.Chat_Start)?.(second.event, {
+      conversationId: 'chat-1',
+      requestId: 'request-1',
+      messages: []
+    })
     first.destroyedListeners.forEach((listener) => listener())
 
     expect(chat.abortAll).toHaveBeenCalledWith('42')

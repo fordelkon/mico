@@ -12,6 +12,9 @@ export default defineConfig({
       }
     },
     build: {
+      externalizeDeps: {
+        exclude: ['@mico/ai-providers']
+      },
       rollupOptions: {
         input: {
           index: resolve('src/main/main.ts')

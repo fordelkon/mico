@@ -39,6 +39,9 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
       mode={composerMode}
       onSend={workspace.sendMessage}
       onStop={workspace.stopResponse}
+      reasoningCapabilities={workspace.reasoningCapabilities}
+      thinkingEffort={workspace.thinkingEffort}
+      onThinkingEffortChange={workspace.setThinkingEffort}
     />
   )
 
