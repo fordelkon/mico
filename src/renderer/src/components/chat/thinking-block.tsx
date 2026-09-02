@@ -5,10 +5,13 @@ import { ThinkingOrb } from 'thinking-orbs'
 
 const thinkingOrbStates = ['working', 'searching', 'solving'] as const
 
+type ThinkingOrbState = (typeof thinkingOrbStates)[number]
+
 type ThinkingBlockProps = {
   id: string
   isAnswerStreaming?: boolean
   isStreaming: boolean
+  orbState?: ThinkingOrbState
   text: string
 }
 
@@ -16,17 +19,17 @@ function ThinkingBlock({
   id,
   isAnswerStreaming = false,
   isStreaming,
+  orbState = 'working',
   text
 }: ThinkingBlockProps): React.JSX.Element | null {
   const isThinking = isStreaming && !isAnswerStreaming
   const [expanded, setExpanded] = React.useState(isThinking)
   const [hasUserToggled, setHasUserToggled] = React.useState(false)
-  const [orbState] = React.useState(
-    () => thinkingOrbStates[Math.floor(Math.random() * thinkingOrbStates.length)]
-  )
   const wasAnswerStreaming = React.useRef(isAnswerStreaming)
+  const panelRef = React.useRef<HTMLDivElement>(null)
   const contentId = `thinking-${id}`
   const label = isThinking ? 'Thinking' : 'Thought summary'
+  const shouldAutoFollow = isThinking && expanded && !hasUserToggled
 
   React.useEffect(() => {
     if (isAnswerStreaming && !wasAnswerStreaming.current && !hasUserToggled) {
@@ -35,6 +38,24 @@ function ThinkingBlock({
 
     wasAnswerStreaming.current = isAnswerStreaming
   }, [hasUserToggled, isAnswerStreaming])
+
+  React.useEffect(() => {
+    if (!shouldAutoFollow) return
+
+    const frameId = window.requestAnimationFrame(() => {
+      const panel = panelRef.current
+      if (!panel) return
+
+      panel.scrollTo({
+        top: panel.scrollHeight,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth'
+      })
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [shouldAutoFollow, text])
 
   if (!text && !isThinking) return null
 
@@ -87,8 +108,11 @@ function ThinkingBlock({
       <div className="thinking-block__panel" data-testid="thinking-panel">
         <div
           aria-hidden={!expanded}
-          className="thinking-block__panel-inner whitespace-pre-wrap rounded-md bg-surface-secondary px-3 py-2"
+          className={`thinking-block__panel-inner whitespace-pre-wrap rounded-md bg-surface-secondary px-3 py-2${
+            shouldAutoFollow ? ' thinking-block__panel-inner--streaming' : ''
+          }`}
           id={contentId}
+          ref={panelRef}
         >
           {text}
         </div>
@@ -97,4 +121,4 @@ function ThinkingBlock({
   )
 }
 
-export { ThinkingBlock }
+export { ThinkingBlock, thinkingOrbStates, type ThinkingOrbState }

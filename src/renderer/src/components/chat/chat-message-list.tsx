@@ -13,6 +13,11 @@ import { LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
+import { thinkingOrbStates, type ThinkingOrbState } from './thinking-block'
+
+function getRandomThinkingOrbState(): ThinkingOrbState {
+  return thinkingOrbStates[Math.floor(Math.random() * thinkingOrbStates.length)]
+}
 
 type ChatMessageListProps = {
   conversationId: string
@@ -32,6 +37,7 @@ function ChatMessageList({
   retry
 }: ChatMessageListProps): React.JSX.Element {
   const [now, setNow] = React.useState(() => Date.now())
+  const [thinkingOrbState, setThinkingOrbState] = React.useState(getRandomThinkingOrbState)
 
   React.useEffect(() => {
     if (!retry) return
@@ -40,9 +46,14 @@ function ChatMessageList({
     return () => window.clearInterval(intervalId)
   }, [retry])
 
+  React.useEffect(() => {
+    if (!isResponding) setThinkingOrbState(getRandomThinkingOrbState())
+  }, [isResponding])
+
   const remainingSeconds = retry
     ? Math.max(0, Math.ceil((retry.startedAt + retry.retryDelayMs - now) / 1_000))
     : 0
+  const showPendingThinking = isResponding && messages.at(-1)?.role !== 'assistant'
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
@@ -65,9 +76,19 @@ function ChatMessageList({
                     message.role === 'assistant' &&
                     message.id === messages.at(-1)?.id
                   }
+                  thinkingOrbState={thinkingOrbState}
                 />
               </MessageScrollerItem>
             ))}
+            {showPendingThinking && (
+              <MessageScrollerItem messageId="pending-assistant">
+                <ChatMessage
+                  isStreaming
+                  message={{ id: 'pending-assistant', role: 'assistant', parts: [] }}
+                  thinkingOrbState={thinkingOrbState}
+                />
+              </MessageScrollerItem>
+            )}
             {errorMessage && (
               <div
                 className="flex items-center justify-between gap-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"

@@ -10,14 +10,33 @@ import type { MicoUIMessage } from '@renderer/types/chat'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { ThinkingBlock } from './thinking-block'
+import { ThinkingBlock, type ThinkingOrbState } from './thinking-block'
 
 type ChatMessageProps = {
   message: MicoUIMessage
   isStreaming: boolean
+  thinkingOrbState?: ThinkingOrbState
 }
 
-function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Element {
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
+
+function StreamingText({ text }: { text: string }): React.JSX.Element {
+  return (
+    <>
+      {Array.from(segmenter.segment(text), ({ segment }, index) => (
+        <span className="chat-stream__segment" key={`${index}-${segment}`}>
+          {segment}
+        </span>
+      ))}
+    </>
+  )
+}
+
+function ChatMessage({
+  message,
+  isStreaming,
+  thinkingOrbState
+}: ChatMessageProps): React.JSX.Element {
   const [copyState, setCopyState] = React.useState<'idle' | 'copied'>('idle')
   const text = message.parts
     .filter((part) => part.type === 'text')
@@ -55,10 +74,19 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
                   isAnswerStreaming={isStreaming && Boolean(text)}
                   isStreaming={isStreaming}
                   key={`${message.id}-${index}`}
+                  orbState={thinkingOrbState}
                   text={part.text}
                 />
               ))
-            : isStreaming && !text && <ThinkingBlock id={message.id} isStreaming text="" />)}
+            : isStreaming &&
+              !text && (
+                <ThinkingBlock
+                  id={message.id}
+                  isStreaming
+                  orbState={thinkingOrbState}
+                  text=""
+                />
+              ))}
         <Bubble
           align={isUser ? 'end' : 'start'}
           variant={isUser ? 'secondary' : 'ghost'}
@@ -76,7 +104,7 @@ function ChatMessage({ message, isStreaming }: ChatMessageProps): React.JSX.Elem
             }
           >
             <p className="whitespace-pre-wrap" data-testid="answer-content">
-              {text}
+              {isStreaming ? <StreamingText text={text} /> : text}
             </p>
             {isStreaming && (
               <span
