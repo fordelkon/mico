@@ -75,11 +75,7 @@ function ChatMessageList({
               {(thinkingOrbState) => (
                 <>
                   {messages.map((message) => (
-                    <MessageScrollerItem
-                      key={message.id}
-                      messageId={message.id}
-                      scrollAnchor={message.role === 'user'}
-                    >
+                    <MessageScrollerItem key={message.id} messageId={message.id}>
                       <ChatMessage
                         message={message}
                         isStreaming={

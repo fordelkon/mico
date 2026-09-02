@@ -7,6 +7,26 @@ import { describe, expect, it, vi } from 'vitest'
 import { ChatMessageList } from './chat-message-list'
 
 describe('ChatMessageList', () => {
+  it('does not make sent user messages scroll anchors', () => {
+    render(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding={false}
+        messages={[
+          {
+            id: 'user-1',
+            role: 'user',
+            parts: [{ type: 'text', text: 'Keep this message near the latest content.' }]
+          }
+        ]}
+      />
+    )
+
+    expect(
+      screen.getByText('Keep this message near the latest content.').closest('[data-message-id]')
+    ).not.toHaveAttribute('data-scroll-anchor', 'true')
+  })
+
   it('shows a provider error as an alert', () => {
     const onRetry = vi.fn()
     render(
