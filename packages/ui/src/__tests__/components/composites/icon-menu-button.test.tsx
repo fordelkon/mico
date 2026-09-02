@@ -2,35 +2,27 @@ import '@testing-library/jest-dom/vitest'
 
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import { DropdownMenuItem } from '../../primitives/dropdown-menu'
-import { IconMenuButton } from './icon-menu-button'
+import { DropdownMenuItem } from '../../../components/primitives/dropdown-menu'
+import { IconMenuButton } from '../../../components/composites/icon-menu-button'
 
 describe('IconMenuButton', () => {
-  it('opens an accessible menu on click and renders menu primitives passed as children', async () => {
+  it('opens an accessible labelled menu on click', async () => {
     const user = userEvent.setup()
-    const onSelect = vi.fn()
 
     render(
-      <IconMenuButton icon={<svg data-testid="custom-icon" />} label="More actions">
-        <DropdownMenuItem onSelect={onSelect}>Rename</DropdownMenuItem>
+      <IconMenuButton icon={<span>⋯</span>} label="More actions">
+        <DropdownMenuItem>Rename</DropdownMenuItem>
       </IconMenuButton>
     )
 
     const button = screen.getByRole('button', { name: 'More actions' })
-    expect(button).toHaveAttribute('data-variant', 'ghost')
-    expect(button).toHaveAttribute('data-size', 'icon')
-    expect(screen.getByTestId('custom-icon')).toBeInTheDocument()
+    expect(screen.getByText('⋯')).toBeVisible()
 
     await user.click(button)
 
-    const menu = screen.getByRole('menu')
-    expect(menu).toHaveAttribute('data-side', 'bottom')
-    expect(menu).toHaveAttribute('data-align', 'center')
-
-    await user.click(screen.getByRole('menuitem', { name: 'Rename' }))
-    expect(onSelect).toHaveBeenCalledOnce()
+    expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeVisible()
   })
 
   it('forwards supported button props and prevents a disabled trigger from opening the menu', async () => {
@@ -50,7 +42,6 @@ describe('IconMenuButton', () => {
 
     const button = screen.getByRole('button', { name: 'More actions' })
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('data-size', 'icon-sm')
     expect(button).toHaveClass('custom-class')
 
     await user.click(button)

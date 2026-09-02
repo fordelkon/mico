@@ -12,7 +12,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList
-} from '../command'
+} from '../../../components/primitives/command'
 
 describe('Command', () => {
   it('renders command children inside its dialog', () => {

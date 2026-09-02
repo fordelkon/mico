@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createReasoningChunkEmitter } from '../streaming/parts'
+import { createReasoningChunkEmitter } from '../../streaming/parts'
 
 describe('reasoning chunk emitter', () => {
   it('opens, streams, and closes one reasoning part', () => {

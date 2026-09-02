@@ -3,7 +3,12 @@ import '@testing-library/jest-dom/vitest'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from '../../../components/primitives/tooltip'
 
 function renderTooltip(open: boolean) {
   render(

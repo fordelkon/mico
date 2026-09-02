@@ -47,4 +47,4 @@ function IconMenuButton({
   )
 }
 
-export { IconMenuButton, type IconMenuButtonProps }
+export { IconMenuButton }

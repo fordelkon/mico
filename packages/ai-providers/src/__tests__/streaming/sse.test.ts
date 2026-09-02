@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseSse } from '../streaming/sse'
+import { parseSse } from '../../streaming/sse'
 
 function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()

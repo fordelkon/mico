@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createChatProvider } from '../index'
+import { createChatProvider } from '../../index'
 
 function sseResponse(events: string): Response {
   return new Response(events, { headers: { 'content-type': 'text/event-stream' } })

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createChatProvider } from '../index'
+import { createChatProvider } from '../../index'
 
 async function collect(stream: AsyncIterable<unknown>) {
   const chunks: unknown[] = []

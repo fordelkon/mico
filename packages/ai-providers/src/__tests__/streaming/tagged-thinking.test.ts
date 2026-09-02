@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createTaggedThinkingExtractor } from '../streaming/tagged-thinking'
+import { createTaggedThinkingExtractor } from '../../streaming/tagged-thinking'
 
 describe('tagged thinking extractor', () => {
   it('separates a thinking tag split across input deltas', () => {

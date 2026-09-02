@@ -52,4 +52,4 @@ function IconTooltipButton({
   )
 }
 
-export { IconTooltipButton, type IconTooltipButtonProps }
+export { IconTooltipButton }
