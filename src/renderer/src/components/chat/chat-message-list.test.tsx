@@ -7,6 +7,48 @@ import { describe, expect, it, vi } from 'vitest'
 import { ChatMessageList } from './chat-message-list'
 
 describe('ChatMessageList', () => {
+  it('keeps the pending thinking state until an assistant response has content', () => {
+    const userMessage = {
+      id: 'user-1',
+      role: 'user' as const,
+      parts: [{ type: 'text' as const, text: 'What should I work on next?' }]
+    }
+    const { rerender } = render(
+      <ChatMessageList conversationId="conversation-1" isResponding messages={[userMessage]} />
+    )
+    const pendingThinking = document.querySelector('[data-message-id="pending-assistant"]')
+
+    rerender(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding
+        messages={[userMessage, { id: 'assistant-1', role: 'assistant', parts: [] }]}
+      />
+    )
+
+    expect(document.querySelector('[data-message-id="pending-assistant"]')).toBe(pendingThinking)
+
+    rerender(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding
+        messages={[
+          userMessage,
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'Start with the most important task.' }]
+          }
+        ]}
+      />
+    )
+
+    expect(document.querySelector('[data-message-id="pending-assistant"]')).toBeNull()
+    expect(screen.getAllByTestId('answer-content').at(-1)).toHaveTextContent(
+      'Start with the most important task.'
+    )
+  })
+
   it('does not make sent user messages scroll anchors', () => {
     render(
       <ChatMessageList

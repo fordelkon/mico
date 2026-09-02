@@ -58,7 +58,12 @@ function ChatMessageList({
   const remainingSeconds = retry
     ? Math.max(0, Math.ceil((retry.startedAt + retry.retryDelayMs - now) / 1_000))
     : 0
-  const showPendingThinking = isResponding && messages.at(-1)?.role !== 'assistant'
+  const latestMessage = messages.at(-1)
+  const hasEmptyAssistantMessage =
+    isResponding && latestMessage?.role === 'assistant' && latestMessage.parts.length === 0
+  const showPendingThinking =
+    isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
+  const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
@@ -74,7 +79,7 @@ function ChatMessageList({
             <ThinkingOrbStateScope key={isResponding ? 'responding' : 'idle'}>
               {(thinkingOrbState) => (
                 <>
-                  {messages.map((message) => (
+                  {displayedMessages.map((message) => (
                     <MessageScrollerItem key={message.id} messageId={message.id}>
                       <ChatMessage
                         message={message}
