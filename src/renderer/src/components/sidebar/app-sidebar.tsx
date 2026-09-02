@@ -76,7 +76,7 @@ function AppSidebar({
     <>
       <Sidebar
         aria-label="Sidebar"
-        className="app-sidebar font-display"
+        className="app-sidebar font-mono"
         collapsible="offcanvas"
         variant="floating"
       >
