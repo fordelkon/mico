@@ -1,4 +1,4 @@
-import { Button } from '@mico/ui'
+import { Button, IconSwap } from '@mico/ui'
 import { BrainIcon, ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
@@ -72,23 +72,18 @@ function ThinkingBlock({
           setExpanded((current) => !current)
         }}
       >
-        <span
-          className="thinking-block__icon-swap"
-          data-state={isThinking ? 'thinking' : 'complete'}
-        >
-          <ThinkingOrb
-            aria-hidden="true"
-            className="thinking-block__icon thinking-block__orb"
-            data-orb-state={orbState}
-            data-testid="thinking-orb"
-            size={20}
-            state={orbState}
-          />
-          <BrainIcon
-            aria-hidden="true"
-            className="thinking-block__icon thinking-block__brain size-3.5"
-          />
-        </span>
+        <IconSwap
+          from={
+            <ThinkingOrb
+              data-orb-state={orbState}
+              data-testid="thinking-orb"
+              size={20}
+              state={orbState}
+            />
+          }
+          state={isThinking ? 'from' : 'to'}
+          to={<BrainIcon className="size-3.5" />}
+        />
         <span
           className={
             isThinking

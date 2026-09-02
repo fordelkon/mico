@@ -7,16 +7,20 @@ import {
   CommandList,
   CommandShortcut,
   IconTooltipButton,
+  IconSwap,
   Kbd,
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarResizeHandle,
   useSidebar
 } from '@mico/ui'
 import type { Conversation } from '@renderer/types/chat'
-import { Moon, PanelLeft, Search, SquarePen } from 'lucide-react'
+import { ArrowLeft, Bot, Moon, PanelLeft, Search, Settings, SquarePen } from 'lucide-react'
 import * as React from 'react'
 
 import { useAppearance } from '../appearance-provider'
@@ -27,9 +31,12 @@ type AppSidebarProps = {
   conversations: Conversation[]
   activeConversationId: string | null
   onDeleteConversation: (conversationId: string) => void
+  onBackFromSettings: () => void
   onNewChat: () => void
+  onOpenSettings: () => void
   onRenameConversation: (conversationId: string, title: string) => void
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
+  settingsActive: boolean
 }
 
 const appearancePreferenceLabels = {
@@ -48,9 +55,12 @@ function AppSidebar({
   conversations,
   activeConversationId,
   onDeleteConversation,
+  onBackFromSettings,
   onNewChat,
+  onOpenSettings,
   onRenameConversation,
-  onSelectConversation
+  onSelectConversation,
+  settingsActive
 }: AppSidebarProps): React.JSX.Element {
   const { state, toggleSidebar } = useSidebar()
   const { preference, setPreference } = useAppearance()
@@ -82,7 +92,16 @@ function AppSidebar({
       >
         <SidebarContent className="pt-[60px]">
           <SidebarGroup>
-            {conversations.length > 0 ? (
+            {settingsActive ? (
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton aria-current="page" isActive tooltip="Providers">
+                    <Bot aria-hidden="true" />
+                    <span>Providers</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            ) : conversations.length > 0 ? (
               <SidebarMenu>
                 {conversations.map((conversation) => (
                   <ConversationRow
@@ -106,6 +125,21 @@ function AppSidebar({
             )}
           </SidebarGroup>
         </SidebarContent>
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                aria-pressed={settingsActive}
+                isActive={settingsActive}
+                onClick={onOpenSettings}
+                tooltip="Settings"
+              >
+                <Settings aria-hidden="true" />
+                <span>Settings</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
         <SidebarResizeHandle className="app-sidebar__resize-handle" />
       </Sidebar>
 
@@ -127,14 +161,25 @@ function AppSidebar({
         />
         <IconTooltipButton
           className="titlebar-button"
-          icon={<SquarePen aria-hidden="true" />}
-          label="New chat"
-          onClick={onNewChat}
+          icon={
+            <IconSwap
+              from={<SquarePen />}
+              className="size-[13px]"
+              state={settingsActive ? 'to' : 'from'}
+              to={<ArrowLeft />}
+            />
+          }
+          label={settingsActive ? 'Back' : 'New chat'}
+          onClick={settingsActive ? onBackFromSettings : onNewChat}
           tooltip={
-            <>
-              <span>New chat</span>
-              <Kbd>⌘ N</Kbd>
-            </>
+            settingsActive ? (
+              'Back'
+            ) : (
+              <>
+                <span>New chat</span>
+                <Kbd>⌘ N</Kbd>
+              </>
+            )
           }
         />
       </header>

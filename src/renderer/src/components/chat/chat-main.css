@@ -46,34 +46,6 @@
   background-color: transparent;
 }
 
-.thinking-block__icon-swap {
-  position: relative;
-  display: inline-grid;
-  width: 20px;
-  height: 20px;
-}
-
-.thinking-block__icon {
-  grid-area: 1 / 1;
-  align-self: center;
-  justify-self: center;
-  transition:
-    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.thinking-block__icon-swap[data-state="thinking"] .thinking-block__orb,
-.thinking-block__icon-swap[data-state="complete"] .thinking-block__brain {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.thinking-block__icon-swap[data-state="thinking"] .thinking-block__brain,
-.thinking-block__icon-swap[data-state="complete"] .thinking-block__orb {
-  opacity: 0;
-  transform: scale(0.6);
-}
-
 .thinking-block__label {
   position: relative;
   display: inline-block;
@@ -238,7 +210,6 @@
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(conversation-paper),
   ::view-transition-new(conversation-paper),
-  .thinking-block__icon,
   .thinking-block__chevron,
   .thinking-block__panel,
   .thinking-block__panel-inner {
