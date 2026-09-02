@@ -64,7 +64,7 @@ function ChatMessage({
   }
 
   return (
-    <Message align={isUser ? 'end' : 'start'}>
+    <Message align={isUser ? 'end' : 'start'} className={isUser ? 'chat-message--sent' : undefined}>
       <MessageContent className="gap-1.5">
         {!isUser &&
           (reasoningParts.length > 0

@@ -64,6 +64,14 @@ function ChatComposer({
     }
   }, [focusKey, mode])
 
+  React.useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    textarea.style.height = 'auto'
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [draft])
+
   const submit = (): void => {
     if (mode !== 'send' || !draft.trim()) return
 
@@ -88,7 +96,7 @@ function ChatComposer({
     >
       <div className="chat-composer__surface mx-auto flex w-full max-w-[46rem] flex-col gap-1.5 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-2.5 shadow-hairline transition-colors focus-within:border-border-strong">
         <Textarea
-          className="min-h-14 max-h-40 resize-none border-0 px-2.5 py-2 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
+          className="min-h-14 max-h-40 resize-none border-0 px-2.5 py-2 text-[15px] leading-6 shadow-none transition-[height] duration-200 ease-out motion-reduce:transition-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
           ref={textareaRef}
           disabled={isDisabled}
           onChange={(event) => setDraft(event.target.value)}
