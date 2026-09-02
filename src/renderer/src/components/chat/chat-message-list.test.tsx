@@ -104,6 +104,15 @@ describe('ChatMessageList', () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
+  it('marks the jump-to-latest control while a response is streaming', () => {
+    render(<ChatMessageList conversationId="conversation-1" isResponding messages={[]} />)
+
+    expect(screen.getByRole('button', { name: 'Scroll to end' })).toHaveAttribute(
+      'data-streaming',
+      'true'
+    )
+  })
+
   it('shows the current retry attempt while reconnecting', () => {
     render(
       <ChatMessageList
@@ -114,6 +123,7 @@ describe('ChatMessageList', () => {
       />
     )
 
+    expect(screen.getByTestId('retry-progress')).toHaveStyle('--retry-delay: 2000ms')
     expect(screen.getByRole('status')).toHaveTextContent(
       'Connection interrupted. Retrying in 2s · attempt 2 of 5.'
     )

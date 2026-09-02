@@ -39,6 +39,17 @@ describe('ChatComposer', () => {
     expect(textarea).toHaveStyle({ height: '56px' })
   })
 
+  it('swaps the send icon for stop without replacing the control', () => {
+    const { rerender } = render(<ChatComposer {...props} />)
+    const sendButton = screen.getByRole('button', { name: 'Send message' })
+
+    rerender(<ChatComposer {...props} mode="stop" />)
+
+    const stopButton = screen.getByRole('button', { name: 'Stop response' })
+    expect(stopButton).toBe(sendButton)
+    expect(stopButton.querySelector('[data-slot="icon-swap"]')).toHaveAttribute('data-state', 'to')
+  })
+
   it('does not render a thinking menu without adjustable capabilities', () => {
     render(<ChatComposer {...props} />)
 

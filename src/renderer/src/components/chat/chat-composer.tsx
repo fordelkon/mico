@@ -3,6 +3,7 @@ import {
   DropdownMenuRadioItem,
   IconMenuButton,
   IconTooltipButton,
+  IconSwap,
   Textarea
 } from '@mico/ui'
 import { ArrowUpIcon, BrainIcon, SquareIcon } from 'lucide-react'
@@ -131,25 +132,21 @@ function ChatComposer({
               </IconMenuButton>
             ) : null}
           </div>
-          {mode === 'stop' ? (
-            <IconTooltipButton
-              className="size-8"
-              icon={<SquareIcon aria-hidden="true" />}
-              label="Stop response"
-              variant="secondary"
-              type="button"
-              onClick={onStop}
-            />
-          ) : (
-            <IconTooltipButton
-              className="size-8"
-              disabled={mode === 'disabled' || !draft.trim()}
-              icon={<ArrowUpIcon aria-hidden="true" />}
-              label="Send message"
-              type="submit"
-              variant="default"
-            />
-          )}
+          <IconTooltipButton
+            className="size-8"
+            disabled={mode === 'disabled' || (mode === 'send' && !draft.trim())}
+            icon={
+              <IconSwap
+                from={<ArrowUpIcon aria-hidden="true" />}
+                state={mode === 'stop' ? 'to' : 'from'}
+                to={<SquareIcon aria-hidden="true" />}
+              />
+            }
+            label={mode === 'stop' ? 'Stop response' : 'Send message'}
+            type={mode === 'stop' ? 'button' : 'submit'}
+            variant={mode === 'stop' ? 'secondary' : 'default'}
+            onClick={mode === 'stop' ? onStop : undefined}
+          />
         </div>
       </div>
     </form>

@@ -38,6 +38,8 @@ type ChatMessageListProps = {
   retry?: ChatRetryState
 }
 
+type RetryProgressStyle = React.CSSProperties & { '--retry-delay': string }
+
 function ChatMessageList({
   conversationId,
   errorMessage,
@@ -64,6 +66,9 @@ function ChatMessageList({
   const showPendingThinking =
     isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
   const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
+  const retryProgressStyle: RetryProgressStyle | undefined = retry
+    ? { '--retry-delay': `${retry.retryDelayMs}ms` }
+    : undefined
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
@@ -118,7 +123,17 @@ function ChatMessageList({
               </div>
             )}
             {retry && (
-              <p className="flex items-center gap-2 text-sm text-text-tertiary" role="status">
+              <p
+                className="chat-retry-status flex items-center gap-2 text-sm text-text-tertiary"
+                role="status"
+              >
+                <span
+                  aria-hidden="true"
+                  className="chat-retry-progress"
+                  data-testid="retry-progress"
+                  key={retry.startedAt}
+                  style={retryProgressStyle}
+                />
                 <LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />
                 {remainingSeconds > 0
                   ? `Connection interrupted. Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
@@ -127,7 +142,10 @@ function ChatMessageList({
             )}
           </MessageScrollerContent>
         </MessageScrollerViewport>
-        <MessageScrollerButton className="bottom-5 size-8 rounded-full border-border-subtle bg-surface-primary shadow-sm" />
+        <MessageScrollerButton
+          className="bottom-5 size-8 rounded-full border-border-subtle bg-surface-primary shadow-sm"
+          data-streaming={isResponding ? 'true' : undefined}
+        />
       </MessageScroller>
     </MessageScrollerProvider>
   )
