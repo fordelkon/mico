@@ -57,7 +57,10 @@ function ChatMessageList({
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
-      <MessageScroller>
+      <MessageScroller
+        className="chat-message-scroller"
+        data-streaming={isResponding ? 'true' : undefined}
+      >
         <MessageScrollerViewport>
           <MessageScrollerContent
             aria-busy={isResponding}

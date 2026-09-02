@@ -28,6 +28,24 @@
   view-transition-name: conversation-paper;
 }
 
+.chat-message-scroller[data-streaming]
+  [data-slot="message-scroller-viewport"]:not(:hover):not(:focus-within):not(
+    [data-scrollable~="end"]
+  ) {
+  scrollbar-color: transparent transparent;
+}
+
+.chat-message-scroller[data-streaming]
+  [data-slot="message-scroller-viewport"]:not(:hover):not(:focus-within):not(
+    [data-scrollable~="end"]
+  )::-webkit-scrollbar-thumb,
+.chat-message-scroller[data-streaming]
+  [data-slot="message-scroller-viewport"]:not(:hover):not(:focus-within):not(
+    [data-scrollable~="end"]
+  )::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
 .thinking-block__icon-swap {
   position: relative;
   display: inline-grid;
