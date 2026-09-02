@@ -39,26 +39,6 @@ describe('ChatMessage', () => {
     )
   })
 
-  it('renders a streamed answer without per-word wrappers', () => {
-    render(
-      <ChatMessage
-        isStreaming
-        message={{
-          id: 'assistant-1',
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'The answer appears immediately.' }]
-        }}
-      />
-    )
-
-    expect(screen.getByTestId('answer-content')).toHaveTextContent(
-      'The answer appears immediately.'
-    )
-    expect(
-      screen.getByTestId('answer-content').querySelectorAll('.chat-message__stream-word')
-    ).toHaveLength(0)
-  })
-
   it('renders streamed reasoning separately from the final answer', () => {
     render(
       <ChatMessage

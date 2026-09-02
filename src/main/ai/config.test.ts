@@ -8,10 +8,13 @@ const baseEnv = {
 }
 
 describe('readChatConfiguration', () => {
-  it('requires an explicit supported provider and only requires an API key for OpenAI', () => {
+  it('requires an explicit provider', () => {
     expect(() => readChatConfiguration({ isDevelopment: true, env: baseEnv })).toThrow(
       'MICO_AI_PROVIDER'
     )
+  })
+
+  it('allows LM Studio without an API key', () => {
     expect(
       readChatConfiguration({
         isDevelopment: true,
@@ -37,4 +40,16 @@ describe('readChatConfiguration', () => {
       modelId: 'local-model'
     })
   })
+
+  it.each(['openai-responses', 'anthropic-compatible'] as const)(
+    'requires an API key for %s',
+    (provider) => {
+      expect(() =>
+        readChatConfiguration({
+          isDevelopment: true,
+          env: { ...baseEnv, MICO_AI_PROVIDER: provider }
+        })
+      ).toThrow('MICO_AI_API_KEY')
+    }
+  )
 })

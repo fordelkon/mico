@@ -50,6 +50,8 @@ function toThink(selection: ThinkingSelection): boolean | string | undefined {
   // Ollama accepts false to disable thinking and uses max for its highest
   // supported level; the other shared preferences are passed through directly.
   if (selection === 'none') return false
+  if (selection === 'auto') return true
+  if (selection === 'default') return undefined
   return selection === 'xhigh' ? 'max' : selection
 }
 function createOllamaProvider(

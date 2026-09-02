@@ -35,6 +35,26 @@ describe('Ollama provider', () => {
       { type: 'text-delta', id: 'part', delta: 'Done.' },
       { type: 'text-end', id: 'part' }
     ])
+  })
+
+  it('enables thinking for the shared automatic selection', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('{"done":true}\n'))
+    const provider = createChatProvider(
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'qwen3' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+        thinkingEffort: 'auto',
+        signal: new AbortController().signal
+      })
+    )
+
     const body = await new Request('https://example.test', fetch.mock.calls[0]?.[1]).text()
     expect(JSON.parse(body)).toMatchObject({ think: true })
   })

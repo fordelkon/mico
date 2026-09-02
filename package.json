@@ -11,7 +11,7 @@
   "scripts": {
     "format": "biome format --write && biome lint --write",
     "format:check": "biome format && biome lint",
-    "test": "vitest run && pnpm --filter @mico/ui test",
+    "test": "vitest run && pnpm --filter @mico/ui test && pnpm --filter @mico/ai-providers test",
     "lint": "oxlint --fix && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --cache && pnpm format",
     "test:lint": "oxlint --deny-warnings && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --cache",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
