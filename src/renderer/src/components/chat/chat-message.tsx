@@ -80,12 +80,7 @@ function ChatMessage({
               ))
             : isStreaming &&
               !text && (
-                <ThinkingBlock
-                  id={message.id}
-                  isStreaming
-                  orbState={thinkingOrbState}
-                  text=""
-                />
+                <ThinkingBlock id={message.id} isStreaming orbState={thinkingOrbState} text="" />
               ))}
         <Bubble
           align={isUser ? 'end' : 'start'}

@@ -48,9 +48,7 @@ function ThinkingBlock({
 
       panel.scrollTo({
         top: panel.scrollHeight,
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-          ? 'auto'
-          : 'smooth'
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
       })
     })
 

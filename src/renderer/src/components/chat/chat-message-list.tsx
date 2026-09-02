@@ -19,6 +19,16 @@ function getRandomThinkingOrbState(): ThinkingOrbState {
   return thinkingOrbStates[Math.floor(Math.random() * thinkingOrbStates.length)]
 }
 
+function ThinkingOrbStateScope({
+  children
+}: {
+  children: (thinkingOrbState: ThinkingOrbState) => React.ReactNode
+}): React.JSX.Element {
+  const [thinkingOrbState] = React.useState(getRandomThinkingOrbState)
+
+  return <>{children(thinkingOrbState)}</>
+}
+
 type ChatMessageListProps = {
   conversationId: string
   errorMessage?: string
@@ -37,7 +47,6 @@ function ChatMessageList({
   retry
 }: ChatMessageListProps): React.JSX.Element {
   const [now, setNow] = React.useState(() => Date.now())
-  const [thinkingOrbState, setThinkingOrbState] = React.useState(getRandomThinkingOrbState)
 
   React.useEffect(() => {
     if (!retry) return
@@ -45,10 +54,6 @@ function ChatMessageList({
     const intervalId = window.setInterval(() => setNow(Date.now()), 250)
     return () => window.clearInterval(intervalId)
   }, [retry])
-
-  React.useEffect(() => {
-    if (!isResponding) setThinkingOrbState(getRandomThinkingOrbState())
-  }, [isResponding])
 
   const remainingSeconds = retry
     ? Math.max(0, Math.ceil((retry.startedAt + retry.retryDelayMs - now) / 1_000))
@@ -66,32 +71,38 @@ function ChatMessageList({
             aria-busy={isResponding}
             className="mx-auto w-full max-w-[46rem] gap-8 px-5 pb-10 pt-12 sm:px-8"
           >
-            {messages.map((message) => (
-              <MessageScrollerItem
-                key={message.id}
-                messageId={message.id}
-                scrollAnchor={message.role === 'user'}
-              >
-                <ChatMessage
-                  message={message}
-                  isStreaming={
-                    isResponding &&
-                    message.role === 'assistant' &&
-                    message.id === messages.at(-1)?.id
-                  }
-                  thinkingOrbState={thinkingOrbState}
-                />
-              </MessageScrollerItem>
-            ))}
-            {showPendingThinking && (
-              <MessageScrollerItem messageId="pending-assistant">
-                <ChatMessage
-                  isStreaming
-                  message={{ id: 'pending-assistant', role: 'assistant', parts: [] }}
-                  thinkingOrbState={thinkingOrbState}
-                />
-              </MessageScrollerItem>
-            )}
+            <ThinkingOrbStateScope key={isResponding ? 'responding' : 'idle'}>
+              {(thinkingOrbState) => (
+                <>
+                  {messages.map((message) => (
+                    <MessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                      scrollAnchor={message.role === 'user'}
+                    >
+                      <ChatMessage
+                        message={message}
+                        isStreaming={
+                          isResponding &&
+                          message.role === 'assistant' &&
+                          message.id === messages.at(-1)?.id
+                        }
+                        thinkingOrbState={thinkingOrbState}
+                      />
+                    </MessageScrollerItem>
+                  ))}
+                  {showPendingThinking && (
+                    <MessageScrollerItem messageId="pending-assistant">
+                      <ChatMessage
+                        isStreaming
+                        message={{ id: 'pending-assistant', role: 'assistant', parts: [] }}
+                        thinkingOrbState={thinkingOrbState}
+                      />
+                    </MessageScrollerItem>
+                  )}
+                </>
+              )}
+            </ThinkingOrbStateScope>
             {errorMessage && (
               <div
                 className="flex items-center justify-between gap-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
