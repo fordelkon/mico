@@ -2,10 +2,13 @@ import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'e
 
 import { ChatRequestIdSchema, ChatStartRequestSchema } from '@shared/data/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
+import { ModelEntryIdSchema, ProviderConfigurationSchema } from '@shared/data/schemas/provider'
 import { IpcChannel } from '@shared/IpcChannel'
+import { AddModelRequestSchema, ImportModelRequestSchema } from '@shared/ipc/schemas/providers'
 import type { ChatService } from './ai/chat-service'
 import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
+import type { ProviderService } from './services/provider-service'
 
 type IpcMainRegistrar = Pick<IpcMain, 'handle'>
 type IpcDependencies = {
@@ -30,10 +33,20 @@ interface IpcServices {
     PreferenceService,
     'getAppearancePreference' | 'getResolvedAppearance' | 'setAppearancePreference'
   >
+  provider: Pick<
+    ProviderService,
+    | 'addModel'
+    | 'discoverModels'
+    | 'getLibrary'
+    | 'importModel'
+    | 'removeModel'
+    | 'saveConfiguration'
+    | 'selectModel'
+  >
 }
 
 function registerIpc(
-  { chat, mainWindow, preference }: IpcServices,
+  { chat, mainWindow, preference, provider }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
     ipcMain
@@ -123,6 +136,53 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid chat request')
 
     chat.abort({ ownerId: String(event.sender.id), requestId: result.data })
+  })
+
+  dependencies.ipcMain.handle(IpcChannel.Providers_GetLibrary, (event) => {
+    getCallingWindow(event)
+    return provider.getLibrary()
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SaveConfiguration, (event, input) => {
+    getCallingWindow(event)
+    const result = ProviderConfigurationSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider configuration')
+
+    return provider.saveConfiguration(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_DiscoverModels, (event, input) => {
+    getCallingWindow(event)
+    const result = ProviderConfigurationSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider configuration')
+
+    return provider.discoverModels(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_ImportModel, (event, input) => {
+    getCallingWindow(event)
+    const result = ImportModelRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model')
+
+    return provider.importModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_AddModel, (event, input) => {
+    getCallingWindow(event)
+    const result = AddModelRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model')
+
+    return provider.addModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_RemoveModel, (event, input) => {
+    getCallingWindow(event)
+    const result = ModelEntryIdSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model ID')
+
+    return provider.removeModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SelectModel, (event, input) => {
+    getCallingWindow(event)
+    const result = ModelEntryIdSchema.nullable().safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model ID')
+
+    return provider.selectModel(result.data)
   })
 }
 

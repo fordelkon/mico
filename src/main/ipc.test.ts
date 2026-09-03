@@ -30,9 +30,18 @@ function createHarness() {
     getResolvedAppearance: vi.fn(),
     setAppearancePreference: vi.fn()
   }
+  const provider = {
+    addModel: vi.fn(),
+    discoverModels: vi.fn(),
+    getLibrary: vi.fn(),
+    importModel: vi.fn(),
+    removeModel: vi.fn(),
+    saveConfiguration: vi.fn(),
+    selectModel: vi.fn()
+  }
 
   registerIpc(
-    { mainWindow, preference, chat },
+    { mainWindow, preference, chat, provider },
     {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
@@ -40,7 +49,7 @@ function createHarness() {
     }
   )
 
-  return { chat, handlers, mainWindow }
+  return { chat, handlers, mainWindow, provider }
 }
 
 function createEvent({
@@ -148,5 +157,38 @@ describe('registerIpc chat handlers', () => {
 
     expect(chat.abortAll).toHaveBeenCalledWith('42')
     expect(chat.abortAll).not.toHaveBeenCalledWith('43')
+  })
+})
+
+describe('registerIpc provider handlers', () => {
+  it('rejects an untrusted sender before provider discovery', async () => {
+    const { handlers, mainWindow, provider } = createHarness()
+    const { event } = createEvent({ id: 42, trusted: false })
+    mainWindow.isTrustedRendererUrl.mockReturnValue(false)
+
+    expect(() =>
+      handlers.get(IpcChannel.Providers_DiscoverModels)?.(event, {
+        provider: 'ollama',
+        baseUrl: 'http://localhost:11434'
+      })
+    ).toThrow('Untrusted')
+    expect(provider.discoverModels).not.toHaveBeenCalled()
+  })
+
+  it('validates and delegates a trusted configuration save', async () => {
+    const { handlers, provider } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const configuration = { provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }
+    const library = { configurations: [configuration], models: [], selectedModelId: null }
+    provider.saveConfiguration.mockImplementation(async (input) => {
+      if (JSON.stringify(input) !== JSON.stringify(configuration)) {
+        throw new Error('Provider configuration was not forwarded.')
+      }
+      return library
+    })
+
+    await expect(
+      handlers.get(IpcChannel.Providers_SaveConfiguration)?.(event, configuration)
+    ).resolves.toEqual(library)
   })
 })

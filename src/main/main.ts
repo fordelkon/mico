@@ -8,9 +8,11 @@ import { createChatProvider } from '@mico/ai-providers'
 import { registerIpc } from './ipc'
 import { MainWindowService } from './services/main-window-service'
 import { PreferenceService } from './services/preference-service'
+import { ProviderService } from './services/provider-service'
 import { TrayService } from './services/tray-service'
 
 const preferenceService = new PreferenceService()
+const providerService = new ProviderService()
 let trayService: TrayService
 let chatService: ChatService | undefined
 const mainWindowService = new MainWindowService(() => trayService.shouldKeepWindowOpen())
@@ -28,11 +30,17 @@ void app.whenReady().then(async () => {
   })
 
   await preferenceService.initialize()
+  await providerService.initialize()
   const chatConfiguration = readChatConfiguration({ isDevelopment: is.dev, env: process.env })
   chatService = new ChatService(createChatProvider(chatConfiguration))
   mainWindowService.initialize()
   trayService.initialize()
-  registerIpc({ chat: chatService, mainWindow: mainWindowService, preference: preferenceService })
+  registerIpc({
+    chat: chatService,
+    mainWindow: mainWindowService,
+    preference: preferenceService,
+    provider: providerService
+  })
 
   app.on('activate', () => {
     mainWindowService.show()
