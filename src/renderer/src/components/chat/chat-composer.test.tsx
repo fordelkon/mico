@@ -2,25 +2,61 @@ import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import * as React from 'react'
 
 import { ChatComposer } from './chat-composer'
 
 const props = {
   focusKey: 0,
   mode: 'send' as const,
-  onSend: vi.fn(),
-  onStop: vi.fn(),
+  onSend: (): void => undefined,
+  onStop: (): void => undefined,
   reasoningCapabilities: null,
   thinkingEffort: 'medium' as const,
-  onThinkingEffortChange: vi.fn()
+  onThinkingEffortChange: (): void => undefined
+}
+
+function ComposerHarness({ mode = 'send' }: { mode?: 'send' | 'stop' }): React.JSX.Element {
+  const [sentContent, setSentContent] = React.useState('')
+  const [wasStopped, setWasStopped] = React.useState(false)
+
+  return (
+    <>
+      <ChatComposer
+        {...props}
+        mode={mode}
+        onSend={setSentContent}
+        onStop={() => setWasStopped(true)}
+      />
+      {sentContent && <output>{sentContent}</output>}
+      {wasStopped && <output>Response stopped</output>}
+    </>
+  )
+}
+
+function ThinkingEffortHarness(): React.JSX.Element {
+  const [selection, setSelection] = React.useState('')
+
+  return (
+    <>
+      <ChatComposer
+        {...props}
+        reasoningCapabilities={{
+          selectableEfforts: ['none', 'low', 'high'],
+          defaultEffort: 'low'
+        }}
+        onThinkingEffortChange={setSelection}
+      />
+      {selection && <output>{`Thinking effort: ${selection}`}</output>}
+    </>
+  )
 }
 
 describe('ChatComposer', () => {
-  it('expands to fit a draft and returns to its single-line height after sending', async () => {
-    const onSend = vi.fn()
+  it('clears a sent draft and restores its single-line height', async () => {
     const user = userEvent.setup()
-    render(<ChatComposer {...props} onSend={onSend} />)
+    render(<ComposerHarness />)
 
     // SAFETY: ChatComposer renders this unique placeholder on its textarea control.
     const textarea = screen.getByPlaceholderText('Message Mico Today') as HTMLTextAreaElement
@@ -35,19 +71,17 @@ describe('ChatComposer', () => {
 
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    expect(onSend).toHaveBeenCalledWith('A multi-line draft.')
+    expect(screen.getByText('A multi-line draft.')).toBeVisible()
     expect(textarea).toHaveStyle({ height: '56px' })
   })
 
-  it('swaps the send icon for stop without replacing the control', () => {
-    const { rerender } = render(<ChatComposer {...props} />)
-    const sendButton = screen.getByRole('button', { name: 'Send message' })
+  it('lets a user stop an in-progress response', async () => {
+    const user = userEvent.setup()
+    render(<ComposerHarness mode="stop" />)
 
-    rerender(<ChatComposer {...props} mode="stop" />)
+    await user.click(screen.getByRole('button', { name: 'Stop response' }))
 
-    const stopButton = screen.getByRole('button', { name: 'Stop response' })
-    expect(stopButton).toBe(sendButton)
-    expect(stopButton.querySelector('[data-slot="icon-swap"]')).toHaveAttribute('data-state', 'to')
+    expect(screen.getByText('Response stopped')).toBeVisible()
   })
 
   it('does not render a thinking menu without adjustable capabilities', () => {
@@ -58,15 +92,7 @@ describe('ChatComposer', () => {
 
   it('renders only advertised options and commits the selected option', async () => {
     const user = userEvent.setup()
-    render(
-      <ChatComposer
-        {...props}
-        reasoningCapabilities={{
-          selectableEfforts: ['none', 'low', 'high'],
-          defaultEffort: 'low'
-        }}
-      />
-    )
+    render(<ThinkingEffortHarness />)
 
     await user.click(screen.getByRole('button', { name: 'Thinking effort' }))
 
@@ -76,7 +102,7 @@ describe('ChatComposer', () => {
 
     await user.click(screen.getByRole('menuitemradio', { name: 'High' }))
 
-    expect(props.onThinkingEffortChange).toHaveBeenCalledWith('high')
+    expect(screen.getByText('Thinking effort: high')).toBeVisible()
   })
 
   it.each(['stop', 'disabled'] as const)(

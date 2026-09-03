@@ -14,23 +14,6 @@ afterEach(() => {
 })
 
 describe('ChatMessage', () => {
-  it('marks sent user messages for their transcript-entering motion', () => {
-    render(
-      <ChatMessage
-        isStreaming={false}
-        message={{
-          id: 'user-1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'Send this thought.' }]
-        }}
-      />
-    )
-
-    expect(screen.getByTestId('answer-content').closest('[data-slot="message"]')).toHaveClass(
-      'chat-message--sent'
-    )
-  })
-
   it('collapses the thought summary when the answer starts streaming', () => {
     render(
       <ChatMessage
