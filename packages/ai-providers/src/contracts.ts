@@ -77,6 +77,16 @@ type ChatProviderConfiguration =
       modelId: string
     }
 
+type LocalProviderId = 'lm-studio' | 'ollama'
+type DiscoverableProviderId = ChatProviderConfiguration['provider']
+type DiscoveredModel = { modelId: string; displayName: string }
+type ModelDiscoveryInput = {
+  provider: DiscoverableProviderId
+  baseUrl: string
+  apiKey?: string
+}
+type ModelDiscoveryDependencies = { fetch?: typeof fetch }
+
 type ChatProviderDependencies = {
   fetch: typeof fetch
   createId: () => string
@@ -91,6 +101,11 @@ export type {
   ChatProviderReasoningPart,
   ChatProviderTextPart,
   ChatProviderStreamInput,
+  DiscoveredModel,
+  DiscoverableProviderId,
+  LocalProviderId,
+  ModelDiscoveryDependencies,
+  ModelDiscoveryInput,
   ModelReasoningCapabilities,
   ThinkingSelection
 }
