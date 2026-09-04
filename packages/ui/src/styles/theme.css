@@ -1,6 +1,5 @@
 @import "shadcn/tailwind.css";
 @import "tw-animate-css";
-@import "@fontsource-variable/outfit/wght.css";
 @import "@fontsource/noto-sans-sc/400.css";
 @import "@fontsource/noto-serif-sc/400.css";
 @import "@fontsource-variable/jetbrains-mono/wght.css";
@@ -24,7 +23,8 @@
   --danger: #7f2c28;
   --danger-surface: #f7ecec;
   --danger-border: #a73d39;
-  --font-family-sans: "Outfit Variable", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-family-sans:
+    "Segoe UI Variable", "Segoe UI", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   --font-family-serif:
     "Noto Serif SC", "Songti SC", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
   --font-family-mono: "JetBrains Mono Variable", ui-monospace, monospace;
