@@ -6,6 +6,7 @@ import type {
   ChatProviderConfiguration,
   ChatProviderDependencies,
   ChatProviderMessage,
+  ProviderPerformanceMetrics,
   ThinkingSelection
 } from '../contracts'
 import { parseNdjson } from '../streaming/ndjson'
@@ -24,6 +25,8 @@ type OllamaRequest = {
 const ChunkSchema = z.object({
   message: z.object({ content: z.string().optional(), thinking: z.string().optional() }).optional(),
   done: z.boolean().optional(),
+  eval_count: z.number().nonnegative().optional(),
+  eval_duration: z.number().positive().optional(),
   error: z.string().optional()
 })
 function getUrl(baseUrl: string): string {
@@ -62,7 +65,7 @@ function createOllamaProvider(
     // Ollama does not expose per-model reasoning capabilities, so it follows the
     // same stable, optimistic five-level UI contract as compatible endpoints.
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal }) => {
+    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
       const think = toThink(thinkingEffort)
       const body: OllamaRequest = {
         model: configuration.modelId,
@@ -94,7 +97,18 @@ function createOllamaProvider(
             yield* reasoning.finish()
             yield* text.emitDelta(parsed.data.message.content)
           }
-          if (parsed.data.done) break
+          if (parsed.data.done) {
+            if (parsed.data.eval_count !== undefined) {
+              const metrics: ProviderPerformanceMetrics = {
+                outputTokens: parsed.data.eval_count
+              }
+              if (parsed.data.eval_duration !== undefined)
+                metrics.tokensPerSecond =
+                  (parsed.data.eval_count * 1_000_000_000) / parsed.data.eval_duration
+              onPerformanceMetrics?.(metrics)
+            }
+            break
+          }
         }
         yield* reasoning.finish()
         yield* text.finish()

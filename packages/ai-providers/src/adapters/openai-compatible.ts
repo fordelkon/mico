@@ -18,6 +18,12 @@ type OpenAICompatibleConfiguration = Extract<
   { provider: 'openai-compatible' }
 >
 type OpenAICompatibleHeaders = { 'content-type': string; authorization?: string }
+type OpenAICompatibleRequest = {
+  model: string
+  messages: ReturnType<typeof toMessages>
+  stream: true
+  stream_options?: { include_usage: true }
+}
 const EventSchema = z.object({
   choices: z
     .array(
@@ -32,6 +38,11 @@ const EventSchema = z.object({
           .optional()
       })
     )
+    .optional(),
+  usage: z
+    .object({
+      completion_tokens: z.number().nonnegative().optional()
+    })
     .optional(),
   error: z.object({ message: z.string().optional() }).optional()
 })
@@ -63,14 +74,21 @@ function createOpenAICompatibleProvider(
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal }) => {
+    stream: async ({
+      collectPerformanceMetrics,
+      messages,
+      thinkingEffort,
+      signal,
+      onPerformanceMetrics
+    }) => {
       const headers: OpenAICompatibleHeaders = { 'content-type': 'application/json' }
       if (configuration.apiKey) headers.authorization = `Bearer ${configuration.apiKey}`
-      const request = {
+      const request: OpenAICompatibleRequest = {
         model: configuration.modelId,
         messages: toMessages(messages),
         stream: true
       }
+      if (collectPerformanceMetrics) request.stream_options = { include_usage: true }
       const response = await fetchWithThinkingFallback(thinkingEffort, (includeThinking) =>
         dependencies.fetch(getUrl(configuration.baseUrl), {
           method: 'POST',
@@ -100,6 +118,8 @@ function createOpenAICompatibleProvider(
               'The OpenAI-compatible streaming response contained invalid event data.'
             )
           if (parsed.data.error?.message) throw new Error(parsed.data.error.message)
+          if (parsed.data.usage?.completion_tokens !== undefined)
+            onPerformanceMetrics?.({ outputTokens: parsed.data.usage.completion_tokens })
           const delta = parsed.data.choices?.[0]?.delta
           const nativeReasoning =
             delta?.reasoning_content ?? delta?.reasoning ?? delta?.reasoning_text

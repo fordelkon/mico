@@ -7,6 +7,7 @@ import type {
   ChatProviderDependencies,
   ChatProviderMessage,
   ModelReasoningCapabilities,
+  ProviderPerformanceMetrics,
   ThinkingSelection
 } from '../contracts'
 import { normalizeCapabilities, resolveThinkingSelection } from '../reasoning'
@@ -49,7 +50,19 @@ const LMStudioEventSchema = z.object({
   content: z.string().optional(),
   delta: z.string().optional(),
   message: z.string().optional(),
-  response_id: z.string().optional()
+  response_id: z.string().optional(),
+  result: z
+    .object({
+      response_id: z.string().optional(),
+      stats: z
+        .object({
+          time_to_first_token_seconds: z.number().nonnegative().optional(),
+          tokens_per_second: z.number().nonnegative().optional(),
+          total_output_tokens: z.number().nonnegative().optional()
+        })
+        .optional()
+    })
+    .optional()
 })
 const LMStudioResponseMetadataSchema = z.object({ responseId: z.string() })
 type LMStudioEvent = z.infer<typeof LMStudioEventSchema>
@@ -147,7 +160,7 @@ function createLMStudioProvider(
   }
   return {
     getModelCapabilities,
-    stream: async ({ messages, thinkingEffort, signal }) => {
+    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
       const currentUserMessage = [...messages].reverse().find((message) => message.role === 'user')
       if (!currentUserMessage) throw new Error('LM Studio requires a user message.')
       const previousResponse = LMStudioResponseMetadataSchema.safeParse(
@@ -200,13 +213,25 @@ function createLMStudioProvider(
           if (event.event === 'error')
             throw new Error(data.message ?? 'LM Studio returned an error.')
           if (event.event === 'chat.end') {
-            if (data.response_id)
+            const responseId = data.result?.response_id ?? data.response_id
+            if (responseId)
               yield {
                 type: 'message-metadata',
                 messageMetadata: {
-                  providerMetadata: { lmStudio: { responseId: data.response_id } }
+                  providerMetadata: { lmStudio: { responseId } }
                 }
               }
+            const stats = data.result?.stats
+            if (stats?.total_output_tokens !== undefined) {
+              const metrics: ProviderPerformanceMetrics = {
+                outputTokens: stats.total_output_tokens
+              }
+              if (stats.time_to_first_token_seconds !== undefined)
+                metrics.timeToFirstTokenMs = stats.time_to_first_token_seconds * 1_000
+              if (stats.tokens_per_second !== undefined)
+                metrics.tokensPerSecond = stats.tokens_per_second
+              onPerformanceMetrics?.(metrics)
+            }
             yield* reasoning.finish()
             yield* text.finish()
             return

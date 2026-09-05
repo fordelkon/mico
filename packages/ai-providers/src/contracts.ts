@@ -34,10 +34,22 @@ type ChatProviderMessage = {
 }
 
 type ChatProviderStreamInput = {
+  collectPerformanceMetrics?: boolean
   conversationKey: string
   messages: ChatProviderMessage[]
   thinkingEffort: ThinkingSelection
   signal: AbortSignal
+  onPerformanceMetrics?: (metrics: ProviderPerformanceMetrics) => void
+}
+
+type ProviderPerformanceMetrics = {
+  outputTokens?: number
+  timeToFirstTokenMs?: number
+  tokensPerSecond?: number
+}
+
+type ProviderTestResult = ProviderPerformanceMetrics & {
+  durationMs: number
 }
 
 type ChatProvider = {
@@ -107,5 +119,7 @@ export type {
   ModelDiscoveryDependencies,
   ModelDiscoveryInput,
   ModelReasoningCapabilities,
+  ProviderPerformanceMetrics,
+  ProviderTestResult,
   ThinkingSelection
 }

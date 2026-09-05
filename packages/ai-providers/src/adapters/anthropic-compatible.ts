@@ -59,6 +59,7 @@ const EventSchema = z.object({
       signature: z.string().optional()
     })
     .optional(),
+  usage: z.object({ output_tokens: z.number().nonnegative().optional() }).optional(),
   error: z.object({ message: z.string().optional() }).optional()
 })
 const SignatureSchema = z.object({ signature: z.string() })
@@ -112,7 +113,7 @@ function createAnthropicCompatibleProvider(
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal }) => {
+    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
       const system = messages
         .filter((message) => message.role === 'system')
         .flatMap((message) =>
@@ -176,6 +177,8 @@ function createAnthropicCompatibleProvider(
               'The Anthropic-compatible streaming response contained invalid event data.'
             )
           if (parsed.data.error?.message) throw new Error(parsed.data.error.message)
+          if (parsed.data.usage?.output_tokens !== undefined)
+            onPerformanceMetrics?.({ outputTokens: parsed.data.usage.output_tokens })
           const index = parsed.data.index ?? 0
           if (
             event.event === 'content_block_start' &&

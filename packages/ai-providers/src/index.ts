@@ -5,6 +5,7 @@ import { createOpenAICompatibleProvider } from './adapters/openai-compatible'
 import { createAnthropicCompatibleProvider } from './adapters/anthropic-compatible'
 import { createOllamaProvider } from './adapters/ollama'
 import { discoverModels } from './discovery'
+import { testChatProvider } from './testing'
 
 const defaultDependencies: ChatProviderDependencies = {
   fetch,
@@ -29,7 +30,7 @@ function createChatProvider(
   }
 }
 
-export { createChatProvider, discoverModels }
+export { createChatProvider, discoverModels, testChatProvider }
 export type {
   ChatProvider,
   ChatProviderConfiguration,
@@ -42,5 +43,8 @@ export type {
   ModelDiscoveryDependencies,
   ModelDiscoveryInput,
   ModelReasoningCapabilities,
+  ProviderPerformanceMetrics,
+  ProviderTestResult,
   ThinkingSelection
 } from './contracts'
+export type { ProviderTestDependencies } from './testing'
