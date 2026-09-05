@@ -6,12 +6,15 @@ import {
   CustomProviderSchema,
   CustomProviderIdSchema,
   ModelEntryIdSchema,
-  ProviderConfigurationSchema
+  ProviderConfigurationSchema,
+  ProviderLibrarySchema
 } from '@shared/data/schemas/provider'
 import { IpcChannel } from '@shared/IpcChannel'
 import {
   AddModelRequestSchema,
   ImportModelRequestSchema,
+  SetModelEnabledRequestSchema,
+  SyncModelsRequestSchema,
   TestModelRequestSchema
 } from '@shared/ipc/schemas/providers'
 import type { ChatService } from './ai/chat-service'
@@ -50,9 +53,12 @@ interface IpcServices {
     | 'discoverModels'
     | 'getLibrary'
     | 'importModel'
+    | 'setModelEnabled'
+    | 'syncModels'
     | 'removeModel'
     | 'removeCustomProvider'
     | 'saveConfiguration'
+    | 'saveLibrary'
     | 'selectModel'
     | 'testModel'
   >
@@ -183,6 +189,13 @@ function registerIpc(
 
     return provider.saveConfiguration(result.data)
   })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SaveLibrary, (event, input) => {
+    getCallingWindow(event)
+    const result = ProviderLibrarySchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider library')
+
+    return provider.saveLibrary(result.data)
+  })
   dependencies.ipcMain.handle(IpcChannel.Providers_DiscoverModels, (event, input) => {
     getCallingWindow(event)
     const result = ProviderConfigurationSchema.safeParse(input)
@@ -196,6 +209,20 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid provider model')
 
     return provider.importModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SetModelEnabled, (event, input) => {
+    getCallingWindow(event)
+    const result = SetModelEnabledRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model')
+
+    return provider.setModelEnabled(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SyncModels, (event, input) => {
+    getCallingWindow(event)
+    const result = SyncModelsRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider models')
+
+    return provider.syncModels(result.data)
   })
   dependencies.ipcMain.handle(IpcChannel.Providers_AddModel, (event, input) => {
     getCallingWindow(event)

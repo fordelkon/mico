@@ -6,8 +6,8 @@ import {
   ModelDisplayNameSchema,
   ModelEntryIdSchema,
   ProviderConfigurationSchema,
-  ProviderIdSchema,
   ProviderLibrarySchema,
+  ModelProviderSchema,
   ProviderModelIdSchema
 } from '../../data/schemas/provider'
 import type {
@@ -23,14 +23,22 @@ const DiscoveredModelSchema = z.object({
   displayName: ModelDisplayNameSchema
 })
 const ImportModelRequestSchema = z.object({
-  provider: ProviderIdSchema,
+  provider: ModelProviderSchema,
   modelId: ProviderModelIdSchema,
   displayName: ModelDisplayNameSchema
 })
 const AddModelRequestSchema = z.object({
-  provider: ProviderIdSchema,
+  provider: ModelProviderSchema,
   modelId: ProviderModelIdSchema,
   displayName: ModelDisplayNameSchema.optional()
+})
+const SyncModelsRequestSchema = z.object({
+  provider: ModelProviderSchema,
+  models: z.array(DiscoveredModelSchema)
+})
+const SetModelEnabledRequestSchema = z.object({
+  modelId: ModelEntryIdSchema,
+  enabled: z.boolean()
 })
 const TestModelRequestSchema = z.object({
   configuration: ProviderConfigurationSchema,
@@ -44,10 +52,13 @@ interface ProvidersAPI {
   updateCustomProvider: (provider: UpdateCustomProviderRequest) => Promise<ProviderLibrary>
   removeCustomProvider: (providerId: string) => Promise<ProviderLibrary>
   getLibrary: () => Promise<ProviderLibrary>
+  saveLibrary: (library: ProviderLibrary) => Promise<ProviderLibrary>
   saveConfiguration: (configuration: ProviderConfiguration) => Promise<ProviderLibrary>
   discoverModels: (configuration: ProviderConfiguration) => Promise<DiscoveredModel[]>
   importModel: (model: ImportModelRequest) => Promise<ProviderLibrary>
   addModel: (model: AddModelRequest) => Promise<ProviderLibrary>
+  setModelEnabled: (model: SetModelEnabledRequest) => Promise<ProviderLibrary>
+  syncModels: (models: SyncModelsRequest) => Promise<ProviderLibrary>
   testModel: (model: TestModelRequest) => Promise<void>
   removeModel: (modelId: string) => Promise<ProviderLibrary>
   selectModel: (modelId: string | null) => Promise<ProviderLibrary>
@@ -79,12 +90,24 @@ const providersRequestSchemas = {
     input: ImportModelRequestSchema,
     output: ProviderLibrarySchema
   }),
+  'providers.set-model-enabled': defineRoute({
+    input: SetModelEnabledRequestSchema,
+    output: ProviderLibrarySchema
+  }),
+  'providers.sync-models': defineRoute({
+    input: SyncModelsRequestSchema,
+    output: ProviderLibrarySchema
+  }),
   'providers.remove-model': defineRoute({
     input: ModelEntryIdSchema,
     output: ProviderLibrarySchema
   }),
   'providers.save-configuration': defineRoute({
     input: ProviderConfigurationSchema,
+    output: ProviderLibrarySchema
+  }),
+  'providers.save-library': defineRoute({
+    input: ProviderLibrarySchema,
     output: ProviderLibrarySchema
   }),
   'providers.select-model': defineRoute({
@@ -98,6 +121,8 @@ type AddModelRequest = z.infer<typeof AddModelRequestSchema>
 type AddCustomProviderRequest = z.infer<typeof AddCustomProviderRequestSchema>
 type DiscoveredModel = z.infer<typeof DiscoveredModelSchema>
 type ImportModelRequest = z.infer<typeof ImportModelRequestSchema>
+type SetModelEnabledRequest = z.infer<typeof SetModelEnabledRequestSchema>
+type SyncModelsRequest = z.infer<typeof SyncModelsRequestSchema>
 type TestModelRequest = z.infer<typeof TestModelRequestSchema>
 type UpdateCustomProviderRequest = z.infer<typeof UpdateCustomProviderRequestSchema>
 
@@ -107,6 +132,8 @@ export {
   UpdateCustomProviderRequestSchema,
   DiscoveredModelSchema,
   ImportModelRequestSchema,
+  SetModelEnabledRequestSchema,
+  SyncModelsRequestSchema,
   TestModelRequestSchema,
   providersRequestSchemas,
   type ProvidersAPI
@@ -117,6 +144,8 @@ export type {
   UpdateCustomProviderRequest,
   DiscoveredModel,
   ImportModelRequest,
+  SetModelEnabledRequest,
+  SyncModelsRequest,
   TestModelRequest,
   ModelEntry,
   ProviderConfiguration,

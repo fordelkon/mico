@@ -11,6 +11,7 @@ import { customProviderLogoSources } from './custom-provider-logo-icons'
 import lmStudioIcon from '@renderer/assets/providers/lmstudio.svg'
 import ollamaDarkIcon from '@renderer/assets/providers/ollama-dark.svg'
 import ollamaLightIcon from '@renderer/assets/providers/ollama-light.svg'
+import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
 
 type ProviderId = string
 
@@ -25,6 +26,8 @@ const providerDescriptors: ProviderDescriptor[] = [
   { id: 'lm-studio', label: 'LM Studio', icon: lmStudioIcon },
   { id: 'ollama', label: 'Ollama', icon: ollamaLightIcon }
 ]
+
+const builtInProviderIds = providerDescriptors.map(({ id }) => id)
 
 const customProviderLogoSourcesById = new Map<string, string>(
   customProviderLogoSources.map(({ id, source }) => [id, source])
@@ -71,26 +74,18 @@ function ProvidersSidebar({
   const [query, setQuery] = React.useState('')
   const railRef = React.useRef<HTMLElement>(null)
   const searchInputRef = React.useRef<HTMLInputElement>(null)
-  const visibleProviders = [
-    ...providerDescriptors,
-    ...customProviders.map<ProviderDescriptor>(({ icon, id, name }) => ({
-      customIcon: icon,
-      id,
-      label: name
-    }))
-  ]
-    .filter(({ label }) => label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-    .sort((left, right) => {
-      const leftEnabledIndex = enabledProviderIds.indexOf(left.id)
-      const rightEnabledIndex = enabledProviderIds.indexOf(right.id)
-
-      if (leftEnabledIndex >= 0 && rightEnabledIndex >= 0) {
-        return leftEnabledIndex - rightEnabledIndex
-      }
-      if (leftEnabledIndex >= 0) return -1
-      if (rightEnabledIndex >= 0) return 1
-      return 0
-    })
+  const visibleProviders = sortByEnabledOrder(
+    [
+      ...providerDescriptors,
+      ...customProviders.map<ProviderDescriptor>(({ icon, id, name }) => ({
+        customIcon: icon,
+        id,
+        label: name
+      }))
+    ].filter(({ label }) => label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())),
+    enabledProviderIds,
+    ({ id }) => id
+  )
 
   const collapse = (): void => {
     setIsExpanded(false)
@@ -256,5 +251,5 @@ function ProvidersSidebar({
   )
 }
 
-export { ProvidersSidebar }
+export { ProvidersSidebar, builtInProviderIds }
 export type { ProviderId }

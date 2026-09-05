@@ -15,21 +15,38 @@ function renderSettings(): void {
   )
 }
 
+async function waitForOllama(): Promise<void> {
+  await screen.findByRole('heading', { level: 2, name: 'Ollama' })
+}
+
 const providerApi = {
   addCustomProvider: vi.fn(),
   discoverModels: vi.fn(),
   getLibrary: vi.fn(),
+  importModel: vi.fn(),
   removeCustomProvider: vi.fn(),
+  removeModel: vi.fn(),
+  saveConfiguration: vi.fn(),
+  saveLibrary: vi.fn(),
+  setModelEnabled: vi.fn(),
+  syncModels: vi.fn(),
   testModel: vi.fn(),
   updateCustomProvider: vi.fn()
 }
 
 beforeEach(() => {
+  let persistedModels: Array<{
+    displayName: string
+    enabled: boolean
+    id: string
+    modelId: string
+    provider: string
+  }> = []
   providerApi.addCustomProvider.mockReset()
   providerApi.addCustomProvider.mockResolvedValue({
     configurations: [
       { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-      { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
     ],
     customProviders: [
       {
@@ -49,7 +66,7 @@ beforeEach(() => {
   providerApi.getLibrary.mockResolvedValue({
     configurations: [
       { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-      { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
     ],
     customProviders: [],
     models: [],
@@ -76,7 +93,7 @@ beforeEach(() => {
     return {
       configurations: [
         { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
       ],
       customProviders: [provider],
       models: [],
@@ -85,15 +102,101 @@ beforeEach(() => {
   })
   providerApi.testModel.mockReset()
   providerApi.testModel.mockResolvedValue(undefined)
+  providerApi.saveLibrary.mockReset()
+  providerApi.saveLibrary.mockImplementation(async (library) => library)
+  providerApi.saveConfiguration.mockReset()
+  providerApi.saveConfiguration.mockImplementation(async (configuration) => ({
+    configurations: [{ provider: 'lm-studio', baseUrl: 'http://localhost:1234' }, configuration],
+    customProviders: [],
+    models: [],
+    selectedModelId: null
+  }))
+  providerApi.importModel.mockReset()
+  providerApi.importModel.mockImplementation(async (model) => ({
+    configurations: [
+      { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
+    ],
+    customProviders: [],
+    models: [{ id: 'saved-model', ...model }],
+    selectedModelId: null
+  }))
+  providerApi.removeModel.mockReset()
+  providerApi.removeModel.mockResolvedValue({
+    configurations: [],
+    customProviders: [],
+    models: [],
+    selectedModelId: null
+  })
+  providerApi.syncModels.mockReset()
+  providerApi.syncModels.mockImplementation(async ({ models, provider }) => {
+    persistedModels = models.map(({ displayName, modelId }) => {
+      const existing = persistedModels.find((model) => model.modelId === modelId)
+      return {
+        displayName,
+        enabled: existing?.enabled ?? false,
+        id: existing?.id ?? `${provider}:${modelId}`,
+        modelId,
+        provider
+      }
+    })
+    return {
+      configurations: [
+        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
+        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
+      ],
+      customProviders: [],
+      models: persistedModels,
+      selectedModelId: null
+    }
+  })
+  providerApi.setModelEnabled.mockReset()
+  providerApi.setModelEnabled.mockImplementation(async ({ enabled, modelId }) => {
+    persistedModels = persistedModels.map((model) =>
+      model.id === modelId ? { ...model, enabled } : model
+    )
+    return {
+      configurations: [
+        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
+        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
+      ],
+      customProviders: [],
+      models: persistedModels,
+      selectedModelId: null
+    }
+  })
   Object.defineProperty(window, 'api', { configurable: true, value: { providers: providerApi } })
 })
 
 describe('SettingsMain', () => {
+  it('does not render manual save controls', () => {
+    renderSettings()
+
+    expect(screen.queryByText('All changes saved')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
+  })
+
+  it('selects the first provider in sidebar order after loading the library', async () => {
+    providerApi.getLibrary.mockResolvedValueOnce({
+      configurations: [
+        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
+        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+      ],
+      customProviders: [],
+      models: [],
+      selectedModelId: null
+    })
+
+    renderSettings()
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
+  })
+
   it('loads persisted custom providers into the sidebar', async () => {
     providerApi.getLibrary.mockResolvedValue({
       configurations: [
         { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
       ],
       customProviders: [
         {
@@ -121,6 +224,7 @@ describe('SettingsMain', () => {
 
     renderSettings()
 
+    await waitForOllama()
     expect(screen.getByRole('button', { name: 'Ollama' })).toHaveAttribute('aria-current', 'page')
 
     await user.click(screen.getByRole('button', { name: 'LM Studio' }))
@@ -133,6 +237,7 @@ describe('SettingsMain', () => {
 
     renderSettings()
 
+    await waitForOllama()
     expect(screen.getByLabelText('Base URL')).toBeVisible()
     expect(screen.getByRole('searchbox', { name: 'Search Ollama models' })).toBeVisible()
 
@@ -141,12 +246,14 @@ describe('SettingsMain', () => {
     expect(screen.getByLabelText('Ollama fetched models')).toBeVisible()
   })
 
-  it('moves an enabled provider ahead of disabled providers in the rail', async () => {
+  it('places a newly enabled provider after previously enabled providers in the rail', async () => {
     const user = userEvent.setup()
 
     renderSettings()
 
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
+    await waitForOllama()
+    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
+    await user.click(screen.getByRole('switch', { name: 'Enable LM Studio' }))
 
     const providerButtons = screen
       .getAllByRole('button')
@@ -158,41 +265,12 @@ describe('SettingsMain', () => {
     ])
   })
 
-  it('keeps enabled providers in activation order and restores the base order after disabling', async () => {
-    const user = userEvent.setup()
-
-    renderSettings()
-
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable LM Studio' }))
-
-    const providerOrder = (): string[] =>
-      screen
-        .getAllByRole('button')
-        .filter((button) =>
-          ['LM Studio', 'Ollama'].includes(button.getAttribute('aria-label') ?? '')
-        )
-        .map((button) => button.getAttribute('aria-label') ?? '')
-
-    expect(providerOrder()).toEqual(['Ollama', 'LM Studio'])
-
-    await user.click(screen.getByRole('button', { name: 'Ollama' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
-
-    expect(providerOrder()).toEqual(['LM Studio', 'Ollama'])
-
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable LM Studio' }))
-
-    expect(providerOrder()).toEqual(['LM Studio', 'Ollama'])
-  })
-
   it('keeps provider configuration independent when switching providers', async () => {
     const user = userEvent.setup()
 
     renderSettings()
 
+    await waitForOllama()
     await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
     await user.click(screen.getByRole('button', { name: 'LM Studio' }))
 
@@ -210,13 +288,14 @@ describe('SettingsMain', () => {
     )
   })
 
-  it('keeps fetched models out of the chat library until the model is enabled', async () => {
+  it('allows testing a fetched disabled model', async () => {
     const user = userEvent.setup()
 
     renderSettings()
 
+    await waitForOllama()
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
+    await screen.findByText('granite4.2:3b')
     await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
 
     const modelOption = screen.getByRole('menuitem', { name: 'granite4.2:3b' })
@@ -227,10 +306,9 @@ describe('SettingsMain', () => {
   })
 
   it('disables model testing until the provider models are fetched', async () => {
-    const user = userEvent.setup()
-
     renderSettings()
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
+
+    await waitForOllama()
 
     expect(screen.getByRole('button', { name: 'Test Ollama model' })).toBeDisabled()
   })
@@ -243,7 +321,9 @@ describe('SettingsMain', () => {
     ])
 
     renderSettings()
+    await waitForOllama()
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
+    await screen.findByText('granite4.2:3b')
     await user.type(screen.getByRole('searchbox', { name: 'Search Ollama models' }), 'llama')
 
     expect(screen.getByText('llama3.2:latest')).toBeVisible()
@@ -255,9 +335,9 @@ describe('SettingsMain', () => {
 
     renderSettings()
 
+    await waitForOllama()
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
     await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable LM Studio' }))
 
     expect(screen.getByLabelText('LM Studio fetched models')).toBeVisible()
     expect(screen.queryByText('granite4.2:3b')).not.toBeInTheDocument()
@@ -269,6 +349,7 @@ describe('SettingsMain', () => {
 
     renderSettings()
 
+    await waitForOllama()
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
 
     expect(await screen.findByText('Ollama is not running.')).toBeVisible()
@@ -279,8 +360,9 @@ describe('SettingsMain', () => {
     providerApi.testModel.mockRejectedValue(new Error('The model is unavailable.'))
 
     renderSettings()
+    await waitForOllama()
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
+    await screen.findByText('granite4.2:3b')
     await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
     await user.click(screen.getByRole('menuitem', { name: 'granite4.2:3b' }))
 
@@ -299,8 +381,9 @@ describe('SettingsMain', () => {
     )
 
     renderSettings()
+    await waitForOllama()
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
+    await screen.findByText('granite4.2:3b')
     await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
     await user.click(screen.getByRole('menuitem', { name: 'granite4.2:3b' }))
 
@@ -357,6 +440,7 @@ describe('SettingsMain', () => {
 
     renderSettings()
 
+    await waitForOllama()
     await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
 
     const dialog = screen.getByRole('dialog', { name: 'Add custom provider' })
@@ -481,7 +565,7 @@ describe('SettingsMain', () => {
     expect(apiKey).toHaveAttribute('type', 'text')
   })
 
-  it('removes a custom provider after confirmation and returns to Ollama', async () => {
+  it('removes a custom provider after confirmation', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -495,7 +579,6 @@ describe('SettingsMain', () => {
     await user.click(screen.getByRole('button', { name: 'Delete Example AI' }))
     await user.click(screen.getByRole('button', { name: 'Delete provider' }))
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Example AI' })).not.toBeInTheDocument()
   })
 

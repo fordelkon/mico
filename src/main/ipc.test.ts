@@ -37,9 +37,12 @@ function createHarness() {
     discoverModels: vi.fn(),
     getLibrary: vi.fn(),
     importModel: vi.fn(),
+    setModelEnabled: vi.fn(),
+    syncModels: vi.fn(),
     removeCustomProvider: vi.fn(),
     removeModel: vi.fn(),
     saveConfiguration: vi.fn(),
+    saveLibrary: vi.fn(),
     selectModel: vi.fn(),
     testModel: vi.fn()
   }
@@ -194,5 +197,24 @@ describe('registerIpc provider handlers', () => {
     await expect(
       handlers.get(IpcChannel.Providers_SaveConfiguration)?.(event, configuration)
     ).resolves.toEqual(library)
+  })
+
+  it('validates and delegates a trusted full library save', async () => {
+    const { handlers, provider } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const library = {
+      configurations: [
+        { provider: 'lm-studio' as const, baseUrl: 'http://localhost:1234' },
+        { provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }
+      ],
+      customProviders: [],
+      models: [],
+      selectedModelId: null
+    }
+    provider.saveLibrary.mockResolvedValue(library)
+
+    await expect(handlers.get(IpcChannel.Providers_SaveLibrary)?.(event, library)).resolves.toEqual(
+      library
+    )
   })
 })

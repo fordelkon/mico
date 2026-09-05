@@ -154,4 +154,32 @@ describe('OpenAI-compatible provider', () => {
       )
     ).resolves.toEqual([])
   })
+
+  it('does not report null completion token usage as a performance metric', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response('data: {"usage":{"completion_tokens":null}}\n\ndata: [DONE]\n\n')
+      )
+    let receivedPerformanceMetrics = false
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        collectPerformanceMetrics: true,
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal,
+        onPerformanceMetrics: () => {
+          receivedPerformanceMetrics = true
+        }
+      })
+    )
+
+    expect(receivedPerformanceMetrics).toBe(false)
+  })
 })

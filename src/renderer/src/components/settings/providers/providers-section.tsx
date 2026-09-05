@@ -42,8 +42,9 @@ import type {
   ProviderConfiguration as ProviderConnection
 } from '@shared/data/schemas/provider'
 
-import { type ProviderModel, useProviderLibrary } from './provider-library'
+import { useProviderLibrary } from './provider-library'
 import type { ProviderId } from './providers-sidebar'
+import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
 
 function toCustomProviderConfiguration(provider: CustomProvider): ProviderConnection {
   switch (provider.apiFormat) {
@@ -82,11 +83,18 @@ function ProvidersSection({
   onCustomProviderRemoved,
   providerId
 }: {
-  onCustomProviderRemoved: () => void
+  onCustomProviderRemoved: (providerId: ProviderId) => void
   providerId: ProviderId
 }): React.JSX.Element {
-  const { library, removeCustomProvider, setModels, updateConfiguration, updateCustomProvider } =
-    useProviderLibrary()
+  const {
+    flushConfiguration,
+    library,
+    removeCustomProvider,
+    syncModels,
+    toggleModel,
+    updateConfiguration,
+    updateCustomProvider
+  } = useProviderLibrary()
   const [isApiKeyVisible, setIsApiKeyVisible] = React.useState(false)
   const [hasFetchedModels, setHasFetchedModels] = React.useState(false)
   const [isFetchingModels, setIsFetchingModels] = React.useState(false)
@@ -103,6 +111,12 @@ function ProvidersSection({
     providerId: ProviderId
     values: Partial<Omit<CustomProvider, 'id'>>
   } | null>(null)
+  const customProviderDraftRef = React.useRef<{
+    providerId: ProviderId
+    values: Partial<Omit<CustomProvider, 'id'>>
+  } | null>(null)
+  const customProviderDraftVersion = React.useRef(0)
+  const customProviderSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const testModelSearchRef = React.useRef<HTMLInputElement>(null)
   const [status, setStatus] = React.useState<{ kind: 'error' | 'success'; message: string } | null>(
     null
@@ -110,8 +124,13 @@ function ProvidersSection({
   const customProvider = library.customProviders.find(({ id }) => id === providerId)
   const builtInProviderId = providerId === 'ollama' ? 'ollama' : 'lm-studio'
   const providerLabel = customProvider?.name ?? (providerId === 'ollama' ? 'Ollama' : 'LM Studio')
-  const configuration = library.configurations[providerId]
+  const configuration = library.configurations[providerId] ?? {
+    apiKey: '',
+    baseUrl: 'http://localhost:1234',
+    enabled: false
+  }
   const models = library.models.filter((model) => model.providerId === providerId)
+  const hasModels = hasFetchedModels || models.length > 0
   const filteredModels = models.filter((model) =>
     model.name.toLowerCase().includes(modelsSearch.toLowerCase())
   )
@@ -132,7 +151,6 @@ function ProvidersSection({
       ? { ...customProvider, ...customProviderDraft.values }
       : customProvider
 
-  const updateModels = (nextModels: ProviderModel[]): void => setModels(providerId, nextModels)
   const customProviderConfiguration = customProviderValues
     ? toCustomProviderConfiguration(customProviderValues)
     : undefined
@@ -152,14 +170,7 @@ function ProvidersSection({
 
     try {
       const discoveredModels = await window.api.providers.discoverModels(providerConfiguration)
-      updateModels(
-        discoveredModels.map(({ modelId }) => ({
-          enabled: models.some((model) => model.name === modelId && model.enabled),
-          id: `${providerId}:${modelId}`,
-          name: modelId,
-          providerId
-        }))
-      )
+      await syncModels(providerId, discoveredModels)
       setHasFetchedModels(true)
     } catch (error) {
       setStatus({
@@ -194,7 +205,7 @@ function ProvidersSection({
 
     try {
       await removeCustomProvider(customProvider.id)
-      onCustomProviderRemoved()
+      onCustomProviderRemoved(customProvider.id)
     } catch (error) {
       setStatus({
         kind: 'error',
@@ -203,22 +214,39 @@ function ProvidersSection({
     }
   }
   const editCustomProvider = (updates: Partial<Omit<CustomProvider, 'id'>>): void => {
-    setCustomProviderDraft((current) => ({
+    const current = customProviderDraftRef.current
+    const next = {
       providerId,
       values:
         current?.providerId === providerId ? { ...current.values, ...updates } : { ...updates }
-    }))
+    }
+    customProviderDraftRef.current = next
+    customProviderDraftVersion.current += 1
+    setCustomProviderDraft(next)
   }
   const saveCustomProvider = (updates: Partial<Omit<CustomProvider, 'id'>> = {}): void => {
     if (!customProvider) return
 
-    const draft = customProviderDraft?.providerId === providerId ? customProviderDraft.values : {}
+    if (customProviderSaveTimer.current) {
+      clearTimeout(customProviderSaveTimer.current)
+      customProviderSaveTimer.current = null
+    }
+
+    const draft =
+      customProviderDraftRef.current?.providerId === providerId
+        ? customProviderDraftRef.current.values
+        : {}
     const apiKey =
       draft.apiKey === undefined ? customProvider.apiKey : draft.apiKey.trim() || undefined
     const provider = { ...customProvider, ...draft, ...updates, apiKey }
+    const draftVersion = customProviderDraftVersion.current
 
     void updateCustomProvider(provider).then(
-      () => setCustomProviderDraft(null),
+      () => {
+        if (customProviderDraftVersion.current !== draftVersion) return
+        customProviderDraftRef.current = null
+        setCustomProviderDraft(null)
+      },
       (error) => {
         setStatus({
           kind: 'error',
@@ -227,6 +255,17 @@ function ProvidersSection({
       }
     )
   }
+  const scheduleCustomProviderSave = (): void => {
+    if (customProviderSaveTimer.current) clearTimeout(customProviderSaveTimer.current)
+    customProviderSaveTimer.current = setTimeout(() => saveCustomProvider(), 150)
+  }
+
+  React.useEffect(
+    () => () => {
+      if (customProviderSaveTimer.current) clearTimeout(customProviderSaveTimer.current)
+    },
+    []
+  )
 
   React.useEffect(() => {
     const animationFrame = isTestModelMenuOpen
@@ -308,7 +347,7 @@ function ProvidersSection({
             {configuration.enabled ? (
               <IconMenuButton
                 className="h-8 w-12 gap-1 px-1.5"
-                disabled={!hasFetchedModels}
+                disabled={!hasModels}
                 icon={
                   <>
                     {testState === 'testing' ? (
@@ -364,7 +403,7 @@ function ProvidersSection({
                     </InputGroup>
                   </div>
                   <div className="max-h-56 overflow-y-auto p-1">
-                    {!hasFetchedModels ? (
+                    {!hasModels ? (
                       <p className="py-6 text-center text-sm text-text-secondary">
                         Fetch models before testing.
                       </p>
@@ -378,7 +417,7 @@ function ProvidersSection({
                           className="rounded-sm px-2 py-1.5"
                           disabled={isTestingModel}
                           key={model.id}
-                          onSelect={() => void testModel(model.name)}
+                          onSelect={() => void testModel(model.modelId)}
                         >
                           {model.name}
                         </DropdownMenuItem>
@@ -392,7 +431,7 @@ function ProvidersSection({
               aria-label={`Enable ${providerLabel}`}
               checked={configuration.enabled}
               onCheckedChange={(enabled) =>
-                updateConfiguration(providerId, { ...configuration, enabled })
+                updateConfiguration(providerId, { ...configuration, enabled }, { immediate: true })
               }
             />
           </div>
@@ -453,7 +492,10 @@ function ProvidersSection({
                 <Input
                   id={`${providerId}-name`}
                   onBlur={() => saveCustomProvider()}
-                  onChange={(event) => editCustomProvider({ name: event.target.value })}
+                  onChange={(event) => {
+                    editCustomProvider({ name: event.target.value })
+                    scheduleCustomProviderSave()
+                  }}
                   value={customProviderValues?.name ?? ''}
                 />
               </label>
@@ -469,8 +511,10 @@ function ProvidersSection({
                 className="font-mono"
                 id={`${providerId}-base-url`}
                 onChange={(event) => {
-                  if (customProvider) editCustomProvider({ baseUrl: event.target.value })
-                  else
+                  if (customProvider) {
+                    editCustomProvider({ baseUrl: event.target.value })
+                    scheduleCustomProviderSave()
+                  } else
                     updateConfiguration(providerId, {
                       ...configuration,
                       baseUrl: event.target.value
@@ -478,6 +522,7 @@ function ProvidersSection({
                 }}
                 onBlur={() => {
                   if (customProvider) saveCustomProvider()
+                  else flushConfiguration(providerId)
                 }}
                 value={customProviderValues?.baseUrl ?? configuration.baseUrl}
               />
@@ -490,8 +535,10 @@ function ProvidersSection({
                     className="font-mono"
                     id={`${providerId}-api-key`}
                     onChange={(event) => {
-                      if (customProvider) editCustomProvider({ apiKey: event.target.value })
-                      else
+                      if (customProvider) {
+                        editCustomProvider({ apiKey: event.target.value })
+                        scheduleCustomProviderSave()
+                      } else
                         updateConfiguration(providerId, {
                           ...configuration,
                           apiKey: event.target.value
@@ -500,6 +547,7 @@ function ProvidersSection({
                     type={isApiKeyVisible ? 'text' : 'password'}
                     onBlur={() => {
                       if (customProvider) saveCustomProvider()
+                      else flushConfiguration(providerId)
                     }}
                     value={customProviderValues?.apiKey ?? configuration.apiKey}
                   />
@@ -605,9 +653,21 @@ function ProvidersSection({
                       setStatus({ kind: 'error', message: 'Custom headers must be valid JSON.' })
                     }
                   }}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setCustomProviderHeadersDraft({ providerId, value: event.target.value })
-                  }
+                    try {
+                      editCustomProvider({
+                        headers: event.target.value.trim() ? JSON.parse(event.target.value) : {}
+                      })
+                      scheduleCustomProviderSave()
+                    } catch {
+                      if (customProviderSaveTimer.current) {
+                        clearTimeout(customProviderSaveTimer.current)
+                        customProviderSaveTimer.current = null
+                      }
+                      // Keep the invalid draft local until the user corrects it.
+                    }
+                  }}
                   placeholder={'{\n  "User-Agent": "Mico"\n}'}
                   spellCheck={false}
                   value={customProviderHeaders}
@@ -636,7 +696,7 @@ function ProvidersSection({
             <InputGroup className="rounded-lg border-input/30 bg-input/30 shadow-none">
               <InputGroupInput
                 aria-label={`Search ${providerLabel} models`}
-                disabled={!hasFetchedModels}
+                disabled={!hasModels}
                 onChange={(event) => setModelsSearch(event.target.value)}
                 placeholder="Search models"
                 type="search"
@@ -650,33 +710,29 @@ function ProvidersSection({
               aria-label={`${providerLabel} fetched models`}
               className="max-h-48 overflow-y-auto rounded-md border border-border-subtle"
             >
-              {hasFetchedModels ? (
+              {hasModels ? (
                 filteredModels.length === 0 ? (
                   <p className="px-3 py-8 text-center text-sm text-text-secondary">
                     No models match your search.
                   </p>
                 ) : (
-                  [...filteredModels]
-                    .sort((left, right) => Number(right.enabled) - Number(left.enabled))
-                    .map((model) => (
-                      <div
-                        className="flex items-center justify-between border-b border-border-subtle px-3 py-2.5 last:border-b-0"
-                        key={model.id}
-                      >
-                        <span className="font-mono text-sm">{model.name}</span>
-                        <Toggle
-                          aria-label={`Enable ${model.name}`}
-                          checked={model.enabled}
-                          onCheckedChange={(enabled) =>
-                            updateModels(
-                              models.map((entry) =>
-                                entry.id === model.id ? { ...entry, enabled } : entry
-                              )
-                            )
-                          }
-                        />
-                      </div>
-                    ))
+                  sortByEnabledOrder(
+                    filteredModels,
+                    library.enabledModelIds,
+                    (model) => model.id
+                  ).map((model) => (
+                    <div
+                      className="flex items-center justify-between border-b border-border-subtle px-3 py-2.5 last:border-b-0"
+                      key={model.id}
+                    >
+                      <span className="font-mono text-sm">{model.name}</span>
+                      <Toggle
+                        aria-label={`Enable ${model.name}`}
+                        checked={model.enabled}
+                        onCheckedChange={(enabled) => void toggleModel(model, enabled)}
+                      />
+                    </div>
+                  ))
                 )
               ) : (
                 <p className="px-3 py-8 text-center text-sm text-text-secondary">

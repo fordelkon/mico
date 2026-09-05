@@ -42,7 +42,12 @@ const EventSchema = z.object({
     .optional(),
   usage: z
     .object({
-      completion_tokens: z.number().nonnegative().nullable().optional()
+      completion_tokens: z
+        .number()
+        .nonnegative()
+        .nullable()
+        .optional()
+        .transform((value) => value ?? undefined)
     })
     .nullable()
     .optional(),

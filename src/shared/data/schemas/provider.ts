@@ -5,6 +5,7 @@ import { defineSchema } from '../define'
 const ProviderIdSchema = defineSchema(
   z.enum(['lm-studio', 'ollama', 'openai-responses', 'openai-compatible', 'anthropic-compatible'])
 )
+const ModelProviderSchema = defineSchema(z.string().trim().min(1))
 const ProviderBaseUrlSchema = defineSchema(
   z
     .url()
@@ -35,6 +36,7 @@ const CustomProviderSchema = defineSchema(
     apiFormat: CustomProviderApiFormatSchema,
     apiKey: ProviderApiKeySchema.optional(),
     baseUrl: ProviderBaseUrlSchema,
+    enabled: z.boolean().optional(),
     headers: z.record(z.string(), z.string()),
     icon: CustomProviderIconSchema,
     id: CustomProviderIdSchema,
@@ -48,23 +50,27 @@ const ProviderConfigurationSchema = defineSchema(
       provider: z.literal('lm-studio'),
       baseUrl: ProviderBaseUrlSchema,
       apiKey: ProviderApiKeySchema.optional(),
+      enabled: z.boolean().optional(),
       headers: ProviderHeadersSchema.optional()
     }),
     z.object({
       provider: z.literal('ollama'),
       baseUrl: ProviderBaseUrlSchema,
+      enabled: z.boolean().optional(),
       headers: ProviderHeadersSchema.optional()
     }),
     z.object({
       provider: z.literal('openai-responses'),
       baseUrl: ProviderBaseUrlSchema,
       apiKey: ProviderApiKeySchema.optional(),
+      enabled: z.boolean().optional(),
       headers: ProviderHeadersSchema.optional()
     }),
     z.object({
       provider: z.literal('openai-compatible'),
       baseUrl: ProviderBaseUrlSchema,
       apiKey: ProviderApiKeySchema.optional(),
+      enabled: z.boolean().optional(),
       headers: ProviderHeadersSchema.optional(),
       useMaxCompletionTokens: z.boolean().optional()
     }),
@@ -72,6 +78,7 @@ const ProviderConfigurationSchema = defineSchema(
       provider: z.literal('anthropic-compatible'),
       baseUrl: ProviderBaseUrlSchema,
       apiKey: ProviderApiKeySchema.optional(),
+      enabled: z.boolean().optional(),
       headers: ProviderHeadersSchema.optional(),
       maxTokens: ProviderMaxTokensSchema.optional()
     })
@@ -83,9 +90,10 @@ const ModelDisplayNameSchema = defineSchema(z.string().trim().min(1))
 const ModelEntrySchema = defineSchema(
   z.object({
     id: ModelEntryIdSchema,
-    provider: ProviderIdSchema,
+    provider: ModelProviderSchema,
     modelId: ProviderModelIdSchema,
-    displayName: ModelDisplayNameSchema
+    displayName: ModelDisplayNameSchema,
+    enabled: z.boolean().default(false)
   })
 )
 const ProviderLibrarySchema = defineSchema(
@@ -116,6 +124,7 @@ const providerDataSchemas = {
   providerConfiguration: ProviderConfigurationSchema,
   providerHeaders: ProviderHeadersSchema,
   providerId: ProviderIdSchema,
+  modelProvider: ModelProviderSchema,
   providerLibrary: ProviderLibrarySchema,
   providerMaxTokens: ProviderMaxTokensSchema,
   providerModelId: ProviderModelIdSchema
@@ -140,6 +149,7 @@ export {
   ProviderConfigurationSchema,
   ProviderHeadersSchema,
   ProviderIdSchema,
+  ModelProviderSchema,
   ProviderLibrarySchema,
   ProviderMaxTokensSchema,
   ProviderModelIdSchema,
