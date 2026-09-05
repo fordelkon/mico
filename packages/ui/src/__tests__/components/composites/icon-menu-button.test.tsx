@@ -47,4 +47,25 @@ describe('IconMenuButton', () => {
     await user.click(button)
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
+
+  it('forwards menu alignment and content sizing to the opened menu', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <IconMenuButton
+        icon={<svg />}
+        label="Browse models"
+        menuAlign="end"
+        menuContentClassName="w-72"
+      >
+        <DropdownMenuItem>Model A</DropdownMenuItem>
+      </IconMenuButton>
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Browse models' }))
+
+    const menu = screen.getByRole('menu')
+    expect(menu).toHaveAttribute('data-align', 'end')
+    expect(menu).toHaveClass('w-72')
+  })
 })

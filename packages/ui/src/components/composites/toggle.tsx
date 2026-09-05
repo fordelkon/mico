@@ -37,7 +37,7 @@ function Toggle({ checked, className, disabled, onCheckedChange, ...props }: Tog
     <Button
       aria-checked={checked}
       className={cn(
-        'group/toggle relative h-5 w-8 rounded-full border border-border bg-secondary p-0 shadow-none transition-[background-color,border-color] duration-0 ease-[cubic-bezier(0.34,1.35,0.64,1)] hover:bg-secondary data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:hover:bg-brand',
+        'group/toggle relative h-5 w-8 rounded-full border border-border bg-secondary p-0 shadow-none transition-[background-color,border-color] duration-0 ease-[cubic-bezier(0.34,1.35,0.64,1)] hover:bg-secondary data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:hover:bg-primary/90',
         className
       )}
       data-init={hasInteracted || undefined}
