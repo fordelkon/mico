@@ -97,4 +97,61 @@ describe('OpenAI-compatible provider', () => {
       { type: 'text-end', id: 'part' }
     ])
   })
+
+  it('streams reasoning when compatible endpoints send null content deltas', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"content":null,"reasoning_content":"Inspect."}}]}\n\ndata: {"choices":[{"delta":{"content":"Done."}}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).resolves.toEqual([
+      { type: 'reasoning-start', id: 'part' },
+      { type: 'reasoning-delta', id: 'part', delta: 'Inspect.' },
+      { type: 'reasoning-end', id: 'part' },
+      { type: 'text-start', id: 'part' },
+      { type: 'text-delta', id: 'part', delta: 'Done.' },
+      { type: 'text-end', id: 'part' }
+    ])
+  })
+
+  it('ignores nullable OpenAI-compatible stream containers', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":null}]}\n\ndata: {"choices":null}\n\ndata: {"usage":{"completion_tokens":null}}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).resolves.toEqual([])
+  })
 })

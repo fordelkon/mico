@@ -68,6 +68,12 @@ const chat: ChatAPI = {
 }
 
 const providers: ProvidersAPI = {
+  addCustomProvider: (provider) =>
+    ipcRenderer.invoke(IpcChannel.Providers_AddCustomProvider, provider),
+  updateCustomProvider: (provider) =>
+    ipcRenderer.invoke(IpcChannel.Providers_UpdateCustomProvider, provider),
+  removeCustomProvider: (providerId) =>
+    ipcRenderer.invoke(IpcChannel.Providers_RemoveCustomProvider, providerId),
   addModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_AddModel, model),
   discoverModels: (configuration) =>
     ipcRenderer.invoke(IpcChannel.Providers_DiscoverModels, configuration),
@@ -76,7 +82,8 @@ const providers: ProvidersAPI = {
   removeModel: (modelId) => ipcRenderer.invoke(IpcChannel.Providers_RemoveModel, modelId),
   saveConfiguration: (configuration) =>
     ipcRenderer.invoke(IpcChannel.Providers_SaveConfiguration, configuration),
-  selectModel: (modelId) => ipcRenderer.invoke(IpcChannel.Providers_SelectModel, modelId)
+  selectModel: (modelId) => ipcRenderer.invoke(IpcChannel.Providers_SelectModel, modelId),
+  testModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_TestModel, model)
 }
 
 const api = { appearance, chat, providers, windowControls }

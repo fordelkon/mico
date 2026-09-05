@@ -1,6 +1,7 @@
 import type { ProviderMetadata, UIMessageChunk } from 'ai'
 import * as z from 'zod'
 
+import { createAnthropicHeaders } from '../anthropic-auth'
 import type {
   ChatProvider,
   ChatProviderConfiguration,
@@ -140,24 +141,34 @@ function createAnthropicCompatibleProvider(
         stream: true
       }
       if (system) request.system = system
-      const send = (includeThinking: boolean) => {
+      const send = (includeThinking: boolean, authentication: 'api-key' | 'bearer' = 'api-key') => {
         const thinking = getThinking(includeThinking)
         const body = thinking ? { ...request, thinking } : request
+        const headers = createAnthropicHeaders(
+          configuration.apiKey,
+          configuration.headers,
+          authentication
+        )
+        headers.set('content-type', 'application/json')
         return dependencies.fetch(getUrl(configuration.baseUrl), {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-api-key': configuration.apiKey,
-            'anthropic-version': '2023-06-01'
-          },
+          headers,
           body: JSON.stringify(body),
           signal
         })
       }
+      const sendWithAuthenticationFallback = async (
+        includeThinking: boolean
+      ): Promise<Response> => {
+        const response = await send(includeThinking)
+        return response.status === 401 && configuration.apiKey
+          ? send(includeThinking, 'bearer')
+          : response
+      }
       const response =
         isOptimisticThinkingEffort(thinkingEffort) && thinkingEffort !== 'none'
-          ? await fetchWithThinkingFallback(thinkingEffort, send)
-          : await send(false)
+          ? await fetchWithThinkingFallback(thinkingEffort, sendWithAuthenticationFallback)
+          : await sendWithAuthenticationFallback(false)
       if (!response.ok)
         throw new Error(
           `Anthropic-compatible request failed (${response.status} ${response.statusText}).`

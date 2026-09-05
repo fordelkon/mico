@@ -33,6 +33,7 @@
     "@ai-sdk/react": "^4.0.80",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@lobehub/icons-static-svg": "^1.94.0",
     "@mico/ai-providers": "workspace:*",
     "@mico/ui": "workspace:*",
     "ai": "^7.0.77",

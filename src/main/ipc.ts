@@ -2,9 +2,18 @@ import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'e
 
 import { ChatRequestIdSchema, ChatStartRequestSchema } from '@shared/data/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
-import { ModelEntryIdSchema, ProviderConfigurationSchema } from '@shared/data/schemas/provider'
+import {
+  CustomProviderSchema,
+  CustomProviderIdSchema,
+  ModelEntryIdSchema,
+  ProviderConfigurationSchema
+} from '@shared/data/schemas/provider'
 import { IpcChannel } from '@shared/IpcChannel'
-import { AddModelRequestSchema, ImportModelRequestSchema } from '@shared/ipc/schemas/providers'
+import {
+  AddModelRequestSchema,
+  ImportModelRequestSchema,
+  TestModelRequestSchema
+} from '@shared/ipc/schemas/providers'
 import type { ChatService } from './ai/chat-service'
 import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
@@ -36,12 +45,16 @@ interface IpcServices {
   provider: Pick<
     ProviderService,
     | 'addModel'
+    | 'addCustomProvider'
+    | 'updateCustomProvider'
     | 'discoverModels'
     | 'getLibrary'
     | 'importModel'
     | 'removeModel'
+    | 'removeCustomProvider'
     | 'saveConfiguration'
     | 'selectModel'
+    | 'testModel'
   >
 }
 
@@ -142,6 +155,27 @@ function registerIpc(
     getCallingWindow(event)
     return provider.getLibrary()
   })
+  dependencies.ipcMain.handle(IpcChannel.Providers_AddCustomProvider, (event, input) => {
+    getCallingWindow(event)
+    const result = CustomProviderSchema.omit({ id: true }).safeParse(input)
+    if (!result.success) throw new Error('Invalid custom provider')
+
+    return provider.addCustomProvider(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_UpdateCustomProvider, (event, input) => {
+    getCallingWindow(event)
+    const result = CustomProviderSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid custom provider')
+
+    return provider.updateCustomProvider(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_RemoveCustomProvider, (event, input) => {
+    getCallingWindow(event)
+    const result = CustomProviderIdSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid custom provider ID')
+
+    return provider.removeCustomProvider(result.data)
+  })
   dependencies.ipcMain.handle(IpcChannel.Providers_SaveConfiguration, (event, input) => {
     getCallingWindow(event)
     const result = ProviderConfigurationSchema.safeParse(input)
@@ -183,6 +217,13 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid provider model ID')
 
     return provider.selectModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_TestModel, (event, input) => {
+    getCallingWindow(event)
+    const result = TestModelRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model test')
+
+    return provider.testModel(result.data)
   })
 }
 

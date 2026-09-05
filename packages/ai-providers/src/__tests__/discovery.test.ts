@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { discoverModels } from '../discovery'
 
@@ -103,6 +103,32 @@ describe('discoverModels', () => {
     expect(client.request().url).toBe('https://example.com/v1/models')
     expect(client.request().headers.get('x-api-key')).toBe('anthropic-key')
     expect(client.request().headers.get('anthropic-version')).toBe('2023-06-01')
+  })
+
+  it('retries Anthropic-compatible discovery with bearer authentication after x-api-key is rejected', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 401, statusText: 'Unauthorized' }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'ark-code-latest' }] }))
+
+    await expect(
+      discoverModels(
+        {
+          provider: 'anthropic-compatible',
+          baseUrl: 'https://example.com/v1/messages',
+          apiKey: 'provider-key'
+        },
+        { fetch }
+      )
+    ).resolves.toEqual([{ modelId: 'ark-code-latest', displayName: 'ark-code-latest' }])
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(
+      new Request('https://example.test', fetch.mock.calls[0]?.[1]).headers.get('x-api-key')
+    ).toBe('provider-key')
+    expect(
+      new Request('https://example.test', fetch.mock.calls[1]?.[1]).headers.get('authorization')
+    ).toBe('Bearer provider-key')
   })
 
   it('rejects an unsuccessful model-list response', async () => {

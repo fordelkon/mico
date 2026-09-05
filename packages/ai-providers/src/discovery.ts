@@ -1,5 +1,6 @@
 import * as z from 'zod'
 
+import { createAnthropicHeaders } from './anthropic-auth'
 import type {
   DiscoveredModel,
   DiscoverableProviderId,
@@ -53,12 +54,18 @@ function getAnthropicModelsUrl(baseUrl: string): string {
   return url.toString()
 }
 
-function getHeaders(provider: DiscoverableProviderId, apiKey: string | undefined): Headers {
+function getHeaders(
+  provider: DiscoverableProviderId,
+  apiKey: string | undefined,
+  customHeaders: Record<string, string> | undefined
+): Headers {
+  if (provider === 'anthropic-compatible') return createAnthropicHeaders(apiKey, customHeaders)
+
   const headers = new Headers()
-  if (provider === 'anthropic-compatible') headers.set('anthropic-version', '2023-06-01')
-  if (!apiKey) return headers
-  if (provider === 'anthropic-compatible') headers.set('x-api-key', apiKey)
-  else headers.set('authorization', `Bearer ${apiKey}`)
+  if (apiKey) {
+    headers.set('authorization', `Bearer ${apiKey}`)
+  }
+  for (const [name, value] of Object.entries(customHeaders ?? {})) headers.set(name, value)
   return headers
 }
 
@@ -67,27 +74,27 @@ function getRequest(input: ModelDiscoveryInput): ModelDiscoveryRequest {
     case 'lm-studio':
       return {
         url: new URL('/api/v1/models', input.baseUrl).toString(),
-        headers: getHeaders(input.provider, input.apiKey)
+        headers: getHeaders(input.provider, input.apiKey, input.headers)
       }
     case 'ollama':
       return {
         url: new URL('/api/tags', input.baseUrl).toString(),
-        headers: getHeaders(input.provider, input.apiKey)
+        headers: getHeaders(input.provider, input.apiKey, input.headers)
       }
     case 'openai-responses':
       return {
         url: getOpenAIModelsUrl(input.baseUrl, 'responses'),
-        headers: getHeaders(input.provider, input.apiKey)
+        headers: getHeaders(input.provider, input.apiKey, input.headers)
       }
     case 'openai-compatible':
       return {
         url: getOpenAIModelsUrl(input.baseUrl, 'chat/completions'),
-        headers: getHeaders(input.provider, input.apiKey)
+        headers: getHeaders(input.provider, input.apiKey, input.headers)
       }
     case 'anthropic-compatible':
       return {
         url: getAnthropicModelsUrl(input.baseUrl),
-        headers: getHeaders(input.provider, input.apiKey)
+        headers: getHeaders(input.provider, input.apiKey, input.headers)
       }
   }
 }
@@ -132,7 +139,13 @@ async function discoverModels(
   dependencies: ModelDiscoveryDependencies = {}
 ): Promise<DiscoveredModel[]> {
   const request = getRequest(input)
-  const response = await (dependencies.fetch ?? fetch)(request.url, { headers: request.headers })
+  const requestFetch = dependencies.fetch ?? fetch
+  let response = await requestFetch(request.url, { headers: request.headers })
+  if (input.provider === 'anthropic-compatible' && input.apiKey && response.status === 401) {
+    response = await requestFetch(request.url, {
+      headers: createAnthropicHeaders(input.apiKey, input.headers, 'bearer')
+    })
+  }
   if (!response.ok)
     throw new Error(
       `${getProviderName(input.provider)} model discovery failed (${response.status} ${response.statusText}).`

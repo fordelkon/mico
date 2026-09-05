@@ -40,6 +40,39 @@ describe('Anthropic-compatible provider', () => {
     ])
   })
 
+  it('retries a rejected Anthropic API key with bearer authentication', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 401, statusText: 'Unauthorized' }))
+      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://example.com',
+        apiKey: 'provider-key',
+        modelId: 'model'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(
+      new Request('https://example.test', fetch.mock.calls[0]?.[1]).headers.get('x-api-key')
+    ).toBe('provider-key')
+    expect(
+      new Request('https://example.test', fetch.mock.calls[1]?.[1]).headers.get('authorization')
+    ).toBe('Bearer provider-key')
+  })
+
   it('ignores Anthropic message metadata after text output', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

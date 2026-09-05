@@ -17,7 +17,6 @@ type OpenAICompatibleConfiguration = Extract<
   ChatProviderConfiguration,
   { provider: 'openai-compatible' }
 >
-type OpenAICompatibleHeaders = { 'content-type': string; authorization?: string }
 type OpenAICompatibleRequest = {
   model: string
   messages: ReturnType<typeof toMessages>
@@ -30,19 +29,22 @@ const EventSchema = z.object({
       z.object({
         delta: z
           .object({
-            content: z.string().optional(),
+            content: z.string().nullable().optional(),
             reasoning: z.string().optional(),
             reasoning_content: z.string().optional(),
             reasoning_text: z.string().optional()
           })
+          .nullable()
           .optional()
       })
     )
+    .nullable()
     .optional(),
   usage: z
     .object({
-      completion_tokens: z.number().nonnegative().optional()
+      completion_tokens: z.number().nonnegative().nullable().optional()
     })
+    .nullable()
     .optional(),
   error: z.object({ message: z.string().optional() }).optional()
 })
@@ -81,8 +83,12 @@ function createOpenAICompatibleProvider(
       signal,
       onPerformanceMetrics
     }) => {
-      const headers: OpenAICompatibleHeaders = { 'content-type': 'application/json' }
-      if (configuration.apiKey) headers.authorization = `Bearer ${configuration.apiKey}`
+      const headers = new Headers({
+        'content-type': 'application/json',
+        ...configuration.headers
+      })
+      if (configuration.apiKey && !headers.has('authorization'))
+        headers.set('authorization', `Bearer ${configuration.apiKey}`)
       const request: OpenAICompatibleRequest = {
         model: configuration.modelId,
         messages: toMessages(messages),

@@ -1,12 +1,14 @@
-import { Button, Separator } from '@mico/ui'
+import { Separator } from '@mico/ui'
 import { Bot } from 'lucide-react'
 import * as React from 'react'
 
 import { ProvidersSidebar, type ProviderId } from './providers/providers-sidebar'
+import { useProviderLibrary } from './providers/provider-library'
+import { ProvidersSection } from './providers/providers-section'
 
-function SettingsMain(): React.JSX.Element {
+function SettingsContent(): React.JSX.Element {
   const [activeProviderId, setActiveProviderId] = React.useState<ProviderId>('ollama')
-  const activeProviderLabel = activeProviderId === 'lm-studio' ? 'LM Studio' : 'Ollama'
+  const { library } = useProviderLibrary()
 
   return (
     <div className="paper-canvas flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -19,26 +21,30 @@ function SettingsMain(): React.JSX.Element {
       <Separator className="bg-border-subtle" />
       <div className="min-h-0 flex-1 overflow-hidden p-2">
         <div className="flex size-full min-h-0 gap-3">
-          <ProvidersSidebar activeProviderId={activeProviderId} onSelect={setActiveProviderId} />
-          <main
-            aria-label="Provider configuration"
-            className="min-h-0 min-w-0 flex-1 rounded-lg border border-border-subtle bg-surface-primary shadow-sm"
-          >
-            <header className="p-6">
-              <h2 className="text-xl font-semibold text-text-primary">{activeProviderLabel}</h2>
-            </header>
-          </main>
+          <ProvidersSidebar
+            activeProviderId={activeProviderId}
+            customProviders={library.customProviders}
+            enabledProviderIds={library.enabledProviderIds}
+            onCustomProviderAdded={setActiveProviderId}
+            onSelect={setActiveProviderId}
+          />
+          <ProvidersSection
+            key={activeProviderId}
+            onCustomProviderRemoved={() => setActiveProviderId('ollama')}
+            providerId={activeProviderId}
+          />
         </div>
       </div>
-      <footer className="flex shrink-0 items-center justify-between border-t border-border-subtle px-6 py-4">
-        <p className="text-sm text-text-secondary">All changes saved</p>
-        <div className="flex gap-2">
-          <Button variant="outline">Close</Button>
-          <Button disabled>Save</Button>
-        </div>
-      </footer>
+      <footer
+        aria-label="Reserved settings actions"
+        className="h-16 shrink-0 border-t border-border-subtle"
+      />
     </div>
   )
+}
+
+function SettingsMain(): React.JSX.Element {
+  return <SettingsContent />
 }
 
 export { SettingsMain }

@@ -2,15 +2,24 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app } from 'electron'
 
-import { discoverModels } from '@mico/ai-providers'
-import type { ChatProviderConfiguration, DiscoveredModel } from '@mico/ai-providers'
+import { createChatProvider, discoverModels } from '@mico/ai-providers'
+import type {
+  ChatProviderConfiguration,
+  ChatProviderMessage,
+  DiscoveredModel
+} from '@mico/ai-providers'
 import { ProviderLibrarySchema } from '@shared/data/schemas/provider'
 import type {
+  CustomProvider,
   ModelEntry,
   ProviderConfiguration,
   ProviderLibrary
 } from '@shared/data/schemas/provider'
-import type { AddModelRequest, ImportModelRequest } from '@shared/ipc/schemas/providers'
+import type {
+  AddModelRequest,
+  ImportModelRequest,
+  TestModelRequest
+} from '@shared/ipc/schemas/providers'
 
 type ProviderFileSystem = {
   mkdir: (path: string, options: { recursive: true }) => Promise<string | undefined>
@@ -23,13 +32,30 @@ type ProviderServiceDependencies = {
   discoverModels?: (configuration: ProviderConfiguration) => Promise<DiscoveredModel[]>
   fileSystem?: ProviderFileSystem
   getUserDataPath?: () => string
+  testModel?: (
+    configuration: ChatProviderConfiguration,
+    messages: ChatProviderMessage[]
+  ) => Promise<void>
 }
 
 const defaultDependencies: Required<ProviderServiceDependencies> = {
   createId: () => crypto.randomUUID(),
   discoverModels,
   fileSystem: { mkdir, readFile, rename, writeFile },
-  getUserDataPath: () => app.getPath('userData')
+  getUserDataPath: () => app.getPath('userData'),
+  testModel: async (configuration, messages) => {
+    const provider = createChatProvider(configuration)
+    const stream = await provider.stream({
+      conversationKey: 'provider-test',
+      messages,
+      thinkingEffort: 'default',
+      signal: new AbortController().signal
+    })
+
+    for await (const _chunk of stream) {
+      // Consume the complete stream so a successful result proves the model can respond.
+    }
+  }
 }
 
 function createDefaultLibrary(): ProviderLibrary {
@@ -38,6 +64,7 @@ function createDefaultLibrary(): ProviderLibrary {
       { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
       { provider: 'ollama', baseUrl: 'http://localhost:11434' }
     ],
+    customProviders: [],
     models: [],
     selectedModelId: null
   }
@@ -70,8 +97,38 @@ class ProviderService {
     return this.getLibrary()
   }
 
+  async addCustomProvider(provider: Omit<CustomProvider, 'id'>): Promise<ProviderLibrary> {
+    await this.updateLibrary((library) => {
+      library.customProviders.push({ id: this.dependencies.createId(), ...provider })
+    })
+    return this.getLibrary()
+  }
+
+  async removeCustomProvider(providerId: string): Promise<ProviderLibrary> {
+    await this.updateLibrary((library) => {
+      library.customProviders = library.customProviders.filter(({ id }) => id !== providerId)
+    })
+    return this.getLibrary()
+  }
+
+  async updateCustomProvider(provider: CustomProvider): Promise<ProviderLibrary> {
+    await this.updateLibrary((library) => {
+      const index = library.customProviders.findIndex(({ id }) => id === provider.id)
+      if (index === -1) throw new Error('Custom provider does not exist.')
+
+      library.customProviders[index] = provider
+    })
+    return this.getLibrary()
+  }
+
   async discoverModels(configuration: ProviderConfiguration): Promise<DiscoveredModel[]> {
     return this.dependencies.discoverModels(configuration)
+  }
+
+  async testModel({ configuration, modelId }: TestModelRequest): Promise<void> {
+    await this.dependencies.testModel(toChatProviderConfiguration(configuration, { modelId }), [
+      { role: 'user', parts: [{ type: 'text', text: 'Reply with OK.' }] }
+    ])
   }
 
   async importModel(model: ImportModelRequest): Promise<ProviderLibrary> {
@@ -157,29 +214,17 @@ class ProviderService {
 
 function toChatProviderConfiguration(
   configuration: ProviderConfiguration,
-  model: ModelEntry
+  model: Pick<ModelEntry, 'modelId'>
 ): ChatProviderConfiguration {
   switch (configuration.provider) {
     case 'lm-studio':
-      return configuration.apiKey
-        ? { ...configuration, modelId: model.modelId }
-        : {
-            provider: configuration.provider,
-            baseUrl: configuration.baseUrl,
-            modelId: model.modelId
-          }
+      return { ...configuration, modelId: model.modelId }
     case 'ollama':
       return { ...configuration, modelId: model.modelId }
     case 'openai-responses':
       return { ...configuration, modelId: model.modelId }
     case 'openai-compatible':
-      return configuration.apiKey
-        ? { ...configuration, modelId: model.modelId }
-        : {
-            provider: configuration.provider,
-            baseUrl: configuration.baseUrl,
-            modelId: model.modelId
-          }
+      return { ...configuration, modelId: model.modelId }
     case 'anthropic-compatible':
       return { ...configuration, modelId: model.modelId }
   }

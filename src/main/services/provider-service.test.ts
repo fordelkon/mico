@@ -57,6 +57,7 @@ describe('ProviderService', () => {
         { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
         { provider: 'ollama', baseUrl: 'http://localhost:11434' }
       ],
+      customProviders: [],
       models: [],
       selectedModelId: null
     })
@@ -72,6 +73,7 @@ describe('ProviderService', () => {
         { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
         { provider: 'ollama', baseUrl: 'http://localhost:11434' }
       ],
+      customProviders: [],
       models: [],
       selectedModelId: null
     })
@@ -100,6 +102,120 @@ describe('ProviderService', () => {
           displayName: 'Llama 3.2'
         }
       ]
+    })
+  })
+
+  it('persists a custom provider with its connection and presentation settings', async () => {
+    const { files, service } = createService()
+    await service.initialize()
+
+    const library = await service.addCustomProvider({
+      apiFormat: 'openai-compatible',
+      apiKey: 'secret',
+      baseUrl: 'https://api.example.com/v1',
+      headers: { 'X-Client': 'Mico' },
+      icon: 'openai',
+      name: 'Example AI',
+      useMaxCompletionTokens: true
+    })
+
+    expect(library.customProviders).toEqual([
+      {
+        apiFormat: 'openai-compatible',
+        apiKey: 'secret',
+        baseUrl: 'https://api.example.com/v1',
+        headers: { 'X-Client': 'Mico' },
+        icon: 'openai',
+        id: 'entry-1',
+        name: 'Example AI',
+        useMaxCompletionTokens: true
+      }
+    ])
+    expect(JSON.parse(files.get(libraryPath) ?? '')).toMatchObject({
+      customProviders: library.customProviders
+    })
+  })
+
+  it('removes a persisted custom provider', async () => {
+    const { files, service } = createService({
+      contents: JSON.stringify({
+        configurations: [
+          { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
+          { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+        ],
+        customProviders: [
+          {
+            apiFormat: 'openai-compatible',
+            baseUrl: 'https://api.example.com/v1',
+            headers: {},
+            icon: 'default',
+            id: 'custom-1',
+            name: 'Example AI',
+            useMaxCompletionTokens: false
+          }
+        ],
+        models: [],
+        selectedModelId: null
+      })
+    })
+    await service.initialize()
+
+    const library = await service.removeCustomProvider('custom-1')
+
+    expect(library.customProviders).toEqual([])
+    expect(JSON.parse(files.get(libraryPath) ?? '')).toMatchObject({ customProviders: [] })
+  })
+
+  it('persists edits to the matching custom provider without changing its ID', async () => {
+    const { files, service } = createService({
+      contents: JSON.stringify({
+        configurations: [
+          { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
+          { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+        ],
+        customProviders: [
+          {
+            apiFormat: 'openai-compatible',
+            apiKey: 'old-key',
+            baseUrl: 'https://api.example.com/v1',
+            headers: {},
+            icon: 'default',
+            id: 'custom-1',
+            name: 'Example AI',
+            useMaxCompletionTokens: false
+          }
+        ],
+        models: [],
+        selectedModelId: null
+      })
+    })
+    await service.initialize()
+
+    const library = await service.updateCustomProvider({
+      apiFormat: 'openai-responses',
+      apiKey: 'new-key',
+      baseUrl: 'https://api.example.com/responses',
+      headers: { 'X-Client': 'Mico' },
+      icon: 'openai',
+      id: 'custom-1',
+      name: 'Renamed AI',
+      useMaxCompletionTokens: false
+    })
+
+    expect(library.customProviders).toEqual([
+      {
+        apiFormat: 'openai-responses',
+        apiKey: 'new-key',
+        baseUrl: 'https://api.example.com/responses',
+        headers: { 'X-Client': 'Mico' },
+        icon: 'openai',
+        id: 'custom-1',
+        name: 'Renamed AI',
+        useMaxCompletionTokens: false
+      }
+    ])
+    expect(JSON.parse(files.get(libraryPath) ?? '')).toMatchObject({
+      customProviders: library.customProviders
     })
   })
 

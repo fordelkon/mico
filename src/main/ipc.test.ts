@@ -32,12 +32,16 @@ function createHarness() {
   }
   const provider = {
     addModel: vi.fn(),
+    addCustomProvider: vi.fn(),
+    updateCustomProvider: vi.fn(),
     discoverModels: vi.fn(),
     getLibrary: vi.fn(),
     importModel: vi.fn(),
+    removeCustomProvider: vi.fn(),
     removeModel: vi.fn(),
     saveConfiguration: vi.fn(),
-    selectModel: vi.fn()
+    selectModel: vi.fn(),
+    testModel: vi.fn()
   }
 
   registerIpc(

@@ -63,30 +63,36 @@ type ChatProviderConfiguration =
       baseUrl: string
       modelId: string
       apiKey?: string
+      headers?: Record<string, string>
     }
   | {
       provider: 'openai-responses'
       baseUrl: string
       modelId: string
-      apiKey: string
+      apiKey?: string
+      headers?: Record<string, string>
     }
   | {
       provider: 'openai-compatible'
       baseUrl: string
       modelId: string
       apiKey?: string
+      headers?: Record<string, string>
+      useMaxCompletionTokens?: boolean
     }
   | {
       provider: 'anthropic-compatible'
       baseUrl: string
       modelId: string
-      apiKey: string
+      apiKey?: string
+      headers?: Record<string, string>
       maxTokens?: number
     }
   | {
       provider: 'ollama'
       baseUrl: string
       modelId: string
+      headers?: Record<string, string>
     }
 
 type LocalProviderId = 'lm-studio' | 'ollama'
@@ -96,6 +102,7 @@ type ModelDiscoveryInput = {
   provider: DiscoverableProviderId
   baseUrl: string
   apiKey?: string
+  headers?: Record<string, string>
 }
 type ModelDiscoveryDependencies = { fetch?: typeof fetch }
 
