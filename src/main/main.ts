@@ -18,38 +18,48 @@ let chatService: ChatService | undefined
 const mainWindowService = new MainWindowService(() => trayService.shouldKeepWindowOpen())
 trayService = new TrayService(mainWindowService)
 
-void app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.electron')
+const gotTheLock = app.requestSingleInstanceLock()
 
-  if (process.platform === 'darwin' && app.dock) {
-    app.dock.setIcon(icon)
-  }
+if (gotTheLock) {
+  const startup = app.whenReady().then(async () => {
+    electronApp.setAppUserModelId('com.electron')
 
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.setIcon(icon)
+    }
 
-  await preferenceService.initialize()
-  await providerService.initialize()
-  chatService = new ChatService(
-    createChatProviderResolver({
-      createChatProvider,
-      getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
     })
-  )
-  mainWindowService.initialize()
-  trayService.initialize()
-  registerIpc({
-    chat: chatService,
-    mainWindow: mainWindowService,
-    preference: preferenceService,
-    provider: providerService
+
+    await preferenceService.initialize()
+    await providerService.initialize()
+    chatService = new ChatService(
+      createChatProviderResolver({
+        createChatProvider,
+        getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
+      })
+    )
+    mainWindowService.initialize()
+    trayService.initialize()
+    registerIpc({
+      chat: chatService,
+      mainWindow: mainWindowService,
+      preference: preferenceService,
+      provider: providerService
+    })
+
+    app.on('activate', () => {
+      mainWindowService.show()
+    })
   })
 
-  app.on('activate', () => {
-    mainWindowService.show()
+  app.on('second-instance', () => {
+    void startup.then(() => mainWindowService.show())
   })
-})
+} else {
+  app.quit()
+}
 
 app.on('before-quit', () => {
   chatService?.dispose()
