@@ -10,7 +10,7 @@ import {
   Input
 } from '@mico/ui'
 import type { ModelEntry, ProviderLibrary } from '@shared/data/schemas/provider'
-import { CheckIcon, ChevronDownIcon, SearchIcon } from 'lucide-react'
+import { ChevronDownIcon, SearchIcon } from 'lucide-react'
 import * as React from 'react'
 
 type EligibleModel = ModelEntry & { providerLabel: string }
@@ -97,9 +97,6 @@ function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React
                   <DropdownMenuRadioItem key={model.id} value={model.id}>
                     <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                       <span className="truncate">{model.displayName}</span>
-                      {model.id === library?.selectedModelId ? (
-                        <CheckIcon aria-hidden="true" className="size-3.5 shrink-0" />
-                      ) : null}
                     </span>
                   </DropdownMenuRadioItem>
                 ))}
