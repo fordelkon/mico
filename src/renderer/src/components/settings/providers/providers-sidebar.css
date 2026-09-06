@@ -1,0 +1,55 @@
+@keyframes provider-badge-slide-in {
+  from {
+    transform: translate(-8.2px, 12.4px);
+  }
+
+  to {
+    transform: translate(0, 0);
+  }
+}
+
+.providers-sidebar__badge {
+  pointer-events: none;
+  position: absolute;
+  top: -0.375rem;
+  right: -0.5rem;
+  will-change: transform;
+}
+
+.providers-sidebar__badge[data-open="true"] {
+  animation: provider-badge-slide-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.providers-sidebar__badge-dot {
+  display: block;
+  width: 0.5rem;
+  height: 0.5rem;
+  transform: scale(1);
+  transform-origin: center;
+  border-radius: 9999px;
+  background: var(--primary);
+  opacity: 1;
+  transition:
+    transform 500ms cubic-bezier(0.34, 1.36, 0.64, 1),
+    opacity 400ms cubic-bezier(0.34, 1.36, 0.64, 1),
+    filter 500ms cubic-bezier(0.34, 1.36, 0.64, 1);
+  will-change: transform, opacity, filter;
+}
+
+.providers-sidebar__badge[data-open="false"] .providers-sidebar__badge-dot {
+  transform: scale(0);
+  filter: blur(2px);
+  opacity: 0;
+  transition:
+    transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    filter 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .providers-sidebar__badge,
+  .providers-sidebar__badge-dot {
+    animation: none !important;
+    transition: none !important;
+  }
+}

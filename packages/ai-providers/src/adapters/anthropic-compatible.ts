@@ -1,6 +1,7 @@
 import type { ProviderMetadata, UIMessageChunk } from 'ai'
 import * as z from 'zod'
 
+import { createAnthropicHeaders } from '../anthropic-auth'
 import type {
   ChatProvider,
   ChatProviderConfiguration,
@@ -59,6 +60,7 @@ const EventSchema = z.object({
       signature: z.string().optional()
     })
     .optional(),
+  usage: z.object({ output_tokens: z.number().nonnegative().optional() }).optional(),
   error: z.object({ message: z.string().optional() }).optional()
 })
 const SignatureSchema = z.object({ signature: z.string() })
@@ -112,7 +114,7 @@ function createAnthropicCompatibleProvider(
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal }) => {
+    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
       const system = messages
         .filter((message) => message.role === 'system')
         .flatMap((message) =>
@@ -139,24 +141,34 @@ function createAnthropicCompatibleProvider(
         stream: true
       }
       if (system) request.system = system
-      const send = (includeThinking: boolean) => {
+      const send = (includeThinking: boolean, authentication: 'api-key' | 'bearer' = 'api-key') => {
         const thinking = getThinking(includeThinking)
         const body = thinking ? { ...request, thinking } : request
+        const headers = createAnthropicHeaders(
+          configuration.apiKey,
+          configuration.headers,
+          authentication
+        )
+        headers.set('content-type', 'application/json')
         return dependencies.fetch(getUrl(configuration.baseUrl), {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-api-key': configuration.apiKey,
-            'anthropic-version': '2023-06-01'
-          },
+          headers,
           body: JSON.stringify(body),
           signal
         })
       }
+      const sendWithAuthenticationFallback = async (
+        includeThinking: boolean
+      ): Promise<Response> => {
+        const response = await send(includeThinking)
+        return response.status === 401 && configuration.apiKey
+          ? send(includeThinking, 'bearer')
+          : response
+      }
       const response =
         isOptimisticThinkingEffort(thinkingEffort) && thinkingEffort !== 'none'
-          ? await fetchWithThinkingFallback(thinkingEffort, send)
-          : await send(false)
+          ? await fetchWithThinkingFallback(thinkingEffort, sendWithAuthenticationFallback)
+          : await sendWithAuthenticationFallback(false)
       if (!response.ok)
         throw new Error(
           `Anthropic-compatible request failed (${response.status} ${response.statusText}).`
@@ -176,6 +188,8 @@ function createAnthropicCompatibleProvider(
               'The Anthropic-compatible streaming response contained invalid event data.'
             )
           if (parsed.data.error?.message) throw new Error(parsed.data.error.message)
+          if (parsed.data.usage?.output_tokens !== undefined)
+            onPerformanceMetrics?.({ outputTokens: parsed.data.usage.output_tokens })
           const index = parsed.data.index ?? 0
           if (
             event.event === 'content_block_start' &&

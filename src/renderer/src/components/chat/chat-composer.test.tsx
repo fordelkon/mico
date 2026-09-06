@@ -12,6 +12,8 @@ const props = {
   mode: 'send' as const,
   onSend: (): void => undefined,
   onStop: (): void => undefined,
+  hasSelectedModel: true,
+  modelSelector: null,
   reasoningCapabilities: null,
   thinkingEffort: 'medium' as const,
   onThinkingEffortChange: (): void => undefined
@@ -82,6 +84,17 @@ describe('ChatComposer', () => {
     await user.click(screen.getByRole('button', { name: 'Stop response' }))
 
     expect(screen.getByText('Response stopped')).toBeVisible()
+  })
+
+  it('prevents sending a drafted message until an enabled model is selected', async () => {
+    const user = userEvent.setup()
+    render(<ChatComposer {...props} hasSelectedModel={false} />)
+
+    await user.type(screen.getByRole('textbox'), 'Hello')
+
+    expect(
+      screen.getByRole('button', { name: 'Select an enabled model to send messages' })
+    ).toBeDisabled()
   })
 
   it('does not render a thinking menu without adjustable capabilities', () => {

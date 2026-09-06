@@ -2,10 +2,25 @@ import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'e
 
 import { ChatRequestIdSchema, ChatStartRequestSchema } from '@shared/data/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
+import {
+  CustomProviderSchema,
+  CustomProviderIdSchema,
+  ModelEntryIdSchema,
+  ProviderConfigurationSchema,
+  ProviderLibrarySchema
+} from '@shared/data/schemas/provider'
 import { IpcChannel } from '@shared/IpcChannel'
+import {
+  AddModelRequestSchema,
+  ImportModelRequestSchema,
+  SetModelEnabledRequestSchema,
+  SyncModelsRequestSchema,
+  TestModelRequestSchema
+} from '@shared/ipc/schemas/providers'
 import type { ChatService } from './ai/chat-service'
 import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
+import type { ProviderService } from './services/provider-service'
 
 type IpcMainRegistrar = Pick<IpcMain, 'handle'>
 type IpcDependencies = {
@@ -30,10 +45,27 @@ interface IpcServices {
     PreferenceService,
     'getAppearancePreference' | 'getResolvedAppearance' | 'setAppearancePreference'
   >
+  provider: Pick<
+    ProviderService,
+    | 'addModel'
+    | 'addCustomProvider'
+    | 'updateCustomProvider'
+    | 'discoverModels'
+    | 'getLibrary'
+    | 'importModel'
+    | 'setModelEnabled'
+    | 'syncModels'
+    | 'removeModel'
+    | 'removeCustomProvider'
+    | 'saveConfiguration'
+    | 'saveLibrary'
+    | 'selectModel'
+    | 'testModel'
+  >
 }
 
 function registerIpc(
-  { chat, mainWindow, preference }: IpcServices,
+  { chat, mainWindow, preference, provider }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
     ipcMain
@@ -123,6 +155,102 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid chat request')
 
     chat.abort({ ownerId: String(event.sender.id), requestId: result.data })
+  })
+
+  dependencies.ipcMain.handle(IpcChannel.Providers_GetLibrary, (event) => {
+    getCallingWindow(event)
+    return provider.getLibrary()
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_AddCustomProvider, (event, input) => {
+    getCallingWindow(event)
+    const result = CustomProviderSchema.omit({ id: true }).safeParse(input)
+    if (!result.success) throw new Error('Invalid custom provider')
+
+    return provider.addCustomProvider(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_UpdateCustomProvider, (event, input) => {
+    getCallingWindow(event)
+    const result = CustomProviderSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid custom provider')
+
+    return provider.updateCustomProvider(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_RemoveCustomProvider, (event, input) => {
+    getCallingWindow(event)
+    const result = CustomProviderIdSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid custom provider ID')
+
+    return provider.removeCustomProvider(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SaveConfiguration, (event, input) => {
+    getCallingWindow(event)
+    const result = ProviderConfigurationSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider configuration')
+
+    return provider.saveConfiguration(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SaveLibrary, (event, input) => {
+    getCallingWindow(event)
+    const result = ProviderLibrarySchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider library')
+
+    return provider.saveLibrary(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_DiscoverModels, (event, input) => {
+    getCallingWindow(event)
+    const result = ProviderConfigurationSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider configuration')
+
+    return provider.discoverModels(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_ImportModel, (event, input) => {
+    getCallingWindow(event)
+    const result = ImportModelRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model')
+
+    return provider.importModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SetModelEnabled, (event, input) => {
+    getCallingWindow(event)
+    const result = SetModelEnabledRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model')
+
+    return provider.setModelEnabled(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SyncModels, (event, input) => {
+    getCallingWindow(event)
+    const result = SyncModelsRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider models')
+
+    return provider.syncModels(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_AddModel, (event, input) => {
+    getCallingWindow(event)
+    const result = AddModelRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model')
+
+    return provider.addModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_RemoveModel, (event, input) => {
+    getCallingWindow(event)
+    const result = ModelEntryIdSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model ID')
+
+    return provider.removeModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SelectModel, (event, input) => {
+    getCallingWindow(event)
+    const result = ModelEntryIdSchema.nullable().safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model ID')
+
+    return provider.selectModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_TestModel, (event, input) => {
+    getCallingWindow(event)
+    const result = TestModelRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid provider model test')
+
+    return provider.testModel(result.data)
   })
 }
 

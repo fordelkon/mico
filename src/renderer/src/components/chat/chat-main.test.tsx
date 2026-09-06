@@ -1,11 +1,17 @@
 import '@testing-library/jest-dom/vitest'
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
 
 import { ChatMain } from './chat-main'
+
+Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+  configurable: true,
+  value: () => undefined
+})
 
 function createWorkspace(): ChatWorkspace {
   return {
@@ -35,9 +41,50 @@ function createWorkspace(): ChatWorkspace {
 }
 
 describe('ChatMain', () => {
+  beforeEach(() => {
+    const library = {
+      configurations: [
+        { provider: 'ollama' as const, baseUrl: 'http://localhost:11434', enabled: true }
+      ],
+      customProviders: [],
+      models: [
+        {
+          id: 'ollama:qwen3',
+          provider: 'ollama',
+          modelId: 'qwen3:8b',
+          displayName: 'Qwen 3 8B',
+          enabled: true
+        }
+      ],
+      selectedModelId: null
+    }
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        chat: { getCapabilities: vi.fn().mockResolvedValue(null) },
+        providers: {
+          getLibrary: vi.fn().mockResolvedValue(library),
+          selectModel: vi.fn().mockResolvedValue({ ...library, selectedModelId: 'ollama:qwen3' })
+        }
+      }
+    })
+  })
+
   it('keeps the stop control available while a response is reconnecting', () => {
     render(<ChatMain workspace={createWorkspace()} />)
 
     expect(screen.getByRole('button', { name: 'Stop response' })).toBeVisible()
+  })
+
+  it('persists a model selected from the composer', async () => {
+    const user = userEvent.setup()
+
+    render(<ChatMain workspace={createWorkspace()} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Select model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Qwen 3 8B' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeVisible())
   })
 })

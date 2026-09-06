@@ -15,7 +15,9 @@ type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
 type ChatComposerProps = {
   focusKey: number
+  hasSelectedModel: boolean
   mode: ChatComposerMode
+  modelSelector: React.ReactNode
   onSend: (content: string) => void
   onStop: () => void
   reasoningCapabilities: ModelReasoningCapabilities | null
@@ -36,7 +38,9 @@ const thinkingEffortLabels = {
 
 function ChatComposer({
   focusKey,
+  hasSelectedModel,
   mode,
+  modelSelector,
   onSend,
   onStop,
   reasoningCapabilities,
@@ -74,7 +78,7 @@ function ChatComposer({
   }, [draft])
 
   const submit = (): void => {
-    if (mode !== 'send' || !draft.trim()) return
+    if (mode !== 'send' || !hasSelectedModel || !draft.trim()) return
 
     onSend(draft)
     setDraft('')
@@ -107,6 +111,7 @@ function ChatComposer({
         />
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
+            {modelSelector}
             {reasoningCapabilities ? (
               <IconMenuButton
                 className="size-8"
@@ -134,7 +139,9 @@ function ChatComposer({
           </div>
           <IconTooltipButton
             className="size-8"
-            disabled={mode === 'disabled' || (mode === 'send' && !draft.trim())}
+            disabled={
+              mode === 'disabled' || (mode === 'send' && (!hasSelectedModel || !draft.trim()))
+            }
             icon={
               <IconSwap
                 from={<ArrowUpIcon aria-hidden="true" />}
@@ -142,7 +149,13 @@ function ChatComposer({
                 to={<SquareIcon aria-hidden="true" />}
               />
             }
-            label={mode === 'stop' ? 'Stop response' : 'Send message'}
+            label={
+              mode === 'stop'
+                ? 'Stop response'
+                : hasSelectedModel
+                  ? 'Send message'
+                  : 'Select an enabled model to send messages'
+            }
             type={mode === 'stop' ? 'button' : 'submit'}
             variant={mode === 'stop' ? 'secondary' : 'default'}
             onClick={mode === 'stop' ? onStop : undefined}

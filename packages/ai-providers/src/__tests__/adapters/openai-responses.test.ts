@@ -109,10 +109,13 @@ describe('OpenAI Responses provider', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.openai.com/v1/responses',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { authorization: 'Bearer key', 'content-type': 'application/json' }
-      })
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(
+      'Bearer key'
+    )
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('content-type')).toBe(
+      'application/json'
     )
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
       JSON.stringify({

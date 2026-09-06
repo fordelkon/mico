@@ -19,6 +19,15 @@ type OpenAIResponsesConfiguration = Extract<
 const OpenAIEventSchema = z.object({
   delta: z.string().optional(),
   message: z.string().optional(),
+  response: z
+    .object({
+      usage: z
+        .object({
+          output_tokens: z.number().nonnegative().optional()
+        })
+        .optional()
+    })
+    .optional(),
   error: z.object({ message: z.string().optional() }).optional()
 })
 type OpenAIEvent = z.infer<typeof OpenAIEventSchema>
@@ -52,17 +61,20 @@ function createOpenAIResponsesProvider(
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal }) => {
+    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
       const request = { model: configuration.modelId, stream: true, input: toOpenAIInput(messages) }
       // Responses uses a different stream vocabulary from Chat Completions, so
       // reasoning summaries and output text are parsed from response.* events below.
-      const response = await fetchWithThinkingFallback(thinkingEffort, (includeThinking) =>
-        dependencies.fetch(responsesUrl, {
+      const response = await fetchWithThinkingFallback(thinkingEffort, (includeThinking) => {
+        const headers = new Headers({
+          'content-type': 'application/json',
+          ...configuration.headers
+        })
+        if (configuration.apiKey && !headers.has('authorization'))
+          headers.set('authorization', `Bearer ${configuration.apiKey}`)
+        return dependencies.fetch(responsesUrl, {
           method: 'POST',
-          headers: {
-            authorization: `Bearer ${configuration.apiKey}`,
-            'content-type': 'application/json'
-          },
+          headers,
           body: JSON.stringify(
             includeThinking
               ? { ...request, reasoning: { effort: thinkingEffort, summary: 'auto' } }
@@ -70,7 +82,7 @@ function createOpenAIResponsesProvider(
           ),
           signal
         })
-      )
+      })
       if (!response.ok)
         throw new Error(`OpenAI request failed (${response.status} ${response.statusText}).`)
       const stream = response.body
@@ -87,6 +99,8 @@ function createOpenAIResponsesProvider(
             yield* text.emitDelta(data.delta)
           }
           if (event.event === 'response.completed') {
+            if (data.response?.usage?.output_tokens !== undefined)
+              onPerformanceMetrics?.({ outputTokens: data.response.usage.output_tokens })
             yield* reasoning.finish()
             yield* text.finish()
             return

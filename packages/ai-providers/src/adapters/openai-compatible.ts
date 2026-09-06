@@ -17,21 +17,39 @@ type OpenAICompatibleConfiguration = Extract<
   ChatProviderConfiguration,
   { provider: 'openai-compatible' }
 >
-type OpenAICompatibleHeaders = { 'content-type': string; authorization?: string }
+type OpenAICompatibleRequest = {
+  model: string
+  messages: ReturnType<typeof toMessages>
+  stream: true
+  stream_options?: { include_usage: true }
+}
 const EventSchema = z.object({
   choices: z
     .array(
       z.object({
         delta: z
           .object({
-            content: z.string().optional(),
+            content: z.string().nullable().optional(),
             reasoning: z.string().optional(),
             reasoning_content: z.string().optional(),
             reasoning_text: z.string().optional()
           })
+          .nullable()
           .optional()
       })
     )
+    .nullable()
+    .optional(),
+  usage: z
+    .object({
+      completion_tokens: z
+        .number()
+        .nonnegative()
+        .nullable()
+        .optional()
+        .transform((value) => value ?? undefined)
+    })
+    .nullable()
     .optional(),
   error: z.object({ message: z.string().optional() }).optional()
 })
@@ -63,14 +81,25 @@ function createOpenAICompatibleProvider(
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal }) => {
-      const headers: OpenAICompatibleHeaders = { 'content-type': 'application/json' }
-      if (configuration.apiKey) headers.authorization = `Bearer ${configuration.apiKey}`
-      const request = {
+    stream: async ({
+      collectPerformanceMetrics,
+      messages,
+      thinkingEffort,
+      signal,
+      onPerformanceMetrics
+    }) => {
+      const headers = new Headers({
+        'content-type': 'application/json',
+        ...configuration.headers
+      })
+      if (configuration.apiKey && !headers.has('authorization'))
+        headers.set('authorization', `Bearer ${configuration.apiKey}`)
+      const request: OpenAICompatibleRequest = {
         model: configuration.modelId,
         messages: toMessages(messages),
         stream: true
       }
+      if (collectPerformanceMetrics) request.stream_options = { include_usage: true }
       const response = await fetchWithThinkingFallback(thinkingEffort, (includeThinking) =>
         dependencies.fetch(getUrl(configuration.baseUrl), {
           method: 'POST',
@@ -100,6 +129,8 @@ function createOpenAICompatibleProvider(
               'The OpenAI-compatible streaming response contained invalid event data.'
             )
           if (parsed.data.error?.message) throw new Error(parsed.data.error.message)
+          if (parsed.data.usage?.completion_tokens !== undefined)
+            onPerformanceMetrics?.({ outputTokens: parsed.data.usage.completion_tokens })
           const delta = parsed.data.choices?.[0]?.delta
           const nativeReasoning =
             delta?.reasoning_content ?? delta?.reasoning ?? delta?.reasoning_text

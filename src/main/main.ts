@@ -1,43 +1,65 @@
 import { app } from 'electron'
-import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import { electronApp, optimizer } from '@electron-toolkit/utils'
 
 import icon from '../../build/icon.png?asset'
 import { ChatService } from './ai/chat-service'
-import { readChatConfiguration } from './ai/config'
+import { createChatProviderResolver } from './ai/chat-provider-resolver'
 import { createChatProvider } from '@mico/ai-providers'
 import { registerIpc } from './ipc'
 import { MainWindowService } from './services/main-window-service'
 import { PreferenceService } from './services/preference-service'
+import { ProviderService } from './services/provider-service'
 import { TrayService } from './services/tray-service'
 
 const preferenceService = new PreferenceService()
+const providerService = new ProviderService()
 let trayService: TrayService
 let chatService: ChatService | undefined
 const mainWindowService = new MainWindowService(() => trayService.shouldKeepWindowOpen())
 trayService = new TrayService(mainWindowService)
 
-void app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.electron')
+const gotTheLock = app.requestSingleInstanceLock()
 
-  if (process.platform === 'darwin' && app.dock) {
-    app.dock.setIcon(icon)
-  }
+if (gotTheLock) {
+  const startup = app.whenReady().then(async () => {
+    electronApp.setAppUserModelId('com.electron')
 
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.setIcon(icon)
+    }
+
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
+
+    await preferenceService.initialize()
+    await providerService.initialize()
+    chatService = new ChatService(
+      createChatProviderResolver({
+        createChatProvider,
+        getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
+      })
+    )
+    mainWindowService.initialize()
+    trayService.initialize()
+    registerIpc({
+      chat: chatService,
+      mainWindow: mainWindowService,
+      preference: preferenceService,
+      provider: providerService
+    })
+
+    app.on('activate', () => {
+      mainWindowService.show()
+    })
   })
 
-  await preferenceService.initialize()
-  const chatConfiguration = readChatConfiguration({ isDevelopment: is.dev, env: process.env })
-  chatService = new ChatService(createChatProvider(chatConfiguration))
-  mainWindowService.initialize()
-  trayService.initialize()
-  registerIpc({ chat: chatService, mainWindow: mainWindowService, preference: preferenceService })
-
-  app.on('activate', () => {
-    mainWindowService.show()
+  app.on('second-instance', () => {
+    void startup.then(() => mainWindowService.show())
   })
-})
+} else {
+  app.quit()
+}
 
 app.on('before-quit', () => {
   chatService?.dispose()

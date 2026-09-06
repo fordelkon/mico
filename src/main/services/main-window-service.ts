@@ -69,10 +69,10 @@ class MainWindowService {
 
   private createWindow(): void {
     const windowOptions: BrowserWindowConstructorOptions = {
-      width: 900,
-      height: 670,
-      minWidth: 800,
-      minHeight: 600,
+      width: 1000,
+      height: 800,
+      minWidth: 1000,
+      minHeight: 800,
       show: false,
       autoHideMenuBar: true,
       webPreferences: {

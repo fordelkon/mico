@@ -66,6 +66,30 @@ body {
   view-transition-name: workspace-content;
 }
 
+.paper-canvas {
+  background-color: var(--chat-canvas);
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
+      transparent 1px
+    ),
+    radial-gradient(
+      circle,
+      color-mix(in oklab, var(--foreground) 5%, transparent) 0.55px,
+      transparent 0.65px
+    );
+  background-position:
+    12px 12px,
+    12px 12px,
+    0 0;
+  background-size:
+    32px 32px,
+    32px 32px,
+    5px 5px;
+}
+
 html[data-navigation-transition="settings"]::view-transition-old(root),
 html[data-navigation-transition="settings"]::view-transition-new(root) {
   animation: none;

@@ -1,6 +1,7 @@
 import { DropdownMenuItem, DropdownMenuSeparator, IconMenuButton } from '@mico/ui'
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MoreHorizontalIcon } from 'lucide-react'
+import * as React from 'react'
 
 const menuItems = (
   <>
@@ -10,6 +11,19 @@ const menuItems = (
     <DropdownMenuItem variant="destructive">Delete</DropdownMenuItem>
   </>
 )
+
+function OpenStateStory(args: React.ComponentProps<typeof IconMenuButton>): React.JSX.Element {
+  const [isOpen, setIsOpen] = React.useState(false)
+
+  return (
+    <div className="flex items-center gap-3">
+      <IconMenuButton {...args} onOpenChange={setIsOpen}>
+        {menuItems}
+      </IconMenuButton>
+      <output className="text-sm text-muted-foreground">{isOpen ? 'Open' : 'Closed'}</output>
+    </div>
+  )
+}
 
 const meta = {
   title: 'Components/Composites/IconMenuButton',
@@ -57,6 +71,17 @@ export const CustomSvg: Story = {
       </svg>
     )
   }
+}
+
+export const EndAligned: Story = {
+  args: {
+    menuAlign: 'end',
+    menuContentClassName: 'w-64'
+  }
+}
+
+export const OpenState: Story = {
+  render: (args) => <OpenStateStory {...args} />
 }
 
 export const Disabled: Story = {
