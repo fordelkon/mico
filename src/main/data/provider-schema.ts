@@ -32,7 +32,8 @@ const providerModels = sqliteTable(
 
 const providerLibraryState = sqliteTable('provider_library_state', {
   id: integer().primaryKey(),
-  selectedModelId: text('selected_model_id')
+  selectedModelId: text('selected_model_id'),
+  selectedProviderId: text('selected_provider_id')
 })
 
 export { providerLibraryState, providerModels, providers }

@@ -68,7 +68,8 @@ class ProviderDatabase {
       );
       CREATE TABLE IF NOT EXISTS provider_library_state (
         id INTEGER PRIMARY KEY NOT NULL,
-        selected_model_id TEXT
+        selected_model_id TEXT,
+        selected_provider_id TEXT
       );
     `)
     // SAFETY: SQLite's table_info pragma always returns a `name` column for each table column.
@@ -83,6 +84,14 @@ class ProviderDatabase {
       )
     if (!modelColumns.some(({ name }) => name === 'enabled_order'))
       sqlite.exec('ALTER TABLE provider_models ADD COLUMN enabled_order INTEGER')
+    // SAFETY: SQLite's table_info pragma always returns a `name` column for each table column.
+    const libraryStateColumns = sqlite
+      .prepare('PRAGMA table_info(provider_library_state)')
+      .all() as Array<{
+      name: string
+    }>
+    if (!libraryStateColumns.some(({ name }) => name === 'selected_provider_id'))
+      sqlite.exec('ALTER TABLE provider_library_state ADD COLUMN selected_provider_id TEXT')
 
     this.sqlite = sqlite
     this.database = drizzle(sqlite, { schema })
@@ -101,7 +110,7 @@ class ProviderDatabase {
       .run()
     this.db
       .insert(providerLibraryState)
-      .values({ id: 1, selectedModelId: null })
+      .values({ id: 1, selectedModelId: null, selectedProviderId: null })
       .onConflictDoNothing()
       .run()
 

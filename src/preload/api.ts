@@ -86,6 +86,8 @@ const providers: ProvidersAPI = {
   saveConfiguration: (configuration) =>
     ipcRenderer.invoke(IpcChannel.Providers_SaveConfiguration, configuration),
   selectModel: (modelId) => ipcRenderer.invoke(IpcChannel.Providers_SelectModel, modelId),
+  selectProvider: (providerId) =>
+    ipcRenderer.invoke(IpcChannel.Providers_SelectProvider, providerId),
   testModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_TestModel, model)
 }
 

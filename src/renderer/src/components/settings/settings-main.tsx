@@ -18,7 +18,7 @@ function SettingsContent(): React.JSX.Element {
   const [activeProviderId, setActiveProviderId] = React.useState<ProviderId>(initialProviderId)
   const hasSelectedDefaultProvider = React.useRef(false)
   const providerReorderAnimation = useListReorderAnimation()
-  const { isLoaded, library } = useProviderLibrary()
+  const { isLoaded, library, selectProvider } = useProviderLibrary()
   const getFirstProviderId = React.useCallback(
     (customProviderIds: ProviderId[]) =>
       sortByEnabledOrder(
@@ -32,9 +32,29 @@ function SettingsContent(): React.JSX.Element {
   React.useEffect(() => {
     if (!isLoaded || hasSelectedDefaultProvider.current) return
 
-    setActiveProviderId(getFirstProviderId(library.customProviders.map(({ id }) => id)))
+    const providerIds = [...builtInProviderIds, ...library.customProviders.map(({ id }) => id)]
+    const fallbackProviderId = getFirstProviderId(library.customProviders.map(({ id }) => id))
+    const restoredProviderId =
+      library.selectedProviderId && providerIds.includes(library.selectedProviderId)
+        ? library.selectedProviderId
+        : fallbackProviderId
+
+    setActiveProviderId(restoredProviderId)
+    if (library.selectedProviderId && library.selectedProviderId !== restoredProviderId)
+      void selectProvider(restoredProviderId)
     hasSelectedDefaultProvider.current = true
-  }, [getFirstProviderId, isLoaded, library.customProviders])
+  }, [
+    getFirstProviderId,
+    isLoaded,
+    library.customProviders,
+    library.selectedProviderId,
+    selectProvider
+  ])
+
+  const selectProviderPage = (providerId: ProviderId): void => {
+    setActiveProviderId(providerId)
+    void selectProvider(providerId)
+  }
 
   return (
     <div className="paper-canvas flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -52,18 +72,17 @@ function SettingsContent(): React.JSX.Element {
             customProviders={library.customProviders}
             enabledProviderIds={library.enabledProviderIds}
             itemRef={providerReorderAnimation.itemRef}
-            onCustomProviderAdded={setActiveProviderId}
-            onSelect={setActiveProviderId}
+            onCustomProviderAdded={selectProviderPage}
+            onSelect={selectProviderPage}
           />
           <ProvidersSection
             key={activeProviderId}
-            onCustomProviderRemoved={(providerId) =>
-              setActiveProviderId(
-                getFirstProviderId(
-                  library.customProviders.filter(({ id }) => id !== providerId).map(({ id }) => id)
-                )
+            onCustomProviderRemoved={(providerId) => {
+              const fallbackProviderId = getFirstProviderId(
+                library.customProviders.filter(({ id }) => id !== providerId).map(({ id }) => id)
               )
-            }
+              selectProviderPage(fallbackProviderId)
+            }}
             onProviderReorder={providerReorderAnimation.capture}
             providerId={activeProviderId}
           />

@@ -20,6 +20,7 @@ export enum IpcChannel {
   Providers_SaveConfiguration = 'providers:save-configuration',
   Providers_SaveLibrary = 'providers:save-library',
   Providers_SelectModel = 'providers:select-model',
+  Providers_SelectProvider = 'providers:select-provider',
   Providers_TestModel = 'providers:test-model',
   WindowControls_Close = 'window-controls:close',
   WindowControls_FullscreenChanged = 'window-controls:fullscreen-changed',

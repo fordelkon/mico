@@ -54,7 +54,8 @@ const library: ProviderLibrary = {
       enabled: true
     }
   ],
-  selectedModelId: 'ollama:qwen3'
+  selectedModelId: 'ollama:qwen3',
+  selectedProviderId: null
 }
 
 describe('ChatModelSelector', () => {

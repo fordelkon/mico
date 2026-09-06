@@ -102,7 +102,8 @@ const ProviderLibrarySchema = defineSchema(
       configurations: z.array(ProviderConfigurationSchema),
       customProviders: z.array(CustomProviderSchema).default([]),
       models: z.array(ModelEntrySchema),
-      selectedModelId: ModelEntryIdSchema.nullable()
+      selectedModelId: ModelEntryIdSchema.nullable(),
+      selectedProviderId: ModelProviderSchema.nullable()
     })
     .refine(
       ({ models, selectedModelId }) =>

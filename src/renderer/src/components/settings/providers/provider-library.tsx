@@ -26,6 +26,7 @@ type ProviderLibrary = {
   enabledModelIds: string[]
   models: ProviderModel[]
   selectedModelId: string | null
+  selectedProviderId: string | null
 }
 type ProviderLibraryContextValue = {
   addCustomProvider: (provider: AddCustomProviderRequest) => Promise<CustomProvider>
@@ -33,6 +34,7 @@ type ProviderLibraryContextValue = {
   library: ProviderLibrary
   removeCustomProvider: (providerId: ProviderId) => Promise<void>
   selectModel: (modelId: string) => Promise<void>
+  selectProvider: (providerId: ProviderId | null) => Promise<void>
   syncModels: (providerId: ProviderId, models: DiscoveredModel[]) => Promise<void>
   toggleModel: (model: ProviderModel, enabled: boolean) => Promise<void>
   flushConfiguration: (providerId: ProviderId) => void
@@ -54,7 +56,8 @@ const initialLibrary: ProviderLibrary = {
   enabledProviderIds: [],
   enabledModelIds: [],
   models: [],
-  selectedModelId: null
+  selectedModelId: null,
+  selectedProviderId: null
 }
 function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderLibrary {
   const configurations = { ...initialLibrary.configurations }
@@ -94,7 +97,8 @@ function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderLibrary {
       providerId: provider
     })),
     enabledModelIds: next.models.filter(({ enabled }) => enabled).map(({ id }) => id),
-    selectedModelId: next.selectedModelId
+    selectedModelId: next.selectedModelId,
+    selectedProviderId: next.selectedProviderId
   }
 }
 const unavailable = async (): Promise<never> => {
@@ -106,6 +110,7 @@ const ProviderLibraryContext = React.createContext<ProviderLibraryContextValue>(
   library: initialLibrary,
   removeCustomProvider: unavailable,
   selectModel: async () => undefined,
+  selectProvider: async () => undefined,
   syncModels: unavailable,
   toggleModel: unavailable,
   flushConfiguration: () => undefined,
@@ -249,6 +254,10 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     const nextLibrary = await window.api.providers.selectModel(modelId)
     setLibrary(fromPersistedLibrary(nextLibrary))
   }, [])
+  const selectProvider = React.useCallback(async (providerId: ProviderId | null) => {
+    setLibrary((current) => ({ ...current, selectedProviderId: providerId }))
+    await window.api.providers.selectProvider(providerId)
+  }, [])
   const value = React.useMemo(
     () => ({
       addCustomProvider,
@@ -257,6 +266,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       library,
       removeCustomProvider,
       selectModel,
+      selectProvider,
       syncModels,
       toggleModel,
       updateConfiguration,
@@ -269,6 +279,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       library,
       removeCustomProvider,
       selectModel,
+      selectProvider,
       syncModels,
       toggleModel,
       updateConfiguration,

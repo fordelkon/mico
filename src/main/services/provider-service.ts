@@ -82,7 +82,8 @@ class ProviderService {
           enabled
         })
       ),
-      selectedModelId: state?.selectedModelId ?? null
+      selectedModelId: state?.selectedModelId ?? null,
+      selectedProviderId: state?.selectedProviderId ?? null
     }
   }
 
@@ -125,7 +126,10 @@ class ProviderService {
         database.db.insert(providerModels).values(library.models.map(toModelValues)).run()
       database.db
         .update(providerLibraryState)
-        .set({ selectedModelId: library.selectedModelId })
+        .set({
+          selectedModelId: library.selectedModelId,
+          selectedProviderId: library.selectedProviderId
+        })
         .where(eq(providerLibraryState.id, 1))
         .run()
     })()
@@ -159,6 +163,12 @@ class ProviderService {
         database.db
           .update(providerLibraryState)
           .set({ selectedModelId: null })
+          .where(eq(providerLibraryState.id, 1))
+          .run()
+      if (state?.selectedProviderId === providerId)
+        database.db
+          .update(providerLibraryState)
+          .set({ selectedProviderId: null })
           .where(eq(providerLibraryState.id, 1))
           .run()
     })()
@@ -333,6 +343,24 @@ class ProviderService {
     this.dependencies.database.db
       .update(providerLibraryState)
       .set({ selectedModelId: modelId })
+      .where(eq(providerLibraryState.id, 1))
+      .run()
+    return this.getLibrary()
+  }
+
+  async selectProvider(providerId: string | null): Promise<ProviderLibrary> {
+    if (
+      providerId !== null &&
+      !this.dependencies.database.db
+        .select()
+        .from(providers)
+        .where(eq(providers.id, providerId))
+        .get()
+    )
+      throw new Error('Provider does not exist in the library.')
+    this.dependencies.database.db
+      .update(providerLibraryState)
+      .set({ selectedProviderId: providerId })
       .where(eq(providerLibraryState.id, 1))
       .run()
     return this.getLibrary()

@@ -8,19 +8,34 @@ import { describe, expect, it } from 'vitest'
 import { ProviderDatabase } from '../data/provider-database'
 import { ProviderService } from './provider-service'
 
-async function createService({ userDataPath }: { userDataPath?: string } = {}) {
+type CreateServiceOptions = {
+  database?: ProviderDatabase
+  userDataPath?: string
+}
+
+async function createService({ database, userDataPath }: CreateServiceOptions = {}) {
   let nextEntryId = 0
-  const database = new ProviderDatabase({
-    getUserDataPath: () => userDataPath ?? join(tmpdir(), 'mico-provider-service'),
-    openDatabase: () => new Database(':memory:')
-  })
+  const providerDatabase =
+    database ??
+    new ProviderDatabase({
+      getUserDataPath: () => userDataPath ?? join(tmpdir(), 'mico-provider-service'),
+      openDatabase: () => new Database(':memory:')
+    })
   const service = new ProviderService({
     createId: () => `entry-${++nextEntryId}`,
-    database,
+    database: providerDatabase,
     discoverModels: async () => [{ modelId: 'gpt-5.6', displayName: 'GPT-5.6' }]
   })
   await service.initialize()
   return service
+}
+
+async function createPersistentService(userDataPath: string) {
+  const database = new ProviderDatabase({
+    getUserDataPath: () => userDataPath,
+    openDatabase: (path) => new Database(path)
+  })
+  return { close: () => database.connection.close(), service: await createService({ database }) }
 }
 
 describe('ProviderService', () => {
@@ -34,7 +49,8 @@ describe('ProviderService', () => {
       ],
       customProviders: [],
       models: [],
-      selectedModelId: null
+      selectedModelId: null,
+      selectedProviderId: null
     })
   })
 
@@ -58,6 +74,45 @@ describe('ProviderService', () => {
       enabled: true,
       useMaxCompletionTokens: true
     })
+  })
+
+  it('persists the last visited provider after reopening the SQLite library', async () => {
+    const userDataPath = await mkdtemp(join(tmpdir(), 'mico-provider-selection-'))
+    let initial: Awaited<ReturnType<typeof createPersistentService>> | undefined
+    let restarted: Awaited<ReturnType<typeof createPersistentService>> | undefined
+    try {
+      initial = await createPersistentService(userDataPath)
+
+      await initial.service.selectProvider('ollama')
+      initial.close()
+      initial = undefined
+      restarted = await createPersistentService(userDataPath)
+
+      expect(restarted.service.getLibrary().selectedProviderId).toBe('ollama')
+    } finally {
+      initial?.close()
+      restarted?.close()
+      await rm(userDataPath, { force: true, recursive: true })
+    }
+  })
+
+  it('clears the last visited provider when that custom provider is removed', async () => {
+    const service = await createService()
+    const library = await service.addCustomProvider({
+      apiFormat: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      headers: {},
+      icon: 'cloud',
+      name: 'Example AI',
+      useMaxCompletionTokens: false
+    })
+    const providerId = library.customProviders[0]?.id
+    if (!providerId) throw new Error('Custom provider was not created.')
+
+    await service.selectProvider(providerId)
+    await service.removeCustomProvider(providerId)
+
+    expect(service.getLibrary().selectedProviderId).toBeNull()
   })
 
   it('keeps the original model when the provider and model ID already exist', async () => {

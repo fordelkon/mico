@@ -6,6 +6,7 @@ import {
   CustomProviderSchema,
   CustomProviderIdSchema,
   ModelEntryIdSchema,
+  ModelProviderSchema,
   ProviderConfigurationSchema,
   ProviderLibrarySchema
 } from '@shared/data/schemas/provider'
@@ -60,6 +61,7 @@ interface IpcServices {
     | 'saveConfiguration'
     | 'saveLibrary'
     | 'selectModel'
+    | 'selectProvider'
     | 'testModel'
   >
 }
@@ -244,6 +246,13 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid provider model ID')
 
     return provider.selectModel(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Providers_SelectProvider, (event, input) => {
+    getCallingWindow(event)
+    const result = ModelProviderSchema.nullable().safeParse(input)
+    if (!result.success) throw new Error('Invalid provider ID')
+
+    return provider.selectProvider(result.data)
   })
   dependencies.ipcMain.handle(IpcChannel.Providers_TestModel, (event, input) => {
     getCallingWindow(event)

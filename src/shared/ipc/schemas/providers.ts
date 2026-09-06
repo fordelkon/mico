@@ -40,6 +40,7 @@ const SetModelEnabledRequestSchema = z.object({
   modelId: ModelEntryIdSchema,
   enabled: z.boolean()
 })
+const SelectProviderRequestSchema = ModelProviderSchema.nullable()
 const TestModelRequestSchema = z.object({
   configuration: ProviderConfigurationSchema,
   modelId: ProviderModelIdSchema
@@ -62,6 +63,7 @@ interface ProvidersAPI {
   testModel: (model: TestModelRequest) => Promise<void>
   removeModel: (modelId: string) => Promise<ProviderLibrary>
   selectModel: (modelId: string | null) => Promise<ProviderLibrary>
+  selectProvider: (providerId: string | null) => Promise<ProviderLibrary>
 }
 
 const providersRequestSchemas = {
@@ -114,6 +116,10 @@ const providersRequestSchemas = {
     input: ModelEntryIdSchema.nullable(),
     output: ProviderLibrarySchema
   }),
+  'providers.select-provider': defineRoute({
+    input: SelectProviderRequestSchema,
+    output: ProviderLibrarySchema
+  }),
   'providers.test-model': defineRoute({ input: TestModelRequestSchema, output: z.void() })
 }
 
@@ -133,6 +139,7 @@ export {
   DiscoveredModelSchema,
   ImportModelRequestSchema,
   SetModelEnabledRequestSchema,
+  SelectProviderRequestSchema,
   SyncModelsRequestSchema,
   TestModelRequestSchema,
   providersRequestSchemas,

@@ -28,6 +28,7 @@ const providerApi = {
   removeModel: vi.fn(),
   saveConfiguration: vi.fn(),
   saveLibrary: vi.fn(),
+  selectProvider: vi.fn(),
   setModelEnabled: vi.fn(),
   syncModels: vi.fn(),
   testModel: vi.fn(),
@@ -70,7 +71,19 @@ beforeEach(() => {
     ],
     customProviders: [],
     models: [],
-    selectedModelId: null
+    selectedModelId: null,
+    selectedProviderId: null
+  })
+  providerApi.selectProvider.mockReset()
+  providerApi.selectProvider.mockResolvedValue({
+    configurations: [
+      { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
+    ],
+    customProviders: [],
+    models: [],
+    selectedModelId: null,
+    selectedProviderId: null
   })
   providerApi.discoverModels.mockReset()
   providerApi.discoverModels.mockResolvedValue([
@@ -188,6 +201,67 @@ describe('SettingsMain', () => {
     })
 
     renderSettings()
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
+  })
+
+  it('restores the last visited provider after loading the library', async () => {
+    providerApi.getLibrary.mockResolvedValueOnce({
+      configurations: [
+        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
+        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+      ],
+      customProviders: [],
+      models: [],
+      selectedModelId: null,
+      selectedProviderId: 'ollama'
+    })
+
+    renderSettings()
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
+  })
+
+  it('falls back from a missing saved provider to the first provider', async () => {
+    providerApi.getLibrary.mockResolvedValueOnce({
+      configurations: [
+        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
+        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
+      ],
+      customProviders: [],
+      models: [],
+      selectedModelId: null,
+      selectedProviderId: 'missing-custom-provider'
+    })
+
+    renderSettings()
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
+    await waitFor(() => {
+      expect(providerApi.selectProvider).toHaveBeenCalledWith('lm-studio')
+    })
+  })
+
+  it('restores the last visited provider after returning to settings', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <ProviderLibraryProvider>
+        <SettingsMain />
+      </ProviderLibraryProvider>
+    )
+
+    await waitForOllama()
+    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
+    rerender(
+      <ProviderLibraryProvider>
+        <div />
+      </ProviderLibraryProvider>
+    )
+    rerender(
+      <ProviderLibraryProvider>
+        <SettingsMain />
+      </ProviderLibraryProvider>
+    )
 
     expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
   })

@@ -44,6 +44,7 @@ function createHarness() {
     saveConfiguration: vi.fn(),
     saveLibrary: vi.fn(),
     selectModel: vi.fn(),
+    selectProvider: vi.fn(),
     testModel: vi.fn()
   }
 
@@ -209,12 +210,43 @@ describe('registerIpc provider handlers', () => {
       ],
       customProviders: [],
       models: [],
-      selectedModelId: null
+      selectedModelId: null,
+      selectedProviderId: null
     }
     provider.saveLibrary.mockResolvedValue(library)
 
     await expect(handlers.get(IpcChannel.Providers_SaveLibrary)?.(event, library)).resolves.toEqual(
       library
     )
+  })
+
+  it('validates and delegates a trusted provider selection', async () => {
+    const { handlers, provider } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const library = {
+      configurations: [{ provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }],
+      customProviders: [],
+      models: [],
+      selectedModelId: null,
+      selectedProviderId: 'ollama'
+    }
+    provider.selectProvider.mockImplementation(async (providerId) => {
+      if (providerId !== 'ollama') throw new Error('Provider selection was not forwarded.')
+      return library
+    })
+
+    await expect(
+      handlers.get(IpcChannel.Providers_SelectProvider)?.(event, 'ollama')
+    ).resolves.toEqual(library)
+  })
+
+  it('rejects an invalid provider selection before delegation', () => {
+    const { handlers, provider } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    expect(() => handlers.get(IpcChannel.Providers_SelectProvider)?.(event, '')).toThrow(
+      'Invalid provider ID'
+    )
+    expect(provider.selectProvider).not.toHaveBeenCalled()
   })
 })
