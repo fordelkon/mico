@@ -19,7 +19,7 @@ const library: ProviderLibrary = {
       apiFormat: 'openai-compatible',
       baseUrl: 'https://api.example.com/v1',
       headers: {},
-      icon: 'cloud',
+      icon: 'zhipu',
       useMaxCompletionTokens: true,
       enabled: true
     }
@@ -59,7 +59,7 @@ const library: ProviderLibrary = {
 }
 
 describe('ChatModelSelector', () => {
-  it('groups only models whose provider and model are enabled', async () => {
+  it('shows enabled models and their identifiers grouped by provider', async () => {
     const user = userEvent.setup()
     render(<ChatModelSelector library={library} onSelect={() => undefined} />)
 
@@ -69,6 +69,8 @@ describe('ChatModelSelector', () => {
     expect(screen.getByText('Example AI')).toBeVisible()
     expect(screen.getByRole('menuitemradio', { name: 'Qwen 3 8B' })).toBeVisible()
     expect(screen.getByRole('menuitemradio', { name: 'Example Chat' })).toBeVisible()
+    expect(screen.getByText('qwen3:8b')).toBeVisible()
+    expect(screen.getByText('example-chat')).toBeVisible()
     expect(screen.queryByText('Disabled model')).toBeNull()
     expect(screen.queryByText('Unavailable LM Studio model')).toBeNull()
   })

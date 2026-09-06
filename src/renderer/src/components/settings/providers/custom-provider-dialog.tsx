@@ -23,7 +23,8 @@ import { CustomProviderSchema } from '@shared/data/schemas/provider'
 import { BoxesIcon, ChevronDownIcon, CloudIcon, ServerIcon, TerminalIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { customProviderLogoSources } from './custom-provider-logo-icons'
+import { customProviderLogoSources } from '@renderer/components/providers/custom-provider-logo-icons'
+
 import { useProviderLibrary } from './provider-library'
 
 type CustomProviderIcon = {

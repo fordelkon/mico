@@ -93,15 +93,15 @@ function ChatComposer({
 
   return (
     <form
-      className="chat-composer shrink-0 px-4 pb-6 pt-3 sm:px-6"
+      className="chat-composer shrink-0 px-4 pb-5 pt-3 sm:px-6"
       onSubmit={(event) => {
         event.preventDefault()
         submit()
       }}
     >
-      <div className="chat-composer__surface mx-auto flex w-full max-w-[46rem] flex-col gap-1.5 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-2.5 shadow-hairline transition-colors focus-within:border-border-strong">
+      <div className="chat-composer__surface mx-auto flex w-full max-w-[50rem] flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
         <Textarea
-          className="min-h-14 max-h-40 resize-none border-0 px-2.5 py-2 text-[15px] leading-6 shadow-none transition-[height] duration-200 ease-out motion-reduce:transition-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
+          className="min-h-16 max-h-40 resize-none border-0 px-2 py-2.5 text-[15px] leading-6 shadow-none transition-[height] duration-200 ease-out motion-reduce:transition-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
           ref={textareaRef}
           disabled={isDisabled}
           onChange={(event) => setDraft(event.target.value)}
@@ -109,8 +109,8 @@ function ChatComposer({
           placeholder="Message Mico Today"
           value={draft}
         />
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1">
+        <div className="flex min-h-8 items-center justify-between gap-4 px-0.5">
+          <div className="flex min-w-0 items-center gap-1.5">
             {modelSelector}
             {reasoningCapabilities ? (
               <IconMenuButton
@@ -137,29 +137,31 @@ function ChatComposer({
               </IconMenuButton>
             ) : null}
           </div>
-          <IconTooltipButton
-            className="size-8"
-            disabled={
-              mode === 'disabled' || (mode === 'send' && (!hasSelectedModel || !draft.trim()))
-            }
-            icon={
-              <IconSwap
-                from={<ArrowUpIcon aria-hidden="true" />}
-                state={mode === 'stop' ? 'to' : 'from'}
-                to={<SquareIcon aria-hidden="true" />}
-              />
-            }
-            label={
-              mode === 'stop'
-                ? 'Stop response'
-                : hasSelectedModel
-                  ? 'Send message'
-                  : 'Select an enabled model to send messages'
-            }
-            type={mode === 'stop' ? 'button' : 'submit'}
-            variant={mode === 'stop' ? 'secondary' : 'default'}
-            onClick={mode === 'stop' ? onStop : undefined}
-          />
+          <div className="flex shrink-0 items-center">
+            <IconTooltipButton
+              className="size-8"
+              disabled={
+                mode === 'disabled' || (mode === 'send' && (!hasSelectedModel || !draft.trim()))
+              }
+              icon={
+                <IconSwap
+                  from={<ArrowUpIcon aria-hidden="true" />}
+                  state={mode === 'stop' ? 'to' : 'from'}
+                  to={<SquareIcon aria-hidden="true" />}
+                />
+              }
+              label={
+                mode === 'stop'
+                  ? 'Stop response'
+                  : hasSelectedModel
+                    ? 'Send message'
+                    : 'Select an enabled model to send messages'
+              }
+              type={mode === 'stop' ? 'button' : 'submit'}
+              variant={mode === 'stop' ? 'secondary' : 'default'}
+              onClick={mode === 'stop' ? onStop : undefined}
+            />
+          </div>
         </div>
       </div>
     </form>

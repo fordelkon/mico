@@ -1,59 +1,28 @@
 import { Button, InputGroup, InputGroupInput, Separator } from '@mico/ui'
 import type { CustomProvider } from '@shared/data/schemas/provider'
-import { BoxesIcon, CloudIcon, PlusIcon, Search, ServerIcon, TerminalIcon } from 'lucide-react'
+import { PlusIcon, Search } from 'lucide-react'
 import * as React from 'react'
 
 import './providers-sidebar.css'
 
+import { ProviderIcon } from '@renderer/components/providers/provider-icon'
 import { CustomProviderDialog } from './custom-provider-dialog'
-import { customProviderLogoSources } from './custom-provider-logo-icons'
-
-import lmStudioIcon from '@renderer/assets/providers/lmstudio.svg'
-import ollamaDarkIcon from '@renderer/assets/providers/ollama-dark.svg'
-import ollamaLightIcon from '@renderer/assets/providers/ollama-light.svg'
 import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
 
 type ProviderId = string
 
 type ProviderDescriptor = {
-  icon?: string
   id: ProviderId
   label: string
   customIcon?: CustomProvider['icon']
 }
 
 const providerDescriptors: ProviderDescriptor[] = [
-  { id: 'lm-studio', label: 'LM Studio', icon: lmStudioIcon },
-  { id: 'ollama', label: 'Ollama', icon: ollamaLightIcon }
+  { id: 'lm-studio', label: 'LM Studio' },
+  { id: 'ollama', label: 'Ollama' }
 ]
 
 const builtInProviderIds = providerDescriptors.map(({ id }) => id)
-
-const customProviderLogoSourcesById = new Map<string, string>(
-  customProviderLogoSources.map(({ id, source }) => [id, source])
-)
-
-function CustomProviderIcon({ icon }: { icon: CustomProvider['icon'] }): React.JSX.Element {
-  switch (icon) {
-    case 'cloud':
-      return <CloudIcon aria-hidden="true" className="size-6 rounded-sm" />
-    case 'server':
-      return <ServerIcon aria-hidden="true" className="size-6 rounded-sm" />
-    case 'terminal':
-      return <TerminalIcon aria-hidden="true" className="size-6 rounded-sm" />
-    case 'default':
-      return <BoxesIcon aria-hidden="true" className="size-6 rounded-sm" />
-    default: {
-      const source = customProviderLogoSourcesById.get(icon)
-
-      return source ? (
-        <img alt="" aria-hidden="true" className="size-6 rounded-sm" src={source} />
-      ) : (
-        <BoxesIcon aria-hidden="true" className="size-6 rounded-sm" />
-      )
-    }
-  }
-}
 
 function ProvidersSidebar({
   activeProviderId,
@@ -173,33 +142,7 @@ function ProvidersSidebar({
                   variant="ghost"
                 >
                   <span className="relative shrink-0">
-                    {provider.id === 'ollama' ? (
-                      <>
-                        <img
-                          alt=""
-                          aria-hidden="true"
-                          className="size-6 shrink-0 rounded-sm dark:hidden"
-                          src={ollamaLightIcon}
-                        />
-                        <img
-                          alt=""
-                          aria-hidden="true"
-                          className="hidden size-6 shrink-0 rounded-sm dark:block"
-                          src={ollamaDarkIcon}
-                        />
-                      </>
-                    ) : provider.icon ? (
-                      <img
-                        alt=""
-                        aria-hidden="true"
-                        className="size-6 rounded-sm"
-                        src={provider.icon}
-                      />
-                    ) : provider.customIcon ? (
-                      <CustomProviderIcon icon={provider.customIcon} />
-                    ) : (
-                      <BoxesIcon aria-hidden="true" className="size-6 rounded-sm" />
-                    )}
+                    <ProviderIcon customIcon={provider.customIcon} providerId={provider.id} />
                     {!isExpanded ? (
                       <span
                         aria-hidden="true"
