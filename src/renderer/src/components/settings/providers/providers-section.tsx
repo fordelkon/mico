@@ -45,6 +45,7 @@ import type {
 import { useProviderLibrary } from './provider-library'
 import type { ProviderId } from './providers-sidebar'
 import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
+import { useListReorderAnimation } from '@renderer/hooks/use-list-reorder-animation'
 
 function toCustomProviderConfiguration(provider: CustomProvider): ProviderConnection {
   switch (provider.apiFormat) {
@@ -81,9 +82,11 @@ function toCustomProviderConfiguration(provider: CustomProvider): ProviderConnec
 
 function ProvidersSection({
   onCustomProviderRemoved,
+  onProviderReorder,
   providerId
 }: {
   onCustomProviderRemoved: (providerId: ProviderId) => void
+  onProviderReorder: () => void
   providerId: ProviderId
 }): React.JSX.Element {
   const {
@@ -121,6 +124,7 @@ function ProvidersSection({
   const [status, setStatus] = React.useState<{ kind: 'error' | 'success'; message: string } | null>(
     null
   )
+  const modelReorderAnimation = useListReorderAnimation()
   const customProvider = library.customProviders.find(({ id }) => id === providerId)
   const builtInProviderId = providerId === 'ollama' ? 'ollama' : 'lm-studio'
   const providerLabel = customProvider?.name ?? (providerId === 'ollama' ? 'Ollama' : 'LM Studio')
@@ -430,9 +434,10 @@ function ProvidersSection({
             <Toggle
               aria-label={`Enable ${providerLabel}`}
               checked={configuration.enabled}
-              onCheckedChange={(enabled) =>
+              onCheckedChange={(enabled) => {
+                onProviderReorder()
                 updateConfiguration(providerId, { ...configuration, enabled }, { immediate: true })
-              }
+              }}
             />
           </div>
         </header>
@@ -724,12 +729,16 @@ function ProvidersSection({
                     <div
                       className="flex items-center justify-between border-b border-border-subtle px-3 py-2.5 last:border-b-0"
                       key={model.id}
+                      ref={modelReorderAnimation.itemRef(model.id)}
                     >
                       <span className="font-mono text-sm">{model.name}</span>
                       <Toggle
                         aria-label={`Enable ${model.name}`}
                         checked={model.enabled}
-                        onCheckedChange={(enabled) => void toggleModel(model, enabled)}
+                        onCheckedChange={(enabled) => {
+                          modelReorderAnimation.capture()
+                          void toggleModel(model, enabled)
+                        }}
                       />
                     </div>
                   ))

@@ -59,12 +59,14 @@ function ProvidersSidebar({
   activeProviderId,
   customProviders,
   enabledProviderIds = [],
+  itemRef,
   onSelect,
   onCustomProviderAdded
 }: {
   activeProviderId: ProviderId
   customProviders: CustomProvider[]
   enabledProviderIds?: ProviderId[]
+  itemRef?: (providerId: ProviderId) => (element: HTMLButtonElement | null) => void
   onSelect: (providerId: ProviderId) => void
   onCustomProviderAdded: (providerId: ProviderId) => void
 }): React.JSX.Element {
@@ -167,6 +169,7 @@ function ProvidersSidebar({
                   }
                   key={provider.id}
                   onClick={() => onSelect(provider.id)}
+                  ref={itemRef?.(provider.id)}
                   variant="ghost"
                 >
                   <span className="relative shrink-0">

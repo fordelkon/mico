@@ -126,19 +126,16 @@ function AppSidebar({
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                aria-pressed={settingsActive}
-                isActive={settingsActive}
-                onClick={onOpenSettings}
-                tooltip="Settings"
-              >
-                <Settings aria-hidden="true" />
-                <span>Settings</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+          {!settingsActive && (
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={onOpenSettings} tooltip="Settings">
+                  <Settings aria-hidden="true" />
+                  <span>Settings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          )}
         </SidebarFooter>
         <SidebarResizeHandle className="app-sidebar__resize-handle" />
       </Sidebar>

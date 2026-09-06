@@ -3,6 +3,7 @@ import { Bot } from 'lucide-react'
 import * as React from 'react'
 
 import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
+import { useListReorderAnimation } from '@renderer/hooks/use-list-reorder-animation'
 
 import {
   builtInProviderIds,
@@ -16,6 +17,7 @@ function SettingsContent(): React.JSX.Element {
   const initialProviderId = builtInProviderIds[0] ?? 'lm-studio'
   const [activeProviderId, setActiveProviderId] = React.useState<ProviderId>(initialProviderId)
   const hasSelectedDefaultProvider = React.useRef(false)
+  const providerReorderAnimation = useListReorderAnimation()
   const { isLoaded, library } = useProviderLibrary()
   const getFirstProviderId = React.useCallback(
     (customProviderIds: ProviderId[]) =>
@@ -49,6 +51,7 @@ function SettingsContent(): React.JSX.Element {
             activeProviderId={activeProviderId}
             customProviders={library.customProviders}
             enabledProviderIds={library.enabledProviderIds}
+            itemRef={providerReorderAnimation.itemRef}
             onCustomProviderAdded={setActiveProviderId}
             onSelect={setActiveProviderId}
           />
@@ -61,6 +64,7 @@ function SettingsContent(): React.JSX.Element {
                 )
               )
             }
+            onProviderReorder={providerReorderAnimation.capture}
             providerId={activeProviderId}
           />
         </div>
