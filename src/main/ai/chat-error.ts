@@ -6,6 +6,9 @@ type ChatErrorDescription = {
 }
 
 function describeChatError(error: Error): ChatErrorDescription {
+  if (error.message === 'Select an enabled model in Settings before chatting.')
+    return { message: error.message, retryable: false }
+
   if (error instanceof TypeError) {
     return {
       message: "Couldn't connect to the API endpoint. Check the API URL, network, VPN, or proxy.",

@@ -1,9 +1,9 @@
 import { app } from 'electron'
-import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import { electronApp, optimizer } from '@electron-toolkit/utils'
 
 import icon from '../../build/icon.png?asset'
 import { ChatService } from './ai/chat-service'
-import { readChatConfiguration } from './ai/config'
+import { createChatProviderResolver } from './ai/chat-provider-resolver'
 import { createChatProvider } from '@mico/ai-providers'
 import { registerIpc } from './ipc'
 import { MainWindowService } from './services/main-window-service'
@@ -31,8 +31,12 @@ void app.whenReady().then(async () => {
 
   await preferenceService.initialize()
   await providerService.initialize()
-  const chatConfiguration = readChatConfiguration({ isDevelopment: is.dev, env: process.env })
-  chatService = new ChatService(createChatProvider(chatConfiguration))
+  chatService = new ChatService(
+    createChatProviderResolver({
+      createChatProvider,
+      getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
+    })
+  )
   mainWindowService.initialize()
   trayService.initialize()
   registerIpc({

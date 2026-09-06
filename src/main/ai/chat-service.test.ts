@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
 import type { ChatProvider } from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
+import { createChatProviderResolver } from './chat-provider-resolver'
 import { ChatService } from './chat-service'
 
 const request: ChatStartRequest = {
@@ -50,10 +51,33 @@ function pendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk> {
 }
 
 describe('ChatService', () => {
+  it('returns no capabilities and emits an error when no enabled model is selected', async () => {
+    const events: ChatStreamEvent[] = []
+    const service = new ChatService(
+      createChatProviderResolver({
+        createChatProvider: () => createProvider(async () => streamFrom([])),
+        getSelectedChatConfiguration: () => null
+      })
+    )
+
+    await expect(service.getModelCapabilities()).resolves.toBeNull()
+    service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
+
+    await waitFor(() => {
+      expect(events).toEqual([
+        {
+          type: 'error',
+          requestId: 'request-1',
+          message: 'Select an enabled model in Settings before chatting.'
+        }
+      ])
+    })
+  })
+
   it('emits every chunk followed by one finish for a normal run', async () => {
     const events: ChatStreamEvent[] = []
     const provider = createProvider(async () => streamFrom([textChunk]))
-    const service = new ChatService(provider)
+    const service = new ChatService(() => provider)
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
 
@@ -72,7 +96,7 @@ describe('ChatService', () => {
       signals.set(String(signals.size + 1), signal)
       return pendingStream(signal)
     })
-    const service = new ChatService(provider)
+    const service = new ChatService(() => provider)
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
     service.start(
@@ -95,7 +119,7 @@ describe('ChatService', () => {
       signals.push(signal)
       return pendingStream(signal)
     })
-    const service = new ChatService(provider)
+    const service = new ChatService(() => provider)
 
     service.start({ ownerId: 'window-1', request }, () => undefined)
     service.start({ ownerId: 'window-2', request }, () => undefined)
@@ -113,7 +137,7 @@ describe('ChatService', () => {
       signals.push(signal)
       return pendingStream(signal)
     })
-    const service = new ChatService(provider)
+    const service = new ChatService(() => provider)
 
     service.start({ ownerId: 'window-1', request }, () => undefined)
     service.start(
@@ -132,7 +156,7 @@ describe('ChatService', () => {
     const stream = vi.fn(async () => {
       throw new Error('upstream credential details')
     })
-    const service = new ChatService(createProvider(stream))
+    const service = new ChatService(() => createProvider(stream))
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
 
@@ -155,7 +179,7 @@ describe('ChatService', () => {
       if (calls === 1) throw new TypeError('fetch failed')
       return streamFrom([textChunk])
     }
-    const service = new ChatService(createProvider(stream), {
+    const service = new ChatService(() => createProvider(stream), {
       maxAttempts: 2,
       retryDelayMs: 0
     })
@@ -185,7 +209,7 @@ describe('ChatService', () => {
         throw new TypeError('fetch failed')
       }
     }))
-    const service = new ChatService(provider, { maxAttempts: 2, retryDelayMs: 0 })
+    const service = new ChatService(() => provider, { maxAttempts: 2, retryDelayMs: 0 })
 
     service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
 
@@ -204,7 +228,7 @@ describe('ChatService', () => {
 
   it('passes a sender-scoped conversation key and the request effort to the provider', async () => {
     const stream = vi.fn(async () => streamFrom([]))
-    const service = new ChatService(createProvider(stream))
+    const service = new ChatService(() => createProvider(stream))
 
     service.start(
       {

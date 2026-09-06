@@ -328,15 +328,8 @@ class ProviderService {
   }
 
   async selectModel(modelId: string | null): Promise<ProviderLibrary> {
-    if (
-      modelId !== null &&
-      !this.dependencies.database.db
-        .select({ id: providerModels.id })
-        .from(providerModels)
-        .where(eq(providerModels.id, modelId))
-        .get()
-    )
-      throw new Error('Selected model does not exist in the library.')
+    if (modelId !== null && !isModelEligible(this.getLibrary(), modelId))
+      throw new Error('Selected model is not enabled in the library.')
     this.dependencies.database.db
       .update(providerLibraryState)
       .set({ selectedModelId: modelId })
@@ -348,10 +341,19 @@ class ProviderService {
   getSelectedChatConfiguration(): ChatProviderConfiguration | null {
     const library = this.getLibrary()
     const model = library.models.find(({ id }) => id === library.selectedModelId)
-    const configuration = model
-      ? library.configurations.find(({ provider }) => provider === model.provider)
-      : undefined
-    return model && configuration ? toChatProviderConfiguration(configuration, model) : null
+    if (!model?.enabled) return null
+
+    const configuration = library.configurations.find(
+      ({ enabled, provider }) => enabled && provider === model.provider
+    )
+    if (configuration) return toChatProviderConfiguration(configuration, model)
+
+    const customProvider = library.customProviders.find(
+      ({ enabled, id }) => enabled && id === model.provider
+    )
+    return customProvider
+      ? toChatProviderConfiguration(toCustomProviderConfiguration(customProvider), model)
+      : null
   }
 }
 
@@ -463,6 +465,50 @@ function toCustomProviderValues(provider: CustomProvider) {
     name: provider.name,
     useMaxCompletionTokens: provider.useMaxCompletionTokens
   }
+}
+
+function toCustomProviderConfiguration(provider: CustomProvider): ProviderConfiguration {
+  switch (provider.apiFormat) {
+    case 'openai-compatible': {
+      const configuration: Extract<ProviderConfiguration, { provider: 'openai-compatible' }> = {
+        provider: 'openai-compatible',
+        baseUrl: provider.baseUrl,
+        headers: provider.headers,
+        useMaxCompletionTokens: provider.useMaxCompletionTokens
+      }
+      if (provider.apiKey) configuration.apiKey = provider.apiKey
+      return configuration
+    }
+    case 'openai-responses': {
+      const configuration: Extract<ProviderConfiguration, { provider: 'openai-responses' }> = {
+        provider: 'openai-responses',
+        baseUrl: provider.baseUrl,
+        headers: provider.headers
+      }
+      if (provider.apiKey) configuration.apiKey = provider.apiKey
+      return configuration
+    }
+    case 'anthropic-compatible': {
+      const configuration: Extract<ProviderConfiguration, { provider: 'anthropic-compatible' }> = {
+        provider: 'anthropic-compatible',
+        baseUrl: provider.baseUrl,
+        headers: provider.headers
+      }
+      if (provider.apiKey) configuration.apiKey = provider.apiKey
+      return configuration
+    }
+  }
+}
+
+function isModelEligible(library: ProviderLibrary, modelId: string): boolean {
+  const model = library.models.find(({ id }) => id === modelId)
+  if (!model?.enabled) return false
+
+  return (
+    library.configurations.some(
+      ({ enabled, provider }) => enabled && provider === model.provider
+    ) || library.customProviders.some(({ enabled, id }) => enabled && id === model.provider)
+  )
 }
 
 function toModelValues(model: ModelEntry) {

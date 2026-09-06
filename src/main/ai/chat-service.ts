@@ -2,6 +2,7 @@ import type { ChatProvider } from '@mico/ai-providers'
 import type { ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
 
 import { describeChatError } from './chat-error'
+import type { ChatProviderResolver } from './chat-provider-resolver'
 
 type ChatRun = {
   controller: AbortController
@@ -37,19 +38,22 @@ class ChatService {
   private readonly maxAttempts: number
   private readonly retryDelayMs: number
 
+  private readonly resolveProvider: ChatProviderResolver
+
   constructor(
-    private readonly provider: Pick<ChatProvider, 'getModelCapabilities' | 'stream'>,
+    resolveProvider: ChatProviderResolver,
     {
       maxAttempts = DEFAULT_MAX_ATTEMPTS,
       retryDelayMs = DEFAULT_RETRY_DELAY_MS
     }: ChatRetryOptions = {}
   ) {
+    this.resolveProvider = resolveProvider
     this.maxAttempts = maxAttempts
     this.retryDelayMs = retryDelayMs
   }
 
   getModelCapabilities(): ReturnType<ChatProvider['getModelCapabilities']> {
-    return this.provider.getModelCapabilities()
+    return this.resolveProvider()?.getModelCapabilities() ?? Promise.resolve(null)
   }
 
   start(
@@ -94,9 +98,12 @@ class ChatService {
     let receivedChunk = false
 
     try {
+      const provider = this.resolveProvider()
+      if (!provider) throw new Error('Select an enabled model in Settings before chatting.')
+
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
-          const stream = await this.provider.stream({
+          const stream = await provider.stream({
             conversationKey: `${run.ownerId}:${request.conversationId}`,
             messages: request.messages,
             thinkingEffort: request.thinkingEffort ?? 'default',

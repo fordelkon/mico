@@ -108,11 +108,80 @@ describe('ProviderService', () => {
 
   it('clears selection when its selected model is removed', async () => {
     const service = await createService()
+    await service.saveConfiguration({
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      enabled: true
+    })
     await service.addModel({ provider: 'ollama', modelId: 'llama3.2' })
     await service.selectModel('entry-1')
     await service.removeModel('entry-1')
 
     expect(service.getLibrary()).toMatchObject({ models: [], selectedModelId: null })
+  })
+
+  it('resolves only an enabled selected model from an enabled built-in provider', async () => {
+    const service = await createService()
+    await service.saveConfiguration({
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      enabled: true
+    })
+    await service.addModel({ provider: 'ollama', modelId: 'qwen3:8b' })
+
+    await service.setModelEnabled({ modelId: 'entry-1', enabled: false })
+    await expect(service.selectModel('entry-1')).rejects.toThrow(
+      'Selected model is not enabled in the library.'
+    )
+
+    await service.setModelEnabled({ modelId: 'entry-1', enabled: true })
+    await service.selectModel('entry-1')
+
+    expect(service.getSelectedChatConfiguration()).toEqual({
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      modelId: 'qwen3:8b'
+    })
+
+    await service.setModelEnabled({ modelId: 'entry-1', enabled: false })
+
+    expect(service.getSelectedChatConfiguration()).toBeNull()
+
+    await service.setModelEnabled({ modelId: 'entry-1', enabled: true })
+    await service.selectModel('entry-1')
+
+    await service.saveConfiguration({
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      enabled: false
+    })
+
+    expect(service.getSelectedChatConfiguration()).toBeNull()
+  })
+
+  it('resolves an enabled selected model from an enabled custom provider', async () => {
+    const service = await createService()
+    const library = await service.addCustomProvider({
+      apiFormat: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      enabled: true,
+      headers: { 'X-Client': 'Mico' },
+      icon: 'cloud',
+      name: 'Example AI',
+      useMaxCompletionTokens: true
+    })
+    const providerId = library.customProviders[0]?.id
+    if (!providerId) throw new Error('Custom provider was not created.')
+    await service.addModel({ provider: providerId, modelId: 'gpt-5.6' })
+    await service.selectModel('entry-2')
+
+    expect(service.getSelectedChatConfiguration()).toEqual({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      headers: { 'X-Client': 'Mico' },
+      modelId: 'gpt-5.6',
+      useMaxCompletionTokens: true
+    })
   })
 
   it('deletes the legacy JSON without importing it after initializing SQLite', async () => {
