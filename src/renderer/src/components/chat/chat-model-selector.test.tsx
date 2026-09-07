@@ -68,8 +68,8 @@ describe('ChatModelSelector', () => {
 
     expect(screen.getByText('Ollama')).toBeVisible()
     expect(screen.getByText('Example AI')).toBeVisible()
-    expect(screen.getByRole('menuitemradio', { name: 'Qwen 3 8B' })).toBeVisible()
-    expect(screen.getByRole('menuitemradio', { name: 'Example Chat' })).toBeVisible()
+    expect(screen.getByRole('option', { name: 'Qwen 3 8B' })).toBeVisible()
+    expect(screen.getByRole('option', { name: 'Example Chat' })).toBeVisible()
     expect(screen.getByText('qwen3:8b')).toBeVisible()
     expect(screen.getByText('example-chat')).toBeVisible()
     expect(screen.queryByText('Disabled model')).toBeNull()
@@ -86,7 +86,17 @@ describe('ChatModelSelector', () => {
 
     expect(search).toHaveValue('example')
 
-    expect(screen.getByRole('menuitemradio', { name: 'Example Chat' })).toBeVisible()
-    expect(screen.queryByRole('menuitemradio', { name: 'Qwen 3 8B' })).toBeNull()
+    expect(screen.getByRole('option', { name: 'Example Chat' })).toBeVisible()
+    expect(screen.queryByRole('option', { name: 'Qwen 3 8B' })).toBeNull()
+  })
+
+  it('closes the selector after a model is selected', async () => {
+    const user = userEvent.setup()
+    render(<ChatModelSelector library={library} onSelect={() => undefined} />)
+
+    await user.click(screen.getByRole('button', { name: 'Qwen 3 8B' }))
+    await user.click(screen.getByRole('option', { name: 'Example Chat' }))
+
+    expect(screen.queryByRole('listbox', { name: 'Available models' })).toBeNull()
   })
 })

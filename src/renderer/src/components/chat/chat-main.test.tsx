@@ -86,7 +86,7 @@ describe('ChatMain', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: 'Select model' }))
-    await user.click(screen.getByRole('menuitemradio', { name: 'Qwen 3 8B' }))
+    await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeVisible())
   })

@@ -1,14 +1,4 @@
-import {
-  Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  Input
-} from '@mico/ui'
+import { Button, Input, Popover, PopoverContent, PopoverTrigger } from '@mico/ui'
 import type { CustomProvider, ModelEntry, ProviderLibrary } from '@shared/data/schemas/provider'
 import { ChevronDownIcon, SearchIcon } from 'lucide-react'
 import * as React from 'react'
@@ -67,15 +57,19 @@ function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React
     : eligibleModels
   const modelsByProvider = Map.groupBy(visibleModels, ({ provider }) => provider)
 
+  function handleOpenChange(open: boolean) {
+    setIsOpen(open)
+    if (!open) setQuery('')
+  }
+
+  function handleSelect(modelId: string) {
+    onSelect(modelId)
+    handleOpenChange(false)
+  }
+
   return (
-    <DropdownMenu
-      open={isOpen}
-      onOpenChange={(open) => {
-        setIsOpen(open)
-        if (!open) setQuery('')
-      }}
-    >
-      <DropdownMenuTrigger asChild disabled={!library}>
+    <Popover open={isOpen} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild disabled={!library}>
         <Button className="h-8 gap-1.5 px-2 text-xs" type="button" variant="ghost">
           {selectedModel ? (
             <ProviderIcon
@@ -87,65 +81,73 @@ function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React
           <span className="max-w-44 truncate">{selectedModel?.displayName ?? 'Select model'}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-96 p-0">
-        <div className="relative p-2">
-          <SearchIcon
-            aria-hidden="true"
-            className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            autoFocus
-            className="h-8 pl-7 text-xs"
-            placeholder="Search models"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => event.stopPropagation()}
-          />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-96 gap-0 overflow-hidden p-0">
+        <div className="border-b border-border/70 px-3 transition-colors hover:bg-accent/40">
+          <div className="flex h-10 items-center gap-2">
+            <SearchIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+            <Input
+              autoFocus
+              className="h-8 rounded-none border-0 bg-transparent px-0 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+              placeholder="Search models"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
         </div>
-        <DropdownMenuSeparator />
         {modelsByProvider.size ? (
-          <div className="max-h-80 overflow-y-auto p-1">
-            <DropdownMenuRadioGroup value={library?.selectedModelId ?? ''} onValueChange={onSelect}>
+          <div
+            aria-label="Available models"
+            className="max-h-80 overflow-y-auto p-1"
+            role="listbox"
+          >
+            <div className="flex flex-col gap-1">
               {[...modelsByProvider].map(([providerId, models], index) => {
                 const [{ providerIcon, providerLabel }] = models
 
                 return (
-                  <React.Fragment key={providerId}>
-                    {index > 0 ? <DropdownMenuSeparator /> : null}
-                    <DropdownMenuLabel className="flex items-center gap-2 px-2 py-2">
+                  <section
+                    aria-label={providerLabel}
+                    className={index > 0 ? 'border-t border-border/70 pt-1' : undefined}
+                    key={providerId}
+                  >
+                    <div className="flex items-center gap-2 px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">
                       <ProviderIcon
-                        className="size-4 rounded-sm"
+                        className="size-3.5 rounded-sm"
                         customIcon={providerIcon}
                         providerId={providerId}
                       />
-                      {providerLabel}
-                    </DropdownMenuLabel>
+                      <span>{providerLabel}</span>
+                    </div>
                     {models.map((model) => (
-                      <DropdownMenuRadioItem key={model.id} value={model.id}>
-                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                          <span className="truncate">{model.displayName}</span>
-                          <span
-                            aria-hidden="true"
-                            className="shrink-0 font-mono text-xs text-muted-foreground"
-                          >
-                            {model.modelId}
-                          </span>
+                      <Button
+                        aria-label={model.displayName}
+                        aria-selected={model.id === library?.selectedModelId}
+                        className="h-auto min-h-8 w-full justify-between gap-3 px-2 py-1.5 text-left text-sm focus-visible:border-transparent focus-visible:bg-accent focus-visible:ring-0"
+                        key={model.id}
+                        onClick={() => handleSelect(model.id)}
+                        role="option"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <span className="min-w-0 truncate">{model.displayName}</span>
+                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                          {model.modelId}
                         </span>
-                      </DropdownMenuRadioItem>
+                      </Button>
                     ))}
-                  </React.Fragment>
+                  </section>
                 )
               })}
-            </DropdownMenuRadioGroup>
+            </div>
           </div>
         ) : (
           <p className="px-2 py-3 text-xs text-muted-foreground">
             Enable a provider and model in Settings to chat.
           </p>
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   )
 }
 

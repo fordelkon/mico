@@ -418,7 +418,7 @@ describe('SettingsMain', () => {
     await screen.findByText('granite4.2:3b')
     await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
 
-    const modelOption = screen.getByRole('menuitem', { name: 'granite4.2:3b' })
+    const modelOption = screen.getByRole('option', { name: 'granite4.2:3b' })
 
     await user.click(modelOption)
 
@@ -484,7 +484,7 @@ describe('SettingsMain', () => {
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
     await screen.findByText('granite4.2:3b')
     await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
-    await user.click(screen.getByRole('menuitem', { name: 'granite4.2:3b' }))
+    await user.click(screen.getByRole('option', { name: 'granite4.2:3b' }))
 
     expect(await screen.findByText('The model is unavailable.')).toBeVisible()
     expect(screen.getByLabelText('Ollama model test failed')).toBeVisible()
@@ -505,7 +505,7 @@ describe('SettingsMain', () => {
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
     await screen.findByText('granite4.2:3b')
     await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
-    await user.click(screen.getByRole('menuitem', { name: 'granite4.2:3b' }))
+    await user.click(screen.getByRole('option', { name: 'granite4.2:3b' }))
 
     expect(screen.getByLabelText('Testing Ollama model')).toBeVisible()
 

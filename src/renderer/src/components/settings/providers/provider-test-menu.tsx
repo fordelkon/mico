@@ -1,10 +1,4 @@
-import {
-  DropdownMenuItem,
-  IconMenuButton,
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput
-} from '@mico/ui'
+import { Button, InputGroupInput, Popover, PopoverContent, PopoverTrigger } from '@mico/ui'
 import {
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -49,12 +43,26 @@ function ProviderTestMenu({
     }
   }, [isOpen])
 
+  function handleOpenChange(open: boolean) {
+    setIsOpen(open)
+    if (!open) setSearch('')
+  }
+
+  function handleTestModel(modelId: string) {
+    onTestModel(modelId)
+    handleOpenChange(false)
+  }
+
   return (
-    <IconMenuButton
-      className="h-8 w-12 gap-1 px-1.5"
-      disabled={!hasModels}
-      icon={
-        <>
+    <Popover open={isOpen} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild disabled={!hasModels}>
+        <Button
+          aria-label={`Test ${providerLabel} model`}
+          className="h-8 w-12 gap-1 px-1.5"
+          disabled={!hasModels}
+          type="button"
+          variant="outline"
+        >
           {testState === 'testing' ? (
             <LoaderCircleIcon
               aria-label={`Testing ${providerLabel} model`}
@@ -74,17 +82,12 @@ function ProviderTestMenu({
             <ZapIcon aria-hidden="true" />
           )}
           <ChevronDownIcon aria-hidden="true" className="size-3" />
-        </>
-      }
-      label={`Test ${providerLabel} model`}
-      menuAlign="end"
-      menuContentClassName="w-72"
-      onOpenChange={setIsOpen}
-      variant="outline"
-    >
-      <div>
-        <div className="p-1 pb-0">
-          <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 gap-0 overflow-hidden p-0">
+        <div className="border-b border-border/70 px-3 transition-colors hover:bg-accent/40">
+          <div className="flex h-10 items-center gap-2">
+            <SearchIcon aria-hidden="true" className="size-4 shrink-0 opacity-50" />
             <InputGroupInput
               aria-label={`Search ${providerLabel} models`}
               onChange={(event) => setSearch(event.target.value)}
@@ -97,12 +100,13 @@ function ProviderTestMenu({
               ref={searchRef}
               value={search}
             />
-            <InputGroupAddon>
-              <SearchIcon aria-hidden="true" className="size-4 shrink-0 opacity-50" />
-            </InputGroupAddon>
-          </InputGroup>
+          </div>
         </div>
-        <div className="max-h-56 overflow-y-auto p-1">
+        <div
+          aria-label={`${providerLabel} models`}
+          className="max-h-56 overflow-y-auto p-1"
+          role="listbox"
+        >
           {!hasModels ? (
             <p className="py-6 text-center text-sm text-text-secondary">
               Fetch models before testing.
@@ -111,19 +115,22 @@ function ProviderTestMenu({
             <p className="py-6 text-center text-sm text-text-secondary">No models found.</p>
           ) : (
             filteredModels.map((model) => (
-              <DropdownMenuItem
-                className="rounded-sm px-2 py-1.5"
+              <Button
+                className="h-auto min-h-8 w-full justify-start rounded-sm px-2 py-1.5 text-left text-sm focus-visible:border-transparent focus-visible:bg-accent focus-visible:ring-0"
                 disabled={isTesting}
                 key={model.id}
-                onSelect={() => onTestModel(model.modelId)}
+                onClick={() => handleTestModel(model.modelId)}
+                role="option"
+                type="button"
+                variant="ghost"
               >
                 {model.name}
-              </DropdownMenuItem>
+              </Button>
             ))
           )}
         </div>
-      </div>
-    </IconMenuButton>
+      </PopoverContent>
+    </Popover>
   )
 }
 
