@@ -31,7 +31,7 @@ function createFetch(response: Response): RecordingFetch {
 }
 
 describe('discoverModels', () => {
-  it('lists LM Studio native models with server display names', async () => {
+  it('lists LM Studio native model keys', async () => {
     const client = createFetch(
       jsonResponse({
         models: [
@@ -47,7 +47,7 @@ describe('discoverModels', () => {
         { provider: 'lm-studio', baseUrl: 'http://localhost:1234/' },
         { fetch: client.fetch }
       )
-    ).resolves.toEqual([{ modelId: 'qwen3-8b', displayName: 'Qwen3 8B' }])
+    ).resolves.toEqual([{ modelId: 'qwen3-8b', displayName: 'qwen3-8b' }])
 
     expect(client.request().url).toBe('http://localhost:1234/api/v1/models')
   })

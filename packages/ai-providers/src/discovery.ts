@@ -21,9 +21,7 @@ const LMStudioModelsSchema = z
   .object({
     models: z.array(z.object({ key: ModelStringSchema, display_name: ModelStringSchema })).catch([])
   })
-  .transform(({ models }) =>
-    models.map(({ key, display_name }) => ({ modelId: key, displayName: display_name }))
-  )
+  .transform(({ models }) => models.map(({ key }) => ({ modelId: key })))
 const OllamaModelsSchema = z
   .object({ models: z.array(z.object({ name: ModelStringSchema })).catch([]) })
   .transform(({ models }) => models.map(({ name }) => ({ modelId: name })))
