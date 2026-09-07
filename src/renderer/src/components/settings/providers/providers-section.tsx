@@ -11,31 +11,15 @@ import {
   Button,
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
-  IconMenuButton,
   IconTooltipButton,
   Input,
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
   Textarea,
   Toggle
 } from '@mico/ui'
-import {
-  CheckCircle2Icon,
-  ChevronDownIcon,
-  CircleXIcon,
-  DownloadIcon,
-  EyeIcon,
-  EyeOffIcon,
-  LoaderCircleIcon,
-  SearchIcon,
-  Trash2Icon,
-  ZapIcon
-} from 'lucide-react'
+import { CheckCircle2Icon, ChevronDownIcon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
 import type {
   CustomProvider,
@@ -43,9 +27,9 @@ import type {
 } from '@shared/data/schemas/provider'
 
 import { useProviderLibrary } from './provider-library'
+import { ProviderModelsSection } from './provider-models-section'
+import { ProviderTestMenu, type ProviderTestState } from './provider-test-menu'
 import type { ProviderId } from './providers-sidebar'
-import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
-import { useListReorderAnimation } from '@renderer/hooks/use-list-reorder-animation'
 
 function toCustomProviderConfiguration(provider: CustomProvider): ProviderConnection {
   switch (provider.apiFormat) {
@@ -93,19 +77,13 @@ function ProvidersSection({
     flushConfiguration,
     library,
     removeCustomProvider,
-    syncModels,
-    toggleModel,
     updateConfiguration,
     updateCustomProvider
   } = useProviderLibrary()
   const [isApiKeyVisible, setIsApiKeyVisible] = React.useState(false)
   const [hasFetchedModels, setHasFetchedModels] = React.useState(false)
-  const [isFetchingModels, setIsFetchingModels] = React.useState(false)
   const [isTestingModel, setIsTestingModel] = React.useState(false)
-  const [isTestModelMenuOpen, setIsTestModelMenuOpen] = React.useState(false)
-  const [testState, setTestState] = React.useState<'error' | 'idle' | 'success' | 'testing'>('idle')
-  const [modelsSearch, setModelsSearch] = React.useState('')
-  const [testModelSearch, setTestModelSearch] = React.useState('')
+  const [testState, setTestState] = React.useState<ProviderTestState>('idle')
   const [customProviderHeadersDraft, setCustomProviderHeadersDraft] = React.useState<{
     providerId: ProviderId
     value: string
@@ -120,11 +98,9 @@ function ProvidersSection({
   } | null>(null)
   const customProviderDraftVersion = React.useRef(0)
   const customProviderSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const testModelSearchRef = React.useRef<HTMLInputElement>(null)
   const [status, setStatus] = React.useState<{ kind: 'error' | 'success'; message: string } | null>(
     null
   )
-  const modelReorderAnimation = useListReorderAnimation()
   const customProvider = library.customProviders.find(({ id }) => id === providerId)
   const builtInProviderId = providerId === 'ollama' ? 'ollama' : 'lm-studio'
   const providerLabel = customProvider?.name ?? (providerId === 'ollama' ? 'Ollama' : 'LM Studio')
@@ -135,12 +111,6 @@ function ProvidersSection({
   }
   const models = library.models.filter((model) => model.providerId === providerId)
   const hasModels = hasFetchedModels || models.length > 0
-  const filteredModels = models.filter((model) =>
-    model.name.toLowerCase().includes(modelsSearch.toLowerCase())
-  )
-  const filteredTestModels = models.filter((model) =>
-    model.name.toLowerCase().includes(testModelSearch.toLowerCase())
-  )
 
   const customProviderHeaders =
     customProviderHeadersDraft?.providerId === providerId
@@ -167,24 +137,6 @@ function ProvidersSection({
           apiKey: configuration.apiKey
         }
       : { provider: builtInProviderId, baseUrl: configuration.baseUrl })
-  const fetchModels = async (): Promise<void> => {
-    setIsFetchingModels(true)
-    setStatus(null)
-    setTestState('idle')
-
-    try {
-      const discoveredModels = await window.api.providers.discoverModels(providerConfiguration)
-      await syncModels(providerId, discoveredModels)
-      setHasFetchedModels(true)
-    } catch (error) {
-      setStatus({
-        kind: 'error',
-        message: error instanceof Error ? error.message : 'The provider returned an unknown error.'
-      })
-    } finally {
-      setIsFetchingModels(false)
-    }
-  }
   const testModel = async (modelId: string): Promise<void> => {
     setIsTestingModel(true)
     setStatus(null)
@@ -271,18 +223,6 @@ function ProvidersSection({
     []
   )
 
-  React.useEffect(() => {
-    const animationFrame = isTestModelMenuOpen
-      ? requestAnimationFrame(() => testModelSearchRef.current?.focus())
-      : null
-
-    return () => {
-      if (animationFrame !== null) {
-        cancelAnimationFrame(animationFrame)
-      }
-    }
-  }, [isTestModelMenuOpen])
-
   return (
     <main
       aria-label="Provider configuration"
@@ -349,87 +289,14 @@ function ProvidersSection({
               </AlertDialog>
             ) : null}
             {configuration.enabled ? (
-              <IconMenuButton
-                className="h-8 w-12 gap-1 px-1.5"
-                disabled={!hasModels}
-                icon={
-                  <>
-                    {testState === 'testing' ? (
-                      <LoaderCircleIcon
-                        aria-label={`Testing ${providerLabel} model`}
-                        className="animate-spin"
-                      />
-                    ) : testState === 'success' ? (
-                      <CheckCircle2Icon
-                        aria-label={`${providerLabel} model test succeeded`}
-                        className="text-emerald-600"
-                      />
-                    ) : testState === 'error' ? (
-                      <CircleXIcon
-                        aria-label={`${providerLabel} model test failed`}
-                        className="text-destructive"
-                      />
-                    ) : (
-                      <ZapIcon aria-hidden="true" />
-                    )}
-                    <ChevronDownIcon aria-hidden="true" className="size-3" />
-                  </>
-                }
-                menuAlign="end"
-                menuContentClassName="w-72"
-                label={`Test ${providerLabel} model`}
-                onOpenChange={setIsTestModelMenuOpen}
-                variant="outline"
-              >
-                <div>
-                  <div className="p-1 pb-0">
-                    <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
-                      <InputGroupInput
-                        aria-label={`Search ${providerLabel} models`}
-                        onChange={(event) => setTestModelSearch(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (
-                            event.key.length === 1 &&
-                            !event.ctrlKey &&
-                            !event.altKey &&
-                            !event.metaKey
-                          ) {
-                            event.stopPropagation()
-                          }
-                        }}
-                        placeholder="Search models"
-                        ref={testModelSearchRef}
-                        value={testModelSearch}
-                      />
-                      <InputGroupAddon>
-                        <SearchIcon aria-hidden="true" className="size-4 shrink-0 opacity-50" />
-                      </InputGroupAddon>
-                    </InputGroup>
-                  </div>
-                  <div className="max-h-56 overflow-y-auto p-1">
-                    {!hasModels ? (
-                      <p className="py-6 text-center text-sm text-text-secondary">
-                        Fetch models before testing.
-                      </p>
-                    ) : filteredTestModels.length === 0 ? (
-                      <p className="py-6 text-center text-sm text-text-secondary">
-                        No models found.
-                      </p>
-                    ) : (
-                      filteredTestModels.map((model) => (
-                        <DropdownMenuItem
-                          className="rounded-sm px-2 py-1.5"
-                          disabled={isTestingModel}
-                          key={model.id}
-                          onSelect={() => void testModel(model.modelId)}
-                        >
-                          {model.name}
-                        </DropdownMenuItem>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </IconMenuButton>
+              <ProviderTestMenu
+                hasModels={hasModels}
+                isTesting={isTestingModel}
+                models={models}
+                onTestModel={(modelId) => void testModel(modelId)}
+                providerLabel={providerLabel}
+                testState={testState}
+              />
             ) : null}
             <Toggle
               aria-label={`Enable ${providerLabel}`}
@@ -680,76 +547,17 @@ function ProvidersSection({
               </label>
             </section>
           ) : null}
-          <section aria-labelledby="models-heading" className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-medium" id="models-heading">
-                  Models
-                </h3>
-              </div>
-              <Button
-                aria-label={`Fetch ${providerLabel} models`}
-                disabled={isFetchingModels}
-                onClick={() => void fetchModels()}
-                size="sm"
-                variant="outline"
-              >
-                <DownloadIcon aria-hidden="true" />
-                {isFetchingModels ? 'Fetching' : 'Fetch'}
-              </Button>
-            </div>
-            <InputGroup className="rounded-lg border-input/30 bg-input/30 shadow-none">
-              <InputGroupInput
-                aria-label={`Search ${providerLabel} models`}
-                disabled={!hasModels}
-                onChange={(event) => setModelsSearch(event.target.value)}
-                placeholder="Search models"
-                type="search"
-                value={modelsSearch}
-              />
-              <InputGroupAddon>
-                <SearchIcon aria-hidden="true" className="size-4 shrink-0 opacity-50" />
-              </InputGroupAddon>
-            </InputGroup>
-            <div
-              aria-label={`${providerLabel} fetched models`}
-              className="max-h-48 overflow-y-auto rounded-md border border-border-subtle"
-            >
-              {hasModels ? (
-                filteredModels.length === 0 ? (
-                  <p className="px-3 py-8 text-center text-sm text-text-secondary">
-                    No models match your search.
-                  </p>
-                ) : (
-                  sortByEnabledOrder(
-                    filteredModels,
-                    library.enabledModelIds,
-                    (model) => model.id
-                  ).map((model) => (
-                    <div
-                      className="flex items-center justify-between border-b border-border-subtle px-3 py-2.5 last:border-b-0"
-                      key={model.id}
-                      ref={modelReorderAnimation.itemRef(model.id)}
-                    >
-                      <span className="font-mono text-sm">{model.name}</span>
-                      <Toggle
-                        aria-label={`Enable ${model.name}`}
-                        checked={model.enabled}
-                        onCheckedChange={(enabled) => {
-                          modelReorderAnimation.capture()
-                          void toggleModel(model, enabled)
-                        }}
-                      />
-                    </div>
-                  ))
-                )
-              ) : (
-                <p className="px-3 py-8 text-center text-sm text-text-secondary">
-                  Fetch models to get started.
-                </p>
-              )}
-            </div>
-          </section>
+          <ProviderModelsSection
+            onFetchStart={() => {
+              setStatus(null)
+              setTestState('idle')
+            }}
+            onStatusChange={setStatus}
+            onModelsFetched={() => setHasFetchedModels(true)}
+            providerConfiguration={providerConfiguration}
+            providerId={providerId}
+            providerLabel={providerLabel}
+          />
         </div>
       </div>
     </main>
