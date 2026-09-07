@@ -78,6 +78,7 @@ function ProviderModelsSection({
       <InputGroup className="rounded-lg border-input/30 bg-input/30 shadow-none">
         <InputGroupInput
           aria-label={`Search ${providerLabel} models`}
+          className="[&::-webkit-search-cancel-button]:appearance-none"
           disabled={!hasModels}
           onChange={(event) => setModelsSearch(event.target.value)}
           placeholder="Search models"
