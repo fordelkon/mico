@@ -7,6 +7,7 @@ const providers = sqliteTable('providers', {
   apiKey: text('api_key'),
   baseUrl: text('base_url').notNull(),
   enabled: integer({ mode: 'boolean' }).notNull().default(false),
+  enabledOrder: integer('enabled_order'),
   headers: text().notNull().default('{}'),
   icon: text(),
   maxTokens: integer('max_tokens'),

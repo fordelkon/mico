@@ -63,8 +63,11 @@ describe('ChatMain', () => {
       value: {
         chat: { getCapabilities: vi.fn().mockResolvedValue(null) },
         providers: {
-          getLibrary: vi.fn().mockResolvedValue(library),
-          selectModel: vi.fn().mockResolvedValue({ ...library, selectedModelId: 'ollama:qwen3' })
+          getLibrary: vi
+            .fn()
+            .mockResolvedValueOnce(library)
+            .mockResolvedValue({ ...library, selectedModelId: 'ollama:qwen3' }),
+          selectModel: vi.fn().mockResolvedValue('ollama:qwen3')
         }
       }
     })

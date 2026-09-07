@@ -10,7 +10,12 @@ import { IpcChannel } from '@shared/IpcChannel'
 class MainWindowService {
   private mainWindow: BrowserWindow | undefined
 
-  constructor(private readonly shouldKeepWindowOpen: () => boolean) {}
+  private readonly closingWindowIds = new Set<number>()
+
+  constructor(
+    private readonly shouldKeepWindowOpen: () => boolean,
+    private readonly flushProviderDraft: (window: BrowserWindow) => Promise<void>
+  ) {}
 
   initialize(): void {
     this.createWindow()
@@ -99,6 +104,16 @@ class MainWindowService {
       event.preventDefault()
       window.hide()
     })
+
+    window.on('close', (event) => {
+      if (this.shouldKeepWindowOpen() || this.closingWindowIds.has(window.webContents.id)) return
+
+      event.preventDefault()
+      this.closingWindowIds.add(window.webContents.id)
+      // Native close and Quit shortcuts bypass React navigation, so the main process owns this final draft boundary.
+      void this.flushProviderDraft(window).finally(() => window.close())
+    })
+    window.on('closed', () => this.closingWindowIds.delete(window.webContents.id))
 
     if (process.platform === 'darwin') {
       window.setWindowButtonVisibility(false)

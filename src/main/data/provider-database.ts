@@ -50,6 +50,7 @@ class ProviderDatabase {
         api_key TEXT,
         base_url TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 0,
+        enabled_order INTEGER,
         headers TEXT NOT NULL DEFAULT '{}',
         icon TEXT,
         max_tokens INTEGER,
@@ -84,6 +85,15 @@ class ProviderDatabase {
       )
     if (!modelColumns.some(({ name }) => name === 'enabled_order'))
       sqlite.exec('ALTER TABLE provider_models ADD COLUMN enabled_order INTEGER')
+    // SAFETY: SQLite's table_info pragma always returns a `name` column for each table column.
+    const providerColumns = sqlite.prepare('PRAGMA table_info(providers)').all() as Array<{
+      name: string
+    }>
+    if (!providerColumns.some(({ name }) => name === 'enabled_order'))
+      sqlite.exec('ALTER TABLE providers ADD COLUMN enabled_order INTEGER')
+    sqlite.exec(
+      'UPDATE providers SET enabled_order = rowid WHERE enabled = 1 AND enabled_order IS NULL'
+    )
     // SAFETY: SQLite's table_info pragma always returns a `name` column for each table column.
     const libraryStateColumns = sqlite
       .prepare('PRAGMA table_info(provider_library_state)')

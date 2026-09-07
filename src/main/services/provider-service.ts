@@ -73,6 +73,9 @@ class ProviderService {
     return {
       configurations: providerRows.filter(({ kind }) => kind === 'builtin').map(toConfiguration),
       customProviders: providerRows.filter(({ kind }) => kind === 'custom').map(toCustomProvider),
+      enabledProviderIds: sortProviders(providerRows)
+        .filter(({ enabled }) => enabled)
+        .map(({ id }) => id),
       models: sortModels(database.select().from(providerModels).all()).map(
         ({ displayName, enabled, id, modelId, providerId }) => ({
           id,
@@ -87,43 +90,83 @@ class ProviderService {
     }
   }
 
-  async saveConfiguration(configuration: ProviderConfiguration): Promise<ProviderLibrary> {
+  async saveConfiguration(configuration: ProviderConfiguration): Promise<ProviderConfiguration> {
+    const database = this.dependencies.database.db
+    const existing = database
+      .select()
+      .from(providers)
+      .where(eq(providers.id, configuration.provider))
+      .get()
     const values = {
       ...toProviderValues(configuration),
       id: configuration.provider,
-      kind: 'builtin' as const
+      kind: 'builtin' as const,
+      enabledOrder: getUpdatedProviderEnabledOrder(
+        database,
+        existing,
+        configuration.enabled ?? false
+      )
     }
-    this.dependencies.database.db
+    database
       .insert(providers)
       .values(values)
       .onConflictDoUpdate({ target: providers.id, set: values })
       .run()
-    return this.getLibrary()
+    const saved = database
+      .select()
+      .from(providers)
+      .where(eq(providers.id, configuration.provider))
+      .get()
+    if (!saved) throw new Error('Provider configuration was not saved.')
+    return toConfiguration(saved)
   }
 
   async saveLibrary(library: ProviderLibrary): Promise<ProviderLibrary> {
     const database = this.dependencies.database
+    const enabledProviderOrders = new Map(
+      library.enabledProviderIds.map((providerId, index) => [providerId, index])
+    )
+    const modelOrders = new Map<string, number>()
+    const enabledModelOrders = new Map<string, number>()
+    for (const [index, model] of library.models.entries()) {
+      modelOrders.set(model.id, index)
+      if (model.enabled) enabledModelOrders.set(model.id, enabledModelOrders.size)
+    }
+
     database.connection.transaction(() => {
       database.db.delete(providerModels).run()
       database.db.delete(providers).run()
-      if (library.configurations.length)
+
+      const providerRows = [
+        ...library.configurations.map((configuration) => ({
+          ...toProviderValues(configuration),
+          id: configuration.provider,
+          kind: 'builtin' as const,
+          enabledOrder: enabledProviderOrders.get(configuration.provider) ?? null
+        })),
+        ...library.customProviders.map((provider) => ({
+          ...toCustomProviderValues(provider),
+          enabledOrder: enabledProviderOrders.get(provider.id) ?? null
+        }))
+      ]
+      if (providerRows.length) database.db.insert(providers).values(providerRows).run()
+
+      if (library.models.length)
         database.db
-          .insert(providers)
+          .insert(providerModels)
           .values(
-            library.configurations.map((configuration) => ({
-              ...toProviderValues(configuration),
-              id: configuration.provider,
-              kind: 'builtin' as const
+            library.models.map((model) => ({
+              id: model.id,
+              providerId: model.provider,
+              modelId: model.modelId,
+              displayName: model.displayName,
+              enabled: model.enabled,
+              discoveryOrder: modelOrders.get(model.id) ?? 0,
+              enabledOrder: enabledModelOrders.get(model.id) ?? null
             }))
           )
           .run()
-      if (library.customProviders.length)
-        database.db
-          .insert(providers)
-          .values(library.customProviders.map(toCustomProviderValues))
-          .run()
-      if (library.models.length)
-        database.db.insert(providerModels).values(library.models.map(toModelValues)).run()
+
       database.db
         .update(providerLibraryState)
         .set({
@@ -133,18 +176,24 @@ class ProviderService {
         .where(eq(providerLibraryState.id, 1))
         .run()
     })()
+
     return this.getLibrary()
   }
 
-  async addCustomProvider(provider: Omit<CustomProvider, 'id'>): Promise<ProviderLibrary> {
+  async addCustomProvider(provider: Omit<CustomProvider, 'id'>): Promise<CustomProvider> {
+    const savedProvider = { id: this.dependencies.createId(), ...provider }
+    const database = this.dependencies.database.db
     this.dependencies.database.db
       .insert(providers)
-      .values(toCustomProviderValues({ id: this.dependencies.createId(), ...provider }))
+      .values({
+        ...toCustomProviderValues(savedProvider),
+        enabledOrder: savedProvider.enabled ? getNextProviderEnabledOrder(database) : null
+      })
       .run()
-    return this.getLibrary()
+    return savedProvider
   }
 
-  async removeCustomProvider(providerId: string): Promise<ProviderLibrary> {
+  async removeCustomProvider(providerId: string): Promise<void> {
     const database = this.dependencies.database
     database.connection.transaction(() => {
       const modelIds = database.db
@@ -172,17 +221,25 @@ class ProviderService {
           .where(eq(providerLibraryState.id, 1))
           .run()
     })()
-    return this.getLibrary()
   }
 
-  async updateCustomProvider(provider: CustomProvider): Promise<ProviderLibrary> {
-    const updated = this.dependencies.database.db
+  async updateCustomProvider(provider: CustomProvider): Promise<CustomProvider> {
+    const database = this.dependencies.database.db
+    const existing = database
+      .select()
+      .from(providers)
+      .where(and(eq(providers.id, provider.id), eq(providers.kind, 'custom')))
+      .get()
+    if (!existing) throw new Error('Custom provider does not exist.')
+    database
       .update(providers)
-      .set(toCustomProviderValues(provider))
+      .set({
+        ...toCustomProviderValues(provider),
+        enabledOrder: getUpdatedProviderEnabledOrder(database, existing, provider.enabled ?? false)
+      })
       .where(and(eq(providers.id, provider.id), eq(providers.kind, 'custom')))
       .run()
-    if (updated.changes === 0) throw new Error('Custom provider does not exist.')
-    return this.getLibrary()
+    return provider
   }
 
   async discoverModels(configuration: ProviderConfiguration): Promise<DiscoveredModel[]> {
@@ -195,7 +252,7 @@ class ProviderService {
     ])
   }
 
-  async importModel(model: ImportModelRequest): Promise<ProviderLibrary> {
+  async importModel(model: ImportModelRequest): Promise<ModelEntry> {
     const database = this.dependencies.database.db
     const existing = database
       .select({ id: providerModels.id, enabled: providerModels.enabled })
@@ -227,10 +284,21 @@ class ProviderService {
         .set({ enabled: true, enabledOrder })
         .where(eq(providerModels.id, existing.id))
         .run()
-    return this.getLibrary()
+    const saved = database
+      .select()
+      .from(providerModels)
+      .where(
+        and(
+          eq(providerModels.providerId, model.provider),
+          eq(providerModels.modelId, model.modelId)
+        )
+      )
+      .get()
+    if (!saved) throw new Error('Provider model was not saved.')
+    return toModelEntry(saved)
   }
 
-  async syncModels({ models, provider }: SyncModelsRequest): Promise<ProviderLibrary> {
+  async syncModels({ models, provider }: SyncModelsRequest): Promise<void> {
     const database = this.dependencies.database
     database.connection.transaction(() => {
       const existingModels = database.db
@@ -285,10 +353,9 @@ class ProviderService {
           .where(eq(providerLibraryState.id, 1))
           .run()
     })()
-    return this.getLibrary()
   }
 
-  async setModelEnabled({ enabled, modelId }: SetModelEnabledRequest): Promise<ProviderLibrary> {
+  async setModelEnabled({ enabled, modelId }: SetModelEnabledRequest): Promise<ModelEntry> {
     const database = this.dependencies.database
     database.connection.transaction(() => {
       const model = database.db
@@ -311,10 +378,16 @@ class ProviderService {
           )
           .run()
     })()
-    return this.getLibrary()
+    const saved = database.db
+      .select()
+      .from(providerModels)
+      .where(eq(providerModels.id, modelId))
+      .get()
+    if (!saved) throw new Error('Provider model does not exist in the library.')
+    return toModelEntry(saved)
   }
 
-  async addModel(model: AddModelRequest): Promise<ProviderLibrary> {
+  async addModel(model: AddModelRequest): Promise<ModelEntry> {
     return this.importModel({
       provider: model.provider,
       modelId: model.modelId,
@@ -322,7 +395,7 @@ class ProviderService {
     })
   }
 
-  async removeModel(modelId: string): Promise<ProviderLibrary> {
+  async removeModel(modelId: string): Promise<void> {
     const database = this.dependencies.database
     database.connection.transaction(() => {
       database.db.delete(providerModels).where(eq(providerModels.id, modelId)).run()
@@ -334,10 +407,9 @@ class ProviderService {
         )
         .run()
     })()
-    return this.getLibrary()
   }
 
-  async selectModel(modelId: string | null): Promise<ProviderLibrary> {
+  async selectModel(modelId: string | null): Promise<string | null> {
     if (modelId !== null && !isModelEligible(this.getLibrary(), modelId))
       throw new Error('Selected model is not enabled in the library.')
     this.dependencies.database.db
@@ -345,10 +417,10 @@ class ProviderService {
       .set({ selectedModelId: modelId })
       .where(eq(providerLibraryState.id, 1))
       .run()
-    return this.getLibrary()
+    return modelId
   }
 
-  async selectProvider(providerId: string | null): Promise<ProviderLibrary> {
+  async selectProvider(providerId: string | null): Promise<string | null> {
     if (
       providerId !== null &&
       !this.dependencies.database.db
@@ -363,7 +435,7 @@ class ProviderService {
       .set({ selectedProviderId: providerId })
       .where(eq(providerLibraryState.id, 1))
       .run()
-    return this.getLibrary()
+    return providerId
   }
 
   getSelectedChatConfiguration(): ChatProviderConfiguration | null {
@@ -539,10 +611,10 @@ function isModelEligible(library: ProviderLibrary, modelId: string): boolean {
   )
 }
 
-function toModelValues(model: ModelEntry) {
+function toModelEntry(model: typeof providerModels.$inferSelect): ModelEntry {
   return {
     id: model.id,
-    providerId: model.provider,
+    provider: model.providerId,
     modelId: model.modelId,
     displayName: model.displayName,
     enabled: model.enabled
@@ -564,6 +636,37 @@ function getNextEnabledOrder(database: ProviderDatabase['db']): number {
     .from(providerModels)
     .all()
   return Math.max(-1, ...enabledOrders.map(({ enabledOrder }) => enabledOrder ?? -1)) + 1
+}
+
+function getNextProviderEnabledOrder(database: ProviderDatabase['db']): number {
+  const enabledOrders = database
+    .select({ enabledOrder: providers.enabledOrder })
+    .from(providers)
+    .all()
+  return Math.max(-1, ...enabledOrders.map(({ enabledOrder }) => enabledOrder ?? -1)) + 1
+}
+
+function getUpdatedProviderEnabledOrder(
+  database: ProviderDatabase['db'],
+  existing: typeof providers.$inferSelect | undefined,
+  enabled: boolean
+): number | null {
+  if (!enabled) return null
+  if (existing?.enabled && existing.enabledOrder !== null) return existing.enabledOrder
+  return getNextProviderEnabledOrder(database)
+}
+
+function sortProviders(providerRows: Array<typeof providers.$inferSelect>) {
+  return [...providerRows].sort((left, right) => {
+    if (left.enabled && right.enabled)
+      return (
+        (left.enabledOrder ?? Number.MAX_SAFE_INTEGER) -
+        (right.enabledOrder ?? Number.MAX_SAFE_INTEGER)
+      )
+    if (left.enabled) return -1
+    if (right.enabled) return 1
+    return 0
+  })
 }
 
 function sortModels(models: Array<typeof providerModels.$inferSelect>) {

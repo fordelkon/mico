@@ -101,6 +101,7 @@ const ProviderLibrarySchema = defineSchema(
     .object({
       configurations: z.array(ProviderConfigurationSchema),
       customProviders: z.array(CustomProviderSchema).default([]),
+      enabledProviderIds: z.array(ModelProviderSchema).default([]),
       models: z.array(ModelEntrySchema),
       selectedModelId: ModelEntryIdSchema.nullable(),
       selectedProviderId: ModelProviderSchema.nullable()

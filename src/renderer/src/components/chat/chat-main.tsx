@@ -45,7 +45,8 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
   const selectModel = React.useCallback(
     async (modelId: string): Promise<void> => {
       try {
-        const nextLibrary = await window.api.providers.selectModel(modelId)
+        await window.api.providers.selectModel(modelId)
+        const nextLibrary = await window.api.providers.getLibrary()
         setLibrary(nextLibrary)
         setSelectionError(null)
         await refreshCapabilities()

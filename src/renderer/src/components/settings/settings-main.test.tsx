@@ -2,7 +2,9 @@ import '@testing-library/jest-dom/vitest'
 
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import * as React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ProviderLibrary as PersistedProviderLibrary } from '@shared/data/schemas/provider'
 
 import { SettingsMain } from './settings-main'
 import { ProviderLibraryProvider } from './providers/provider-library'
@@ -23,165 +25,164 @@ const providerApi = {
   addCustomProvider: vi.fn(),
   discoverModels: vi.fn(),
   getLibrary: vi.fn(),
+  saveLibrary: vi.fn(),
   importModel: vi.fn(),
   removeCustomProvider: vi.fn(),
   removeModel: vi.fn(),
   saveConfiguration: vi.fn(),
-  saveLibrary: vi.fn(),
   selectProvider: vi.fn(),
   setModelEnabled: vi.fn(),
   syncModels: vi.fn(),
   testModel: vi.fn(),
   updateCustomProvider: vi.fn()
 }
+const windowControlsApi = {
+  onProviderDraftFlush: vi.fn(() => () => undefined)
+}
+
+let persistedLibrary: PersistedProviderLibrary
 
 beforeEach(() => {
-  let persistedModels: Array<{
-    displayName: string
-    enabled: boolean
-    id: string
-    modelId: string
-    provider: string
-  }> = []
-  providerApi.addCustomProvider.mockReset()
-  providerApi.addCustomProvider.mockResolvedValue({
+  persistedLibrary = {
     configurations: [
       { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
       { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
     ],
-    customProviders: [
-      {
-        apiFormat: 'openai-compatible',
-        baseUrl: 'https://api.example.com/v1',
-        headers: {},
-        icon: 'default',
-        id: 'example-ai',
-        name: 'Example AI',
-        useMaxCompletionTokens: false
-      }
-    ],
+    customProviders: [],
+    enabledProviderIds: ['ollama'],
     models: [],
-    selectedModelId: null
+    selectedModelId: null,
+    selectedProviderId: null
+  }
+  providerApi.addCustomProvider.mockReset()
+  providerApi.addCustomProvider.mockImplementation(async (provider) => {
+    const saved = { ...provider, id: 'example-ai' }
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: [...persistedLibrary.customProviders, saved]
+    }
+    return saved
   })
   providerApi.getLibrary.mockReset()
-  providerApi.getLibrary.mockResolvedValue({
-    configurations: [
-      { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-    ],
-    customProviders: [],
-    models: [],
-    selectedModelId: null,
-    selectedProviderId: null
+  providerApi.getLibrary.mockImplementation(async () => persistedLibrary)
+  providerApi.saveLibrary.mockReset()
+  providerApi.saveLibrary.mockImplementation(async (library) => {
+    persistedLibrary = library
+    return library
   })
   providerApi.selectProvider.mockReset()
-  providerApi.selectProvider.mockResolvedValue({
-    configurations: [
-      { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-    ],
-    customProviders: [],
-    models: [],
-    selectedModelId: null,
-    selectedProviderId: null
+  providerApi.selectProvider.mockImplementation(async (providerId) => {
+    persistedLibrary = { ...persistedLibrary, selectedProviderId: providerId }
+    return providerId
   })
   providerApi.discoverModels.mockReset()
   providerApi.discoverModels.mockResolvedValue([
     { modelId: 'granite4.2:3b', displayName: 'granite4.2:3b' }
   ])
   providerApi.removeCustomProvider.mockReset()
-  providerApi.removeCustomProvider.mockResolvedValue({
-    configurations: [
-      { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-      { provider: 'ollama', baseUrl: 'http://localhost:11434' }
-    ],
-    customProviders: [],
-    models: [],
-    selectedModelId: null
+  providerApi.removeCustomProvider.mockImplementation(async (providerId) => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: persistedLibrary.customProviders.filter(({ id }) => id !== providerId),
+      models: persistedLibrary.models.filter(({ provider }) => provider !== providerId)
+    }
   })
   providerApi.updateCustomProvider.mockReset()
   providerApi.updateCustomProvider.mockImplementation(async (provider) => {
     if (provider.apiKey === '') throw new Error('Invalid custom provider')
-
-    return {
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-      ],
-      customProviders: [provider],
-      models: [],
-      selectedModelId: null
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: persistedLibrary.customProviders.map((current) =>
+        current.id === provider.id ? provider : current
+      )
     }
+    return provider
   })
   providerApi.testModel.mockReset()
   providerApi.testModel.mockResolvedValue(undefined)
-  providerApi.saveLibrary.mockReset()
-  providerApi.saveLibrary.mockImplementation(async (library) => library)
   providerApi.saveConfiguration.mockReset()
-  providerApi.saveConfiguration.mockImplementation(async (configuration) => ({
-    configurations: [{ provider: 'lm-studio', baseUrl: 'http://localhost:1234' }, configuration],
-    customProviders: [],
-    models: [],
-    selectedModelId: null
-  }))
-  providerApi.importModel.mockReset()
-  providerApi.importModel.mockImplementation(async (model) => ({
-    configurations: [
-      { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-    ],
-    customProviders: [],
-    models: [{ id: 'saved-model', ...model }],
-    selectedModelId: null
-  }))
-  providerApi.removeModel.mockReset()
-  providerApi.removeModel.mockResolvedValue({
-    configurations: [],
-    customProviders: [],
-    models: [],
-    selectedModelId: null
+  providerApi.saveConfiguration.mockImplementation(async (configuration) => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      configurations: [
+        ...persistedLibrary.configurations.filter(
+          ({ provider }) => provider !== configuration.provider
+        ),
+        configuration
+      ]
+    }
+    return configuration
   })
+  providerApi.importModel.mockReset()
+  providerApi.importModel.mockImplementation(async (model) => ({ id: 'saved-model', ...model }))
+  providerApi.removeModel.mockReset()
+  providerApi.removeModel.mockResolvedValue(undefined)
   providerApi.syncModels.mockReset()
   providerApi.syncModels.mockImplementation(async ({ models, provider }) => {
-    persistedModels = models.map(({ displayName, modelId }) => {
-      const existing = persistedModels.find((model) => model.modelId === modelId)
-      return {
-        displayName,
-        enabled: existing?.enabled ?? false,
-        id: existing?.id ?? `${provider}:${modelId}`,
-        modelId,
-        provider
-      }
-    })
-    return {
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-      ],
-      customProviders: [],
-      models: persistedModels,
-      selectedModelId: null
+    const existingModels = persistedLibrary.models.filter((model) => model.provider === provider)
+    persistedLibrary = {
+      ...persistedLibrary,
+      models: models.map(({ displayName, modelId }) => {
+        const existing = existingModels.find((model) => model.modelId === modelId)
+        return {
+          displayName,
+          enabled: existing?.enabled ?? false,
+          id: existing?.id ?? `${provider}:${modelId}`,
+          modelId,
+          provider
+        }
+      })
     }
   })
   providerApi.setModelEnabled.mockReset()
   providerApi.setModelEnabled.mockImplementation(async ({ enabled, modelId }) => {
-    persistedModels = persistedModels.map((model) =>
-      model.id === modelId ? { ...model, enabled } : model
-    )
-    return {
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-      ],
-      customProviders: [],
-      models: persistedModels,
-      selectedModelId: null
+    const model = persistedLibrary.models.find(({ id }) => id === modelId)
+    if (!model) throw new Error('Provider model was not found.')
+    const saved = { ...model, enabled }
+    persistedLibrary = {
+      ...persistedLibrary,
+      models: persistedLibrary.models.map((current) => (current.id === modelId ? saved : current))
     }
+    return saved
   })
-  Object.defineProperty(window, 'api', { configurable: true, value: { providers: providerApi } })
+  windowControlsApi.onProviderDraftFlush.mockClear()
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    value: { providers: providerApi, windowControls: windowControlsApi }
+  })
 })
 
 describe('SettingsMain', () => {
+  it('does not replace the persisted library while Strict Mode hydrates settings', async () => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: [
+        {
+          apiFormat: 'openai-compatible',
+          baseUrl: 'https://api.example.com/v1',
+          enabled: true,
+          headers: {},
+          icon: 'cloud',
+          id: 'example-ai',
+          name: 'Example AI',
+          useMaxCompletionTokens: false
+        }
+      ],
+      enabledProviderIds: ['ollama', 'example-ai']
+    }
+
+    render(
+      <React.StrictMode>
+        <ProviderLibraryProvider>
+          <SettingsMain />
+        </ProviderLibraryProvider>
+      </React.StrictMode>
+    )
+
+    expect(await screen.findByRole('button', { name: 'Example AI' })).toBeVisible()
+    expect(providerApi.saveLibrary).not.toHaveBeenCalled()
+  })
+
   it('does not render manual save controls', () => {
     renderSettings()
 
@@ -238,7 +239,7 @@ describe('SettingsMain', () => {
 
     expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
     await waitFor(() => {
-      expect(providerApi.selectProvider).toHaveBeenCalledWith('lm-studio')
+      expect(screen.getByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
     })
   })
 
@@ -337,6 +338,51 @@ describe('SettingsMain', () => {
       'Ollama',
       'LM Studio'
     ])
+  })
+
+  it('keeps provider rail order after enabling a model', async () => {
+    const user = userEvent.setup()
+    persistedLibrary = {
+      configurations: [
+        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
+        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
+      ],
+      customProviders: [],
+      enabledProviderIds: ['ollama', 'lm-studio'],
+      models: [
+        {
+          displayName: 'llama3.2',
+          enabled: false,
+          id: 'ollama-model',
+          modelId: 'llama3.2',
+          provider: 'ollama'
+        }
+      ],
+      selectedModelId: null,
+      selectedProviderId: 'ollama'
+    }
+
+    renderSettings()
+
+    await screen.findByRole('heading', { level: 2, name: 'Ollama' })
+    await user.click(screen.getByRole('switch', { name: 'Enable llama3.2' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable llama3.2' })).toHaveAttribute(
+        'aria-checked',
+        'true'
+      )
+      const providerButtons = screen
+        .getAllByRole('button')
+        .filter((button) =>
+          ['LM Studio', 'Ollama'].includes(button.getAttribute('aria-label') ?? '')
+        )
+
+      expect(providerButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
+        'Ollama',
+        'LM Studio'
+      ])
+    })
   })
 
   it('keeps provider configuration independent when switching providers', async () => {
@@ -558,25 +604,16 @@ describe('SettingsMain', () => {
 
   it('selects a newly added custom provider and displays its fetched models', async () => {
     const user = userEvent.setup()
-    providerApi.addCustomProvider.mockResolvedValue({
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
-      ],
-      customProviders: [
-        {
-          apiFormat: 'openai-compatible',
-          apiKey: 'secret',
-          baseUrl: 'https://api.example.com/v1',
-          headers: { 'X-Client': 'Mico' },
-          icon: 'default',
-          id: 'example-ai',
-          name: 'Example AI',
-          useMaxCompletionTokens: true
-        }
-      ],
-      models: [],
-      selectedModelId: null
+    providerApi.addCustomProvider.mockImplementation(async (provider) => {
+      const saved = {
+        ...provider,
+        apiKey: 'secret',
+        headers: { 'X-Client': 'Mico' },
+        id: 'example-ai',
+        useMaxCompletionTokens: true
+      }
+      persistedLibrary = { ...persistedLibrary, customProviders: [saved] }
+      return saved
     })
     renderSettings()
 
@@ -598,25 +635,16 @@ describe('SettingsMain', () => {
 
   it('edits a custom provider configuration from its details', async () => {
     const user = userEvent.setup()
-    providerApi.addCustomProvider.mockResolvedValue({
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
-      ],
-      customProviders: [
-        {
-          apiFormat: 'openai-compatible',
-          apiKey: 'secret',
-          baseUrl: 'https://api.example.com/v1',
-          headers: { 'X-Client': 'Mico' },
-          icon: 'default',
-          id: 'example-ai',
-          name: 'Example AI',
-          useMaxCompletionTokens: true
-        }
-      ],
-      models: [],
-      selectedModelId: null
+    providerApi.addCustomProvider.mockImplementation(async (provider) => {
+      const saved = {
+        ...provider,
+        apiKey: 'secret',
+        headers: { 'X-Client': 'Mico' },
+        id: 'example-ai',
+        useMaxCompletionTokens: true
+      }
+      persistedLibrary = { ...persistedLibrary, customProviders: [saved] }
+      return saved
     })
     renderSettings()
 
@@ -628,8 +656,8 @@ describe('SettingsMain', () => {
 
     const apiKey = screen.getByLabelText('API Key (Optional)')
     expect(apiKey).toHaveAttribute('type', 'password')
-    expect(apiKey).toHaveValue('secret')
-    expect(screen.getByLabelText('Custom headers (JSON)')).toHaveValue('{\n  "X-Client": "Mico"\n}')
+    expect(apiKey).toHaveValue('')
+    expect(screen.getByLabelText('Custom headers (JSON)')).toHaveValue('')
     expect(
       screen.getByRole('button', { name: 'Chat Completions (/chat/completions)' })
     ).toBeVisible()

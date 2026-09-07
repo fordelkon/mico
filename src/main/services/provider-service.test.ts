@@ -48,6 +48,7 @@ describe('ProviderService', () => {
         { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: false }
       ],
       customProviders: [],
+      enabledProviderIds: [],
       models: [],
       selectedModelId: null,
       selectedProviderId: null
@@ -57,7 +58,7 @@ describe('ProviderService', () => {
   it('stores provider configuration including API keys, headers, and enabled state', async () => {
     const service = await createService()
 
-    await service.saveConfiguration({
+    const configuration = await service.saveConfiguration({
       provider: 'openai-compatible',
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'secret',
@@ -66,7 +67,7 @@ describe('ProviderService', () => {
       useMaxCompletionTokens: true
     })
 
-    expect(service.getLibrary().configurations).toContainEqual({
+    expect(configuration).toEqual({
       provider: 'openai-compatible',
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'secret',
@@ -74,6 +75,104 @@ describe('ProviderService', () => {
       enabled: true,
       useMaxCompletionTokens: true
     })
+  })
+
+  it('replaces the persisted library with one snapshot', async () => {
+    const service = await createService()
+    await service.addModel({ provider: 'lm-studio', modelId: 'stale-model' })
+
+    await service.saveLibrary({
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
+      customProviders: [
+        {
+          apiFormat: 'openai-compatible',
+          baseUrl: 'https://api.example.com/v1',
+          enabled: true,
+          headers: {},
+          icon: 'cloud',
+          id: 'example-ai',
+          name: 'Example AI',
+          useMaxCompletionTokens: false
+        }
+      ],
+      enabledProviderIds: ['ollama', 'example-ai'],
+      models: [
+        {
+          id: 'model-1',
+          provider: 'ollama',
+          modelId: 'qwen3',
+          displayName: 'Qwen 3',
+          enabled: true
+        }
+      ],
+      selectedModelId: 'model-1',
+      selectedProviderId: 'ollama'
+    })
+
+    expect(service.getLibrary()).toEqual({
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
+      customProviders: [
+        {
+          apiFormat: 'openai-compatible',
+          baseUrl: 'https://api.example.com/v1',
+          enabled: true,
+          headers: {},
+          icon: 'cloud',
+          id: 'example-ai',
+          name: 'Example AI',
+          useMaxCompletionTokens: false
+        }
+      ],
+      enabledProviderIds: ['ollama', 'example-ai'],
+      models: [
+        {
+          id: 'model-1',
+          provider: 'ollama',
+          modelId: 'qwen3',
+          displayName: 'Qwen 3',
+          enabled: true
+        }
+      ],
+      selectedModelId: 'model-1',
+      selectedProviderId: 'ollama'
+    })
+  })
+
+  it('preserves provider activation order across model changes and restart', async () => {
+    const userDataPath = await mkdtemp(join(tmpdir(), 'mico-provider-enabled-order-'))
+    let initial: Awaited<ReturnType<typeof createPersistentService>> | undefined
+    let restarted: Awaited<ReturnType<typeof createPersistentService>> | undefined
+    try {
+      initial = await createPersistentService(userDataPath)
+      await initial.service.saveConfiguration({
+        provider: 'ollama',
+        baseUrl: 'http://localhost:11434',
+        enabled: true
+      })
+      await initial.service.saveConfiguration({
+        provider: 'lm-studio',
+        baseUrl: 'http://localhost:1234',
+        enabled: true
+      })
+      await initial.service.addModel({ provider: 'ollama', modelId: 'llama3.2' })
+      await initial.service.setModelEnabled({ enabled: false, modelId: 'entry-1' })
+
+      expect(initial.service.getLibrary()).toMatchObject({
+        enabledProviderIds: ['ollama', 'lm-studio']
+      })
+
+      initial.close()
+      initial = undefined
+      restarted = await createPersistentService(userDataPath)
+
+      expect(restarted.service.getLibrary()).toMatchObject({
+        enabledProviderIds: ['ollama', 'lm-studio']
+      })
+    } finally {
+      initial?.close()
+      restarted?.close()
+      await rm(userDataPath, { force: true, recursive: true })
+    }
   })
 
   it('persists the last visited provider after reopening the SQLite library', async () => {
@@ -98,7 +197,7 @@ describe('ProviderService', () => {
 
   it('clears the last visited provider when that custom provider is removed', async () => {
     const service = await createService()
-    const library = await service.addCustomProvider({
+    const provider = await service.addCustomProvider({
       apiFormat: 'openai-compatible',
       baseUrl: 'https://api.example.com/v1',
       headers: {},
@@ -106,7 +205,7 @@ describe('ProviderService', () => {
       name: 'Example AI',
       useMaxCompletionTokens: false
     })
-    const providerId = library.customProviders[0]?.id
+    const providerId = provider.id
     if (!providerId) throw new Error('Custom provider was not created.')
 
     await service.selectProvider(providerId)
@@ -175,6 +274,21 @@ describe('ProviderService', () => {
     expect(service.getLibrary()).toMatchObject({ models: [], selectedModelId: null })
   })
 
+  it('returns the committed model after changing its enabled state', async () => {
+    const service = await createService()
+    await service.addModel({ provider: 'ollama', modelId: 'llama3.2' })
+
+    const model = await service.setModelEnabled({ enabled: false, modelId: 'entry-1' })
+
+    expect(model).toEqual({
+      displayName: 'llama3.2',
+      enabled: false,
+      id: 'entry-1',
+      modelId: 'llama3.2',
+      provider: 'ollama'
+    })
+  })
+
   it('resolves only an enabled selected model from an enabled built-in provider', async () => {
     const service = await createService()
     await service.saveConfiguration({
@@ -216,7 +330,7 @@ describe('ProviderService', () => {
 
   it('resolves an enabled selected model from an enabled custom provider', async () => {
     const service = await createService()
-    const library = await service.addCustomProvider({
+    const provider = await service.addCustomProvider({
       apiFormat: 'openai-compatible',
       baseUrl: 'https://api.example.com/v1',
       enabled: true,
@@ -225,7 +339,7 @@ describe('ProviderService', () => {
       name: 'Example AI',
       useMaxCompletionTokens: true
     })
-    const providerId = library.customProviders[0]?.id
+    const providerId = provider.id
     if (!providerId) throw new Error('Custom provider was not created.')
     await service.addModel({ provider: providerId, modelId: 'gpt-5.6' })
     await service.selectModel('entry-2')

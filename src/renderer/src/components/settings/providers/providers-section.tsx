@@ -436,7 +436,7 @@ function ProvidersSection({
               checked={configuration.enabled}
               onCheckedChange={(enabled) => {
                 onProviderReorder()
-                updateConfiguration(providerId, { ...configuration, enabled }, { immediate: true })
+                updateConfiguration(providerId, { ...configuration, enabled })
               }}
             />
           </div>

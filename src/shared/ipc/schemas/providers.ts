@@ -5,12 +5,14 @@ import {
   CustomProviderIdSchema,
   ModelDisplayNameSchema,
   ModelEntryIdSchema,
+  ModelEntrySchema,
   ProviderConfigurationSchema,
   ProviderLibrarySchema,
   ModelProviderSchema,
   ProviderModelIdSchema
 } from '../../data/schemas/provider'
 import type {
+  CustomProvider,
   ModelEntry,
   ProviderConfiguration,
   ProviderId,
@@ -49,76 +51,76 @@ const AddCustomProviderRequestSchema = CustomProviderSchema.omit({ id: true })
 const UpdateCustomProviderRequestSchema = CustomProviderSchema
 
 interface ProvidersAPI {
-  addCustomProvider: (provider: AddCustomProviderRequest) => Promise<ProviderLibrary>
-  updateCustomProvider: (provider: UpdateCustomProviderRequest) => Promise<ProviderLibrary>
-  removeCustomProvider: (providerId: string) => Promise<ProviderLibrary>
+  addCustomProvider: (provider: AddCustomProviderRequest) => Promise<CustomProvider>
+  updateCustomProvider: (provider: UpdateCustomProviderRequest) => Promise<CustomProvider>
+  removeCustomProvider: (providerId: string) => Promise<void>
   getLibrary: () => Promise<ProviderLibrary>
   saveLibrary: (library: ProviderLibrary) => Promise<ProviderLibrary>
-  saveConfiguration: (configuration: ProviderConfiguration) => Promise<ProviderLibrary>
+  saveConfiguration: (configuration: ProviderConfiguration) => Promise<ProviderConfiguration>
   discoverModels: (configuration: ProviderConfiguration) => Promise<DiscoveredModel[]>
-  importModel: (model: ImportModelRequest) => Promise<ProviderLibrary>
-  addModel: (model: AddModelRequest) => Promise<ProviderLibrary>
-  setModelEnabled: (model: SetModelEnabledRequest) => Promise<ProviderLibrary>
-  syncModels: (models: SyncModelsRequest) => Promise<ProviderLibrary>
+  importModel: (model: ImportModelRequest) => Promise<ModelEntry>
+  addModel: (model: AddModelRequest) => Promise<ModelEntry>
+  setModelEnabled: (model: SetModelEnabledRequest) => Promise<ModelEntry>
+  syncModels: (models: SyncModelsRequest) => Promise<void>
   testModel: (model: TestModelRequest) => Promise<void>
-  removeModel: (modelId: string) => Promise<ProviderLibrary>
-  selectModel: (modelId: string | null) => Promise<ProviderLibrary>
-  selectProvider: (providerId: string | null) => Promise<ProviderLibrary>
+  removeModel: (modelId: string) => Promise<void>
+  selectModel: (modelId: string | null) => Promise<string | null>
+  selectProvider: (providerId: string | null) => Promise<string | null>
 }
 
 const providersRequestSchemas = {
   'providers.add-custom-provider': defineRoute({
     input: AddCustomProviderRequestSchema,
-    output: ProviderLibrarySchema
+    output: CustomProviderSchema
   }),
   'providers.add-model': defineRoute({
     input: AddModelRequestSchema,
-    output: ProviderLibrarySchema
+    output: ModelEntrySchema
   }),
   'providers.update-custom-provider': defineRoute({
     input: UpdateCustomProviderRequestSchema,
-    output: ProviderLibrarySchema
+    output: CustomProviderSchema
   }),
   'providers.remove-custom-provider': defineRoute({
     input: CustomProviderIdSchema,
-    output: ProviderLibrarySchema
+    output: z.void()
   }),
   'providers.discover-models': defineRoute({
     input: ProviderConfigurationSchema,
     output: z.array(DiscoveredModelSchema)
   }),
   'providers.get-library': defineRoute({ input: z.void(), output: ProviderLibrarySchema }),
-  'providers.import-model': defineRoute({
-    input: ImportModelRequestSchema,
-    output: ProviderLibrarySchema
-  }),
-  'providers.set-model-enabled': defineRoute({
-    input: SetModelEnabledRequestSchema,
-    output: ProviderLibrarySchema
-  }),
-  'providers.sync-models': defineRoute({
-    input: SyncModelsRequestSchema,
-    output: ProviderLibrarySchema
-  }),
-  'providers.remove-model': defineRoute({
-    input: ModelEntryIdSchema,
-    output: ProviderLibrarySchema
-  }),
-  'providers.save-configuration': defineRoute({
-    input: ProviderConfigurationSchema,
-    output: ProviderLibrarySchema
-  }),
   'providers.save-library': defineRoute({
     input: ProviderLibrarySchema,
     output: ProviderLibrarySchema
   }),
+  'providers.import-model': defineRoute({
+    input: ImportModelRequestSchema,
+    output: ModelEntrySchema
+  }),
+  'providers.set-model-enabled': defineRoute({
+    input: SetModelEnabledRequestSchema,
+    output: ModelEntrySchema
+  }),
+  'providers.sync-models': defineRoute({
+    input: SyncModelsRequestSchema,
+    output: z.void()
+  }),
+  'providers.remove-model': defineRoute({
+    input: ModelEntryIdSchema,
+    output: z.void()
+  }),
+  'providers.save-configuration': defineRoute({
+    input: ProviderConfigurationSchema,
+    output: ProviderConfigurationSchema
+  }),
   'providers.select-model': defineRoute({
     input: ModelEntryIdSchema.nullable(),
-    output: ProviderLibrarySchema
+    output: ModelEntryIdSchema.nullable()
   }),
   'providers.select-provider': defineRoute({
     input: SelectProviderRequestSchema,
-    output: ProviderLibrarySchema
+    output: SelectProviderRequestSchema
   }),
   'providers.test-model': defineRoute({ input: TestModelRequestSchema, output: z.void() })
 }

@@ -187,28 +187,25 @@ describe('registerIpc provider handlers', () => {
     const { handlers, provider } = createHarness()
     const { event } = createEvent({ id: 42 })
     const configuration = { provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }
-    const library = { configurations: [configuration], models: [], selectedModelId: null }
     provider.saveConfiguration.mockImplementation(async (input) => {
       if (JSON.stringify(input) !== JSON.stringify(configuration)) {
         throw new Error('Provider configuration was not forwarded.')
       }
-      return library
+      return configuration
     })
 
     await expect(
       handlers.get(IpcChannel.Providers_SaveConfiguration)?.(event, configuration)
-    ).resolves.toEqual(library)
+    ).resolves.toEqual(configuration)
   })
 
-  it('validates and delegates a trusted full library save', async () => {
+  it('validates and delegates a trusted provider-library snapshot', async () => {
     const { handlers, provider } = createHarness()
     const { event } = createEvent({ id: 42 })
     const library = {
-      configurations: [
-        { provider: 'lm-studio' as const, baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }
-      ],
+      configurations: [{ provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }],
       customProviders: [],
+      enabledProviderIds: [],
       models: [],
       selectedModelId: null,
       selectedProviderId: null
@@ -223,21 +220,14 @@ describe('registerIpc provider handlers', () => {
   it('validates and delegates a trusted provider selection', async () => {
     const { handlers, provider } = createHarness()
     const { event } = createEvent({ id: 42 })
-    const library = {
-      configurations: [{ provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }],
-      customProviders: [],
-      models: [],
-      selectedModelId: null,
-      selectedProviderId: 'ollama'
-    }
     provider.selectProvider.mockImplementation(async (providerId) => {
       if (providerId !== 'ollama') throw new Error('Provider selection was not forwarded.')
-      return library
+      return providerId
     })
 
     await expect(
       handlers.get(IpcChannel.Providers_SelectProvider)?.(event, 'ollama')
-    ).resolves.toEqual(library)
+    ).resolves.toEqual('ollama')
   })
 
   it('rejects an invalid provider selection before delegation', () => {

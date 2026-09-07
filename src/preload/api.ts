@@ -32,6 +32,15 @@ const windowControls: WindowControlsAPI = {
     return () =>
       ipcRenderer.removeListener(IpcChannel.WindowControls_MaximizedChanged, wrappedListener)
   },
+  onProviderDraftFlush: (listener) => {
+    const wrappedListener = (): void => {
+      // The main process keeps the window alive until this acknowledgement arrives.
+      void listener().finally(() => ipcRenderer.send(IpcChannel.Providers_DraftFlushed))
+    }
+
+    ipcRenderer.on(IpcChannel.Providers_FlushDraft, wrappedListener)
+    return () => ipcRenderer.removeListener(IpcChannel.Providers_FlushDraft, wrappedListener)
+  },
   toggleFullScreen: () => ipcRenderer.invoke(IpcChannel.WindowControls_ToggleFullscreen),
   unmaximize: () => ipcRenderer.invoke(IpcChannel.WindowControls_Unmaximize)
 }

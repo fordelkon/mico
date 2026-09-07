@@ -10,6 +10,7 @@ interface WindowControlsAPI {
   minimize: () => Promise<void>
   onFullScreenChange: (listener: (isFullScreen: boolean) => void) => () => void
   onMaximizedChange: (listener: (isMaximized: boolean) => void) => () => void
+  onProviderDraftFlush: (listener: () => Promise<void>) => () => void
   toggleFullScreen: () => Promise<void>
   unmaximize: () => Promise<void>
 }

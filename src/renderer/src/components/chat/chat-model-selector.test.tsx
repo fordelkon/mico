@@ -24,6 +24,7 @@ const library: ProviderLibrary = {
       enabled: true
     }
   ],
+  enabledProviderIds: ['ollama', 'example-ai'],
   models: [
     {
       id: 'ollama:qwen3',

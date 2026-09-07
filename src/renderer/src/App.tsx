@@ -4,14 +4,16 @@ import * as React from 'react'
 import { ChatMain } from './components/chat/chat-main'
 import { SettingsMain } from './components/settings/settings-main'
 import { ProviderLibraryProvider } from './components/settings/providers/provider-library'
+import { useProviderLibrary } from './components/settings/providers/provider-library'
 import { AppSidebar } from './components/sidebar/app-sidebar'
 import { WindowControls } from './components/window-controls/window-controls'
 import { useChatWorkspaceState } from './hooks/chat/use-chat-workspace-state'
 import { selectConversationWithPaperTransition } from '@renderer/utils/conversation-paper-transition'
 import { transitionSettingsPage } from '@renderer/utils/settings-paper-transition'
 
-function App(): React.JSX.Element {
+function AppContent(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
+  const { flushLibrary } = useProviderLibrary()
   const [activePage, setActivePage] = React.useState<'chat' | 'settings'>('chat')
 
   const handleNewChat = (): void => {
@@ -25,9 +27,11 @@ function App(): React.JSX.Element {
     transitionSettingsPage(() => setActivePage('settings'))
   }, [activePage])
 
-  const handleBackFromSettings = React.useCallback((): void => {
+  const handleBackFromSettings = React.useCallback(async (): Promise<void> => {
+    // The outgoing settings view remains visible until its draft reaches the snapshot boundary.
+    await flushLibrary()
     transitionSettingsPage(() => setActivePage('chat'))
-  }, [])
+  }, [flushLibrary])
 
   // Keep every sidebar selection on the same conversation handoff path.
   const handleSelectConversation = (
@@ -43,36 +47,42 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <ProviderLibraryProvider>
-      <SidebarProvider
-        className="home-workspace"
-        data-platform={window.electron.process.platform}
-        resize={{ defaultWidth: 240, maxWidth: 320, minWidth: 180 }}
+    <SidebarProvider
+      className="home-workspace"
+      data-platform={window.electron.process.platform}
+      resize={{ defaultWidth: 240, maxWidth: 320, minWidth: 180 }}
+    >
+      <div aria-hidden="true" className="home-workspace__titlebar" />
+      <AppSidebar
+        activeConversationId={workspace.activeConversation?.id ?? null}
+        conversations={workspace.conversations}
+        onDeleteConversation={workspace.deleteConversation}
+        onBackFromSettings={handleBackFromSettings}
+        onNewChat={handleNewChat}
+        onOpenSettings={handleOpenSettings}
+        onRenameConversation={workspace.renameConversation}
+        onSelectConversation={handleSelectConversation}
+        settingsActive={activePage === 'settings'}
+      />
+      <WindowControls />
+      <div aria-hidden="true" className="home-workspace__paper-feed">
+        <Separator className="home-workspace__paper-slot" />
+      </div>
+      <SidebarInset
+        aria-label="Main content"
+        className="home-workspace__content"
+        data-page={activePage}
       >
-        <div aria-hidden="true" className="home-workspace__titlebar" />
-        <AppSidebar
-          activeConversationId={workspace.activeConversation?.id ?? null}
-          conversations={workspace.conversations}
-          onDeleteConversation={workspace.deleteConversation}
-          onBackFromSettings={handleBackFromSettings}
-          onNewChat={handleNewChat}
-          onOpenSettings={handleOpenSettings}
-          onRenameConversation={workspace.renameConversation}
-          onSelectConversation={handleSelectConversation}
-          settingsActive={activePage === 'settings'}
-        />
-        <WindowControls />
-        <div aria-hidden="true" className="home-workspace__paper-feed">
-          <Separator className="home-workspace__paper-slot" />
-        </div>
-        <SidebarInset
-          aria-label="Main content"
-          className="home-workspace__content"
-          data-page={activePage}
-        >
-          {activePage === 'settings' ? <SettingsMain /> : <ChatMain workspace={workspace} />}
-        </SidebarInset>
-      </SidebarProvider>
+        {activePage === 'settings' ? <SettingsMain /> : <ChatMain workspace={workspace} />}
+      </SidebarInset>
+    </SidebarProvider>
+  )
+}
+
+function App(): React.JSX.Element {
+  return (
+    <ProviderLibraryProvider>
+      <AppContent />
     </ProviderLibraryProvider>
   )
 }
