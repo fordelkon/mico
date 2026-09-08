@@ -135,6 +135,7 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid chat request')
 
     const ownerId = String(event.sender.id)
+    const senderFrame = event.senderFrame
     if (!destroyedSenderIds.has(event.sender.id)) {
       destroyedSenderIds.add(event.sender.id)
       event.sender.once('destroyed', () => {
@@ -144,7 +145,17 @@ function registerIpc(
     }
 
     chat.start({ ownerId, request: result.data }, (chatEvent) => {
-      event.sender.send(IpcChannel.Chat_Event, chatEvent)
+      // A renderer crash can dispose its frame before the owning WebContents emits 'destroyed'.
+      if (!senderFrame || event.sender.isDestroyed() || senderFrame.isDestroyed()) {
+        chat.abortAll(ownerId)
+        return
+      }
+
+      try {
+        event.sender.send(IpcChannel.Chat_Event, chatEvent)
+      } catch {
+        chat.abortAll(ownerId)
+      }
     })
   })
   dependencies.ipcMain.handle(IpcChannel.Chat_GetCapabilities, (event) => {

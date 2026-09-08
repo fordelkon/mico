@@ -11,6 +11,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('ThinkingBlock', () => {
@@ -35,5 +36,29 @@ describe('ThinkingBlock', () => {
 
     expect(button).toHaveAttribute('aria-expanded', 'true')
     expect(summary).toHaveAttribute('aria-hidden', 'false')
+  })
+
+  it('follows streamed reasoning without starting a smooth scroll animation', () => {
+    const scrollTo = vi.fn()
+    const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: scrollTo
+    })
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
+      callback(performance.now())
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', (): void => undefined)
+
+    try {
+      render(<ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />)
+
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' })
+    } finally {
+      if (originalScrollTo)
+        Object.defineProperty(HTMLElement.prototype, 'scrollTo', originalScrollTo)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+    }
   })
 })

@@ -81,7 +81,8 @@ function ChatMessageList({
             aria-busy={isResponding}
             className="mx-auto w-full max-w-[46rem] gap-8 px-5 pb-10 pt-12 sm:px-8"
           >
-            <ThinkingOrbStateScope key={isResponding ? 'responding' : 'idle'}>
+            {/* Preserve the mounted transcript when a response completes so the browser retains scroll position. */}
+            <ThinkingOrbStateScope>
               {(thinkingOrbState) => (
                 <>
                   {displayedMessages.map((message) => (

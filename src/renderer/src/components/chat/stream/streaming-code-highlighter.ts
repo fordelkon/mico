@@ -177,8 +177,6 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
         await session.writer.write(suffix)
         session.stableCode = stable
         await this.waitForPublication(session, published)
-      } else {
-        this.schedulePublication(session)
       }
 
       if (!this.isCurrentSession(session)) return this.rawFallback(input.code)

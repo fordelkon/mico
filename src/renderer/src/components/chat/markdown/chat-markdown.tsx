@@ -31,13 +31,6 @@ const plugins = {
   cjk
 }
 
-const streamingAnimation = {
-  animation: 'blurIn',
-  duration: 180,
-  easing: 'ease-out',
-  sep: 'word'
-} as const
-
 function ChatMarkdownCode({
   children,
   className,
@@ -92,8 +85,8 @@ function ChatMarkdown({ isStreaming, text }: ChatMarkdownProps): React.JSX.Eleme
 
   return (
     <div className="chat-markdown" data-testid="answer-content">
+      {/* Per-word animation retains a wrapper for every streamed word and can exhaust renderer memory. */}
       <Streamdown
-        animated={streamingAnimation}
         caret="circle"
         components={components}
         isAnimating={isStreaming}

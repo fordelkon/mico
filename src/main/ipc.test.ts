@@ -62,26 +62,33 @@ function createHarness() {
 
 function createEvent({
   id,
+  frameDestroyed = false,
   isMainFrame = true,
   trusted = true
 }: {
   id: number
+  frameDestroyed?: boolean
   isMainFrame?: boolean
   trusted?: boolean
 }) {
   const destroyedListeners: Array<() => void> = []
+  const senderFrame = { isDestroyed: vi.fn(() => frameDestroyed) }
   const sender = {
     id,
-    mainFrame: {},
+    mainFrame: senderFrame,
+    isDestroyed: vi.fn(() => false),
     once: vi.fn((event: string, listener: () => void) => {
       if (event === 'destroyed') destroyedListeners.push(listener)
     }),
     send: vi.fn()
   }
-  const senderFrame = isMainFrame ? sender.mainFrame : {}
+  const invokingFrame = isMainFrame ? sender.mainFrame : {}
 
   // SAFETY: The handlers exercise only sender identity, sender frame identity, and fake event methods.
-  const event = Object.assign(Object.create(null) as IpcMainInvokeEvent, { sender, senderFrame })
+  const event = Object.assign(Object.create(null) as IpcMainInvokeEvent, {
+    sender,
+    senderFrame: invokingFrame
+  })
 
   return { destroyedListeners, event, sender, trusted }
 }
@@ -165,6 +172,25 @@ describe('registerIpc chat handlers', () => {
 
     expect(chat.abortAll).toHaveBeenCalledWith('42')
     expect(chat.abortAll).not.toHaveBeenCalledWith('43')
+  })
+
+  it('stops the owner run instead of sending to a disposed renderer frame', () => {
+    const { chat, handlers } = createHarness()
+    const { event, sender } = createEvent({ id: 42, frameDestroyed: true })
+    let emit: ((event: ChatStreamEvent) => void) | undefined
+    chat.start.mockImplementation((_input, sink) => {
+      emit = sink
+    })
+
+    handlers.get(IpcChannel.Chat_Start)?.(event, {
+      conversationId: 'chat-1',
+      requestId: 'request-1',
+      messages: []
+    })
+    emit?.({ type: 'finish', requestId: 'request-1' })
+
+    expect(sender.send).not.toHaveBeenCalled()
+    expect(chat.abortAll).toHaveBeenCalledWith('42')
   })
 })
 

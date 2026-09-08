@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatStreamEvent, ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
@@ -32,6 +32,7 @@ class FakeChatAPI implements ChatAPI {
 const originalApi = Object.getOwnPropertyDescriptor(window, 'api')
 
 afterEach(() => {
+  vi.useRealTimers()
   if (originalApi) Object.defineProperty(window, 'api', originalApi)
   else Reflect.deleteProperty(window, 'api')
 })
@@ -72,6 +73,54 @@ describe('useChatWorkspaceState', () => {
 
     act(() => result.current.sendMessage('Hello'))
     await waitFor(() => expect(api.startedRequests[0]?.thinkingEffort).toBe('default'))
+  })
+
+  it('batches rapid streamed text updates before committing the transcript', async () => {
+    vi.useFakeTimers()
+    const api = new FakeChatAPI()
+    Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    act(() => result.current.sendMessage('Hello'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const requestId = api.startedRequests[0]?.requestId
+    if (!requestId) throw new Error('Sending a message must start a request.')
+
+    act(() => {
+      api.emit({
+        type: 'chunk',
+        requestId,
+        chunk: { type: 'text-start', id: 'part-1' }
+      })
+      api.emit({
+        type: 'chunk',
+        requestId,
+        chunk: { type: 'text-delta', id: 'part-1', delta: 'rapid ' }
+      })
+      api.emit({
+        type: 'chunk',
+        requestId,
+        chunk: { type: 'text-delta', id: 'part-1', delta: 'updates' }
+      })
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(49)
+    })
+    expect(result.current.activeMessages.at(-1)?.parts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'rapid updates' })])
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(result.current.activeMessages.at(-1)?.parts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'rapid updates' })])
+    )
   })
 
   it('keeps a provider error on its conversation and clears it when the next send begins', async () => {

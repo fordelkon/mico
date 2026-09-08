@@ -16,7 +16,6 @@ type StreamingCodeHighlightOptions = {
 
 type StreamingCodeHighlightState = {
   isFallback: boolean
-  rawTail: string
   source: { code: string; language?: string }
   tokenLines: ThemedToken[][] | null
 }
@@ -24,12 +23,13 @@ type StreamingCodeHighlightState = {
 type StreamingCodeHighlightSession = {
   code: string
   highlighter: StreamingCodeHighlighter
+  isStreaming: boolean
   language: string
+  stableCode: string
 }
 
 const rawCodeState = (code: string, language?: string): StreamingCodeHighlightState => ({
   isFallback: true,
-  rawTail: code,
   source: { code, language },
   tokenLines: null
 })
@@ -51,7 +51,6 @@ function useStreamingCodeHighlight({
   const publishHighlight = React.useEffectEvent((highlight: StreamingCodeHighlight) => {
     setState({
       isFallback: highlight.isFallback,
-      rawTail: highlight.isFallback ? code : splitStableCode(code, isStreaming).tail,
       source: { code, language },
       tokenLines: highlight.isFallback ? null : highlight.lines
     })
@@ -66,6 +65,7 @@ function useStreamingCodeHighlight({
       return
     }
 
+    const stableCode = splitStableCode(code, isStreaming).stable
     const currentSession = sessionRef.current
     const needsNewSession =
       !currentSession ||
@@ -75,6 +75,12 @@ function useStreamingCodeHighlight({
     if (needsNewSession) {
       const generation = ++generationRef.current
       const previousSession = sessionRef.current
+      if (!stableCode) {
+        sessionRef.current = null
+        void previousSession?.highlighter.dispose()
+        return
+      }
+
       const highlighter = createStreamingCodeHighlighter({
         onTokens: (highlight) => {
           if (generation !== generationRef.current) return
@@ -82,26 +88,25 @@ function useStreamingCodeHighlight({
           publishHighlight(highlight)
         }
       })
-      const session = { code, highlighter, language }
+      const session = { code, highlighter, isStreaming, language, stableCode }
       sessionRef.current = session
       void previousSession?.highlighter.dispose()
 
-      void highlighter.update({ code, isStreaming, language }).then((highlight) => {
-        if (generation !== generationRef.current) return
+      void highlighter.update({ code, isStreaming, language })
+      return
+    }
 
-        publishHighlight(highlight)
-      })
+    if (currentSession.stableCode === stableCode && currentSession.isStreaming === isStreaming) {
+      // The raw tail renders from current props; publishing it would add a React update per token.
+      currentSession.code = code
       return
     }
 
     currentSession.code = code
-    const generation = generationRef.current
+    currentSession.isStreaming = isStreaming
+    currentSession.stableCode = stableCode
 
-    void currentSession.highlighter.update({ code, isStreaming, language }).then((highlight) => {
-      if (generation !== generationRef.current) return
-
-      publishHighlight(highlight)
-    })
+    void currentSession.highlighter.update({ code, isStreaming, language })
   }, [code, isStreaming, language])
 
   React.useEffect(

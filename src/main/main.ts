@@ -45,6 +45,33 @@ trayService = new TrayService(mainWindowService)
 
 const gotTheLock = app.requestSingleInstanceLock()
 
+app.on('child-process-gone', (_, details) => {
+  console.error('[chat-renderer-debug] child-process-gone', details)
+})
+
+app.on('render-process-gone', (_, webContents, details) => {
+  console.error('[chat-renderer-debug] render-process-gone', {
+    details,
+    webContentsId: webContents.id,
+    url: webContents.getURL()
+  })
+})
+
+app.on('web-contents-created', (_, webContents) => {
+  webContents.on('console-message', ({ level, lineNumber, message, sourceId }) => {
+    if (level !== 'error') return
+
+    console.error('[chat-renderer-debug] renderer-console-error', {
+      lineNumber,
+      message,
+      sourceId
+    })
+  })
+  webContents.on('unresponsive', () => {
+    console.error('[chat-renderer-debug] renderer-unresponsive', { webContentsId: webContents.id })
+  })
+})
+
 if (gotTheLock) {
   const startup = app.whenReady().then(async () => {
     electronApp.setAppUserModelId('com.electron')

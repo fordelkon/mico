@@ -2,6 +2,7 @@ import { Button } from '@mico/ui'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import * as React from 'react'
 
+import { splitStableCode } from '../stream/streaming-code-highlighter'
 import { useStreamingCodeHighlight } from '../stream/use-streaming-code-highlight'
 
 type ChatCodeBlockProps = {
@@ -40,13 +41,13 @@ function completeTokensForLine<Token extends { content: string }>(
 function ChatCodeBlock({ code, isStreaming, language }: ChatCodeBlockProps): React.JSX.Element {
   const [copied, setCopied] = React.useState(false)
   const lines = code.split('\n')
-  const { isFallback, rawTail, source, tokenLines } = useStreamingCodeHighlight({
+  const { isFallback, source, tokenLines } = useStreamingCodeHighlight({
     code,
     isStreaming,
     language
   })
   const canRenderTokens = hasCompatibleHighlight({ isFallback, source }, code, language)
-  const visibleRawTail = canRenderTokens ? rawTail : ''
+  const visibleRawTail = canRenderTokens ? splitStableCode(code, isStreaming).tail : ''
   const stableLineCount =
     visibleRawTail && code.endsWith(visibleRawTail)
       ? code.slice(0, -visibleRawTail.length).replace(/\n$/, '').split('\n').length

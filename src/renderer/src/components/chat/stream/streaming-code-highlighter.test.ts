@@ -23,6 +23,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -39,6 +40,35 @@ describe('createStreamingCodeHighlighter', () => {
     expect(highlight.isFallback).toBe(false)
     expect(getCode(highlight.lines)).toBe('const answer = 42')
     expect(highlight.rawTail).toBe('const pending')
+    await session.dispose()
+  })
+
+  it('does not publish a new highlight when only the unfinished streamed tail grows', async () => {
+    const publications: ThemedToken[][][] = []
+    vi.useFakeTimers()
+    const session = createStreamingCodeHighlighter({
+      createHighlighter: createTestHighlighter,
+      onTokens: (highlight) => publications.push(highlight.lines)
+    })
+
+    const initialUpdate = session.update({
+      code: 'const answer = 42\nconst pending',
+      isStreaming: true,
+      language: 'typescript'
+    })
+    await vi.runAllTimersAsync()
+    await initialUpdate
+    await vi.runAllTimersAsync()
+    const publishedCompletedLines = publications.length
+
+    await session.update({
+      code: 'const answer = 42\nconst pendingValue',
+      isStreaming: true,
+      language: 'typescript'
+    })
+    await vi.runAllTimersAsync()
+
+    expect(publications).toHaveLength(publishedCompletedLines)
     await session.dispose()
   })
 

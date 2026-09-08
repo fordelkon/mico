@@ -11,6 +11,8 @@ import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 
 const EMPTY_MESSAGES: MicoUIMessage[] = []
+// A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
+const STREAMING_UPDATE_THROTTLE_MS = 50
 
 class ThinkingEffortStore {
   #value: ThinkingSelection = 'default'
@@ -180,7 +182,8 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const subscribedChat = activeSession?.chat ?? idleChat
   const { messages: subscribedMessages, status: subscribedStatus } = useChat<MicoUIMessage>({
-    chat: subscribedChat
+    chat: subscribedChat,
+    throttle: STREAMING_UPDATE_THROTTLE_MS
   })
   const activeMessages = activeSession ? subscribedMessages : EMPTY_MESSAGES
 

@@ -140,7 +140,6 @@
 .thinking-block__panel-inner--streaming {
   height: 7.5rem;
   overflow-y: auto;
-  scroll-behavior: smooth;
   scrollbar-width: none;
   -webkit-mask-image: linear-gradient(
     transparent 0,
@@ -385,10 +384,6 @@
   .thinking-block__panel-inner {
     animation: none;
     transition: none;
-  }
-
-  .thinking-block__panel-inner--streaming {
-    scroll-behavior: auto;
   }
 
   .chat-message--sent {
