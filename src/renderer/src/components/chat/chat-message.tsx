@@ -10,26 +10,13 @@ import type { MicoUIMessage } from '@renderer/types/chat'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import * as React from 'react'
 
+import { ChatMarkdown } from './chat-markdown'
 import { ThinkingBlock, type ThinkingOrbState } from './thinking-block'
 
 type ChatMessageProps = {
   message: MicoUIMessage
   isStreaming: boolean
   thinkingOrbState?: ThinkingOrbState
-}
-
-const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
-
-function StreamingText({ text }: { text: string }): React.JSX.Element {
-  return (
-    <>
-      {Array.from(segmenter.segment(text), ({ segment }, index) => (
-        <span className="chat-stream__segment" key={`${index}-${segment}`}>
-          {segment}
-        </span>
-      ))}
-    </>
-  )
 }
 
 function ChatMessage({
@@ -98,9 +85,7 @@ function ChatMessage({
                 : 'max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
             }
           >
-            <p className="whitespace-pre-wrap" data-testid="answer-content">
-              {isStreaming ? <StreamingText text={text} /> : text}
-            </p>
+            <ChatMarkdown isStreaming={isStreaming} text={text} />
             {isStreaming && (
               <span
                 aria-hidden="true"
