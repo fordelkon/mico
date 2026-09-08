@@ -163,6 +163,13 @@
   margin-top: 1rem;
 }
 
+/* Let Streamdown's existing scroll viewport shrink below a wide table's intrinsic width. */
+.chat-markdown [data-streamdown="table-wrapper"],
+.chat-markdown [data-streamdown="table-wrapper"] > div:last-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .chat-markdown :is(h1, h2, h3, h4) {
   margin-top: 1.5rem;
   font-family: var(--font-sans);

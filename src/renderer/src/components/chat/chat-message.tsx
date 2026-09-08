@@ -82,7 +82,7 @@ function ChatMessage({
             className={
               isUser
                 ? 'rounded-[var(--radius-message)] px-4 py-2.5'
-                : 'max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
+                : 'w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
             }
           >
             <ChatMarkdown isStreaming={isStreaming} text={text} />
