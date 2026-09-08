@@ -6,6 +6,7 @@ import { is } from '@electron-toolkit/utils'
 import icon from '../../../build/icon.png?asset'
 import windowsIcon from '../../../build/icons/icon.ico?asset'
 import { IpcChannel } from '@shared/IpcChannel'
+import { registerWindowClosingHandlers } from './window-lifecycle'
 
 class MainWindowService {
   private mainWindow: BrowserWindow | undefined
@@ -97,23 +98,12 @@ class MainWindowService {
     }
     const window = new BrowserWindow(windowOptions)
     this.mainWindow = window
-
-    window.on('close', (event) => {
-      if (!this.shouldKeepWindowOpen()) return
-
-      event.preventDefault()
-      window.hide()
+    registerWindowClosingHandlers({
+      closingWindowIds: this.closingWindowIds,
+      flushProviderDraft: this.flushProviderDraft,
+      shouldKeepWindowOpen: this.shouldKeepWindowOpen,
+      window
     })
-
-    window.on('close', (event) => {
-      if (this.shouldKeepWindowOpen() || this.closingWindowIds.has(window.webContents.id)) return
-
-      event.preventDefault()
-      this.closingWindowIds.add(window.webContents.id)
-      // Native close and Quit shortcuts bypass React navigation, so the main process owns this final draft boundary.
-      void this.flushProviderDraft(window).finally(() => window.close())
-    })
-    window.on('closed', () => this.closingWindowIds.delete(window.webContents.id))
 
     if (process.platform === 'darwin') {
       window.setWindowButtonVisibility(false)
