@@ -3,6 +3,7 @@ import { Streamdown, type Components } from 'streamdown'
 import * as React from 'react'
 
 import 'katex/dist/katex.min.css'
+import 'streamdown/styles.css'
 
 import { ChatCodeBlock } from './chat-code-block'
 import {
@@ -29,6 +30,13 @@ function textFromChildren(children: React.ReactNode): string {
 const plugins = {
   cjk
 }
+
+const streamingAnimation = {
+  animation: 'blurIn',
+  duration: 180,
+  easing: 'ease-out',
+  sep: 'word'
+} as const
 
 function ChatMarkdownCode({
   children,
@@ -85,6 +93,8 @@ function ChatMarkdown({ isStreaming, text }: ChatMarkdownProps): React.JSX.Eleme
   return (
     <div className="chat-markdown" data-testid="answer-content">
       <Streamdown
+        animated={streamingAnimation}
+        caret="circle"
         components={components}
         isAnimating={isStreaming}
         mode={isStreaming ? 'streaming' : 'static'}

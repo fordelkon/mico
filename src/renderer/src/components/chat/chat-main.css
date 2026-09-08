@@ -186,15 +186,20 @@
 }
 
 .chat-markdown :is(ul, ol) {
+  padding-left: 0;
+  list-style-position: inside;
+}
+
+.chat-markdown :is(ul, ol) > li {
   padding-left: 1.5rem;
 }
 
 .chat-markdown ul {
-  list-style: disc;
+  list-style-type: disc;
 }
 
 .chat-markdown ol {
-  list-style: decimal;
+  list-style-type: decimal;
 }
 
 .chat-markdown blockquote {

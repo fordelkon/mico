@@ -6,6 +6,17 @@ import { describe, expect, it } from 'vitest'
 import { ChatMarkdown } from './chat-markdown'
 
 describe('ChatMarkdown', () => {
+  it('animates streamed prose word by word while showing the streaming caret', () => {
+    render(<ChatMarkdown isStreaming text="The answer is arriving." />)
+
+    const answer = screen.getByTestId('answer-content')
+
+    expect(answer.querySelectorAll('[data-sd-animate]')).not.toHaveLength(0)
+    expect(answer.querySelector('[style*="--streamdown-caret"]')).toHaveStyle({
+      '--streamdown-caret': '" ●"'
+    })
+  })
+
   it('renders an unlabelled fenced block as a line-numbered code card and preserves its blank line', () => {
     render(<ChatMarkdown isStreaming={false} text={'```\nconst answer = 42\n\n```'} />)
 

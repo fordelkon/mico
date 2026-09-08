@@ -86,12 +86,6 @@ function ChatMessage({
             }
           >
             <ChatMarkdown isStreaming={isStreaming} text={text} />
-            {isStreaming && (
-              <span
-                aria-hidden="true"
-                className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-brand motion-reduce:animate-none"
-              />
-            )}
           </BubbleContent>
         </Bubble>
         {canCopy && (
