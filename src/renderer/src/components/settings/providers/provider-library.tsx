@@ -163,6 +163,8 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   const pendingConfigurations = React.useRef(new Map<ProviderId, ProviderConfiguration>())
   const libraryRef = React.useRef(library)
   const librarySaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A stale debounced snapshot must not finish after model sync and overwrite its normalized state.
+  const librarySaveQueue = React.useRef(Promise.resolve())
   const isLibraryLoaded = React.useRef(false)
   const libraryRevision = React.useRef(0)
   const hasUnsavedLibraryChanges = React.useRef(false)
@@ -178,9 +180,16 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   }, [])
   const commitLibrary = React.useCallback(async (): Promise<void> => {
     const revision = libraryRevision.current
-    const saved = await window.api.providers.saveLibrary(toPersistedLibrary(libraryRef.current))
-    if (libraryRevision.current === revision) hasUnsavedLibraryChanges.current = false
-    setLibrary(fromPersistedLibrary(saved))
+    const library = toPersistedLibrary(libraryRef.current)
+    const save = librarySaveQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        const saved = await window.api.providers.saveLibrary(library)
+        if (libraryRevision.current === revision) hasUnsavedLibraryChanges.current = false
+        setLibrary(fromPersistedLibrary(saved))
+      })
+    librarySaveQueue.current = save
+    await save
   }, [])
   const scheduleLibrarySave = React.useCallback((): void => {
     libraryRevision.current += 1
@@ -236,6 +245,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   const flushLibrary = React.useCallback(async (): Promise<void> => {
     if (librarySaveTimer.current) clearTimeout(librarySaveTimer.current)
     await waitForConfigurationSaves()
+    await librarySaveQueue.current
     if (!isLibraryLoaded.current || !hasUnsavedLibraryChanges.current) return
 
     // A flush always serializes the draft, never a refresh result, so rail reordering and persistence share one state transition.
@@ -325,23 +335,11 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   )
   const syncModels = React.useCallback(
     async (providerId: ProviderId, models: DiscoveredModel[]) => {
-      await waitForConfigurationSaves()
-      setLibrary((current) => ({
-        ...current,
-        models: [
-          ...current.models.filter((model) => model.providerId !== providerId),
-          ...models.map(({ displayName, modelId }) => ({
-            id: crypto.randomUUID(),
-            providerId,
-            modelId,
-            name: displayName,
-            enabled: false
-          }))
-        ]
-      }))
-      scheduleLibrarySave()
+      await flushLibrary()
+      await window.api.providers.syncModels({ provider: providerId, models })
+      await refresh()
     },
-    [scheduleLibrarySave, waitForConfigurationSaves]
+    [flushLibrary, refresh]
   )
   const updateCustomProvider = React.useCallback(
     async (provider: UpdateCustomProviderRequest) => {

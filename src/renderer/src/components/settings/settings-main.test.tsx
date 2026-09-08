@@ -120,18 +120,26 @@ beforeEach(() => {
   providerApi.syncModels.mockReset()
   providerApi.syncModels.mockImplementation(async ({ models, provider }) => {
     const existingModels = persistedLibrary.models.filter((model) => model.provider === provider)
+    const discoveredModels = new Map<string, { displayName: string; modelId: string }>(
+      models.map((model) => [model.modelId, model])
+    )
     persistedLibrary = {
       ...persistedLibrary,
-      models: models.map(({ displayName, modelId }) => {
-        const existing = existingModels.find((model) => model.modelId === modelId)
-        return {
-          displayName,
-          enabled: existing?.enabled ?? false,
-          id: existing?.id ?? `${provider}:${modelId}`,
-          modelId,
-          provider
-        }
-      })
+      models: [
+        ...existingModels.flatMap((model) => {
+          const discovered = discoveredModels.get(model.modelId)
+          return discovered ? [{ ...model, displayName: `Saved ${discovered.displayName}` }] : []
+        }),
+        ...models
+          .filter((model) => !existingModels.some(({ modelId }) => modelId === model.modelId))
+          .map(({ displayName, modelId }) => ({
+            displayName,
+            enabled: false,
+            id: `${provider}:${modelId}`,
+            modelId,
+            provider
+          }))
+      ]
     }
   })
   providerApi.setModelEnabled.mockReset()
@@ -319,6 +327,53 @@ describe('SettingsMain', () => {
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
 
     expect(screen.getByLabelText('Ollama fetched models')).toBeVisible()
+  })
+
+  it('keeps enabled models and their order after refreshing a provider', async () => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      models: [
+        {
+          displayName: 'second-model',
+          enabled: true,
+          id: 'ollama:second-model',
+          modelId: 'second-model',
+          provider: 'ollama'
+        },
+        {
+          displayName: 'first-model',
+          enabled: true,
+          id: 'ollama:first-model',
+          modelId: 'first-model',
+          provider: 'ollama'
+        }
+      ]
+    }
+    providerApi.discoverModels.mockResolvedValue([
+      { modelId: 'first-model', displayName: 'First refreshed' },
+      { modelId: 'second-model', displayName: 'Second refreshed' }
+    ])
+    const user = userEvent.setup()
+
+    renderSettings()
+    await waitForOllama()
+    await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
+
+    await waitFor(() => {
+      const models = screen
+        .getAllByRole('switch')
+        .filter((control) =>
+          ['Enable Saved First refreshed', 'Enable Saved Second refreshed'].includes(
+            control.getAttribute('aria-label') ?? ''
+          )
+        )
+      expect(models.map((control) => control.getAttribute('aria-label'))).toEqual([
+        'Enable Saved Second refreshed',
+        'Enable Saved First refreshed'
+      ])
+      expect(models[0]).toHaveAttribute('aria-checked', 'true')
+      expect(models[1]).toHaveAttribute('aria-checked', 'true')
+    })
   })
 
   it('places a newly enabled provider after previously enabled providers in the rail', async () => {
