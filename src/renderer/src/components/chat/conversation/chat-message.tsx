@@ -10,7 +10,7 @@ import type { MicoUIMessage } from '@renderer/types/chat'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { ChatMarkdown } from './chat-markdown'
+import { ChatMarkdown } from '../markdown/chat-markdown'
 import { ThinkingBlock, type ThinkingOrbState } from './thinking-block'
 
 type ChatMessageProps = {

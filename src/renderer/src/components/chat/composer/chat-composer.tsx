@@ -11,13 +11,15 @@ import * as React from 'react'
 
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 
+import { ChatModelSelector } from './chat-model-selector'
+import { useComposerModelSelection } from './use-composer-model-selection'
+
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
 type ChatComposerProps = {
   focusKey: number
-  hasSelectedModel: boolean
   mode: ChatComposerMode
-  modelSelector: React.ReactNode
+  onModelSelected: () => Promise<void>
   onSend: (content: string) => void
   onStop: () => void
   reasoningCapabilities: ModelReasoningCapabilities | null
@@ -38,15 +40,17 @@ const thinkingEffortLabels = {
 
 function ChatComposer({
   focusKey,
-  hasSelectedModel,
   mode,
-  modelSelector,
+  onModelSelected,
   onSend,
   onStop,
   reasoningCapabilities,
   thinkingEffort,
   onThinkingEffortChange
 }: ChatComposerProps): React.JSX.Element {
+  const { hasSelectedModel, library, selectionError, selectModel } = useComposerModelSelection({
+    onModelSelected
+  })
   const [draft, setDraft] = React.useState('')
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const mountedRef = React.useRef(false)
@@ -111,7 +115,12 @@ function ChatComposer({
         />
         <div className="flex min-h-8 items-center justify-between gap-4 px-0.5">
           <div className="flex min-w-0 items-center gap-1.5">
-            {modelSelector}
+            <div className="flex flex-col gap-1">
+              <ChatModelSelector library={library} onSelect={selectModel} />
+              {selectionError ? (
+                <p className="px-2 text-xs text-destructive">{selectionError}</p>
+              ) : null}
+            </div>
             {reasoningCapabilities ? (
               <IconMenuButton
                 className="size-8"

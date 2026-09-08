@@ -2,7 +2,7 @@ import { Button } from '@mico/ui'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { useStreamingCodeHighlight } from './use-streaming-code-highlight'
+import { useStreamingCodeHighlight } from '../stream/use-streaming-code-highlight'
 
 type ChatCodeBlockProps = {
   code: string

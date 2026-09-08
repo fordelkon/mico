@@ -1,11 +1,9 @@
 import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
-import type { ProviderLibrary } from '@shared/data/schemas/provider'
 import * as React from 'react'
 
-import { ChatComposer, type ChatComposerMode } from './chat-composer'
-import { ChatMessageList } from './chat-message-list'
-import { ChatModelSelector, getEligibleModels } from './chat-model-selector'
+import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
+import { ChatMessageList } from './conversation/chat-message-list'
 import { EmptyConversation } from './empty-conversation'
 import './chat-main.css'
 
@@ -14,53 +12,15 @@ type ChatMainProps = {
 }
 
 function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
-  const [library, setLibrary] = React.useState<ProviderLibrary | null>(null)
-  const [selectionError, setSelectionError] = React.useState<string | null>(null)
   const [refreshedCapabilities, setRefreshedCapabilities] = React.useState<
     ModelReasoningCapabilities | null | undefined
   >(undefined)
-
-  React.useEffect(() => {
-    let active = true
-
-    void window.api.providers.getLibrary().then(
-      (nextLibrary) => {
-        if (active) setLibrary(nextLibrary)
-      },
-      () => {
-        if (active) setSelectionError('Could not load models. Open Settings and try again.')
-      }
-    )
-
-    return () => {
-      active = false
-    }
-  }, [])
 
   const refreshCapabilities = React.useCallback(async (): Promise<void> => {
     const capabilities = await window.api.chat.getCapabilities()
     setRefreshedCapabilities(capabilities ?? null)
   }, [])
 
-  const selectModel = React.useCallback(
-    async (modelId: string): Promise<void> => {
-      try {
-        await window.api.providers.selectModel(modelId)
-        const nextLibrary = await window.api.providers.getLibrary()
-        setLibrary(nextLibrary)
-        setSelectionError(null)
-        await refreshCapabilities()
-      } catch {
-        setSelectionError(
-          'Could not select this model. Verify its provider settings and try again.'
-        )
-      }
-    },
-    [refreshCapabilities]
-  )
-  const hasSelectedModel = getEligibleModels(library).some(
-    ({ id }) => id === library?.selectedModelId
-  )
   const isActiveResponse =
     (workspace.response.status === 'submitted' ||
       workspace.response.status === 'streaming' ||
@@ -87,16 +47,8 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
   const composer = (
     <ChatComposer
       focusKey={workspace.composerFocusKey}
-      hasSelectedModel={hasSelectedModel}
       mode={composerMode}
-      modelSelector={
-        <div className="flex flex-col gap-1">
-          <ChatModelSelector library={library} onSelect={selectModel} />
-          {selectionError ? (
-            <p className="px-2 text-xs text-destructive">{selectionError}</p>
-          ) : null}
-        </div>
-      }
+      onModelSelected={refreshCapabilities}
       onSend={workspace.sendMessage}
       onStop={workspace.stopResponse}
       reasoningCapabilities={

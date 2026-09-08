@@ -10,7 +10,7 @@ import {
   decodeMarkdownMath,
   prepareMarkdownMath,
   renderMarkdownMath
-} from '../../utils/markdown-math-parser'
+} from './markdown-math-parser'
 
 type ChatMarkdownProps = {
   isStreaming: boolean
