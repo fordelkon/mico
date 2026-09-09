@@ -12,6 +12,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
   Input,
+  RadioSelect,
   Textarea,
   Toggle,
   Tooltip,
@@ -19,11 +20,10 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from '@mico/ui'
+import { customProviderLogoSources } from '@renderer/assets/provider-logo-catalog'
 import { CustomProviderSchema } from '@shared/data/schemas/provider'
 import { BoxesIcon, ChevronDownIcon, CloudIcon, ServerIcon, TerminalIcon } from 'lucide-react'
 import * as React from 'react'
-
-import { customProviderLogoSources } from '@renderer/components/providers/custom-provider-logo-icons'
 
 import { useProviderLibrary } from './provider-library'
 
@@ -300,31 +300,12 @@ function CustomProviderDialog({
             </label>
             <fieldset aria-label="API format" className="space-y-1">
               <legend className="text-sm">API format</legend>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    aria-label={selectedCustomProviderApiFormat.label}
-                    className="w-fit justify-between"
-                    type="button"
-                    variant="outline"
-                  >
-                    {selectedCustomProviderApiFormat.label}
-                    <ChevronDownIcon aria-hidden="true" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-max max-w-[calc(100vw-4rem)]">
-                  <DropdownMenuRadioGroup
-                    onValueChange={setApiFormat}
-                    value={customProviderApiFormat}
-                  >
-                    {customProviderApiFormats.map(({ label, value }) => (
-                      <DropdownMenuRadioItem key={value} value={value}>
-                        {label}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <RadioSelect
+                aria-label={selectedCustomProviderApiFormat.label}
+                onValueChange={setApiFormat}
+                options={customProviderApiFormats}
+                value={customProviderApiFormat}
+              />
             </fieldset>
             {customProviderApiFormat === 'openai-compatible' ? (
               <div className="flex items-center justify-between gap-4">

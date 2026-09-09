@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ProviderTestMenu } from './provider-test-menu'
 
 describe('ProviderTestMenu', () => {
-  it('passes the selected model identifier to the test action', async () => {
+  it('passes the selected model identifier and closes the popover', async () => {
     const onTestModel = vi.fn()
     const user = userEvent.setup()
     render(
@@ -32,33 +32,30 @@ describe('ProviderTestMenu', () => {
     await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
     await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
 
+    expect(onTestModel).toHaveBeenCalledOnce()
     expect(onTestModel).toHaveBeenCalledWith('qwen3:8b')
+    expect(screen.queryByRole('listbox', { name: 'Ollama models' })).toBeNull()
   })
 
-  it('closes the popover after a model is selected', async () => {
+  it('does not open when models are unavailable', async () => {
     const user = userEvent.setup()
+
     render(
       <ProviderTestMenu
-        hasModels
+        hasModels={false}
         isTesting={false}
-        models={[
-          {
-            enabled: true,
-            id: 'ollama:qwen3',
-            modelId: 'qwen3:8b',
-            name: 'Qwen 3 8B',
-            providerId: 'ollama'
-          }
-        ]}
-        onTestModel={() => undefined}
+        models={[]}
+        onTestModel={vi.fn()}
         providerLabel="Ollama"
         testState="idle"
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Test Ollama model' }))
-    await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
+    const trigger = screen.getByRole('button', { name: 'Test Ollama model' })
+    expect(trigger).toBeDisabled()
 
-    expect(screen.queryByRole('listbox', { name: 'Ollama models' })).toBeNull()
+    await user.click(trigger)
+
+    expect(screen.queryByRole('listbox', { name: 'Ollama models' })).not.toBeInTheDocument()
   })
 })

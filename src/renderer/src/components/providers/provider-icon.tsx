@@ -6,7 +6,7 @@ import lmStudioIcon from '@renderer/assets/providers/lmstudio.svg'
 import ollamaDarkIcon from '@renderer/assets/providers/ollama-dark.svg'
 import ollamaLightIcon from '@renderer/assets/providers/ollama-light.svg'
 
-import { customProviderLogoSources } from './custom-provider-logo-icons'
+import { customProviderLogoSources } from '@renderer/assets/provider-logo-catalog'
 
 const customProviderLogoSourcesById = new Map<string, string>(
   customProviderLogoSources.map(({ id, source }) => [id, source])

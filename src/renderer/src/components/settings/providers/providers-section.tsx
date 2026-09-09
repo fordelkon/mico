@@ -9,22 +9,18 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
   Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
   IconTooltipButton,
   Input,
+  RadioSelect,
   Textarea,
   Toggle
 } from '@mico/ui'
-import { CheckCircle2Icon, ChevronDownIcon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
-import * as React from 'react'
 import type {
   CustomProvider,
   ProviderConfiguration as ProviderConnection
 } from '@shared/data/schemas/provider'
+import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
+import * as React from 'react'
 
 import { useProviderLibrary } from './provider-library'
 import { ProviderModelsSection } from './provider-models-section'
@@ -446,48 +442,30 @@ function ProvidersSection({
               </h3>
               <fieldset aria-label="API format" className="space-y-1">
                 <legend className="text-sm">API format</legend>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button className="w-fit" type="button" variant="outline">
-                      {customProvider.apiFormat === 'openai-compatible'
-                        ? 'Chat Completions (/chat/completions)'
-                        : customProvider.apiFormat === 'openai-responses'
-                          ? 'Responses (/responses)'
-                          : 'Anthropic Messages (v1/messages)'}
-                      <ChevronDownIcon aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="w-max max-w-[calc(100vw-4rem)]">
-                    <DropdownMenuRadioGroup
-                      onValueChange={(apiFormat) => {
-                        if (
-                          apiFormat === 'openai-compatible' ||
-                          apiFormat === 'openai-responses' ||
-                          apiFormat === 'anthropic-compatible'
-                        ) {
-                          saveCustomProvider({
-                            apiFormat,
-                            useMaxCompletionTokens:
-                              apiFormat === 'openai-compatible'
-                                ? customProvider.useMaxCompletionTokens
-                                : false
-                          })
-                        }
-                      }}
-                      value={customProvider.apiFormat}
-                    >
-                      <DropdownMenuRadioItem value="openai-compatible">
-                        Chat Completions (/chat/completions)
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="openai-responses">
-                        Responses (/responses)
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="anthropic-compatible">
-                        Anthropic Messages (v1/messages)
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <RadioSelect
+                  aria-label="API format"
+                  onValueChange={(apiFormat) => {
+                    if (
+                      apiFormat === 'openai-compatible' ||
+                      apiFormat === 'openai-responses' ||
+                      apiFormat === 'anthropic-compatible'
+                    ) {
+                      saveCustomProvider({
+                        apiFormat,
+                        useMaxCompletionTokens:
+                          apiFormat === 'openai-compatible'
+                            ? customProvider.useMaxCompletionTokens
+                            : false
+                      })
+                    }
+                  }}
+                  options={[
+                    { label: 'Chat Completions (/chat/completions)', value: 'openai-compatible' },
+                    { label: 'Responses (/responses)', value: 'openai-responses' },
+                    { label: 'Anthropic Messages (v1/messages)', value: 'anthropic-compatible' }
+                  ]}
+                  value={customProvider.apiFormat}
+                />
               </fieldset>
               {customProvider.apiFormat === 'openai-compatible' ? (
                 <div className="flex items-center justify-between gap-4">
