@@ -3,10 +3,13 @@ import type { ZodType } from 'zod'
 import { chatDataSchemas } from './chat'
 import { AppearancePreferenceSchema, AppearanceSchema } from './preference'
 import { providerDataSchemas } from './provider'
+import { ThemePreferencesSchema, ThemeStateSchema } from './theme'
 
 const dataSchemas = {
   appearance: AppearanceSchema,
   appearancePreference: AppearancePreferenceSchema,
+  themePreferences: ThemePreferencesSchema,
+  themeState: ThemeStateSchema,
   ...chatDataSchemas,
   ...providerDataSchemas
 } satisfies Record<string, ZodType>

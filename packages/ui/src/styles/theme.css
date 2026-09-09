@@ -67,13 +67,6 @@
   --sidebar-accent-foreground: var(--text-primary);
   --sidebar-border: var(--border-subtle);
   --sidebar-ring: var(--text-secondary);
-  --chat-canvas: var(--background);
-  --chat-composer: var(--surface-primary);
-  --chat-border: var(--border-subtle);
-  --chat-user: var(--surface-user-message);
-  --chat-user-foreground: var(--text-primary);
-  --sidebar-row-hover: #eeece5;
-  --sidebar-row-active: #e7e5dd;
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 }
@@ -127,13 +120,6 @@
   --sidebar-accent-foreground: var(--text-primary);
   --sidebar-border: var(--border-subtle);
   --sidebar-ring: var(--text-secondary);
-  --chat-canvas: var(--background);
-  --chat-composer: var(--surface-primary);
-  --chat-border: var(--border-subtle);
-  --chat-user: var(--surface-user-message);
-  --chat-user-foreground: var(--text-primary);
-  --sidebar-row-hover: #292826;
-  --sidebar-row-active: var(--surface-primary);
 }
 
 @theme inline {
@@ -185,13 +171,6 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-  --color-chat-canvas: var(--chat-canvas);
-  --color-chat-composer: var(--chat-composer);
-  --color-chat-border: var(--chat-border);
-  --color-chat-user: var(--chat-user);
-  --color-chat-user-foreground: var(--chat-user-foreground);
-  --color-sidebar-row-hover: var(--sidebar-row-hover);
-  --color-sidebar-row-active: var(--sidebar-row-active);
 
   --font-sans: var(--font-family-sans);
   --font-serif: var(--font-family-serif);

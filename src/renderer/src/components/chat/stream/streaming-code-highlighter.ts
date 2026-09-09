@@ -22,6 +22,7 @@ type StreamingCodeHighlight = {
 type StreamingCodeHighlighterOptions = {
   createHighlighter?: () => Promise<HighlighterCore>
   onTokens?: (highlight: StreamingCodeHighlight) => void
+  themes?: { dark: string; light: string }
 }
 
 type StreamingCodeHighlighter = {
@@ -90,18 +91,22 @@ function toTokenLines(tokens: ThemedToken[]): ThemedToken[][] {
   return lines
 }
 
-async function createDefaultHighlighter(): Promise<HighlighterCore> {
+async function createDefaultHighlighter(themes: {
+  dark: string
+  light: string
+}): Promise<HighlighterCore> {
   return createHighlighter({
     // The renderer CSP disallows WASM compilation, so use the browser-safe regex engine.
     engine: createJavaScriptRegexEngine(),
     langs: [],
-    themes: ['github-light', 'github-dark']
+    themes: [themes.light, themes.dark]
   })
 }
 
 class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
   private readonly createHighlighter: () => Promise<HighlighterCore>
   private readonly onTokens: ((highlight: StreamingCodeHighlight) => void) | undefined
+  private readonly themes: { dark: string; light: string }
   private generation = 0
   private operation = Promise.resolve()
   private disposed = false
@@ -109,10 +114,12 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
 
   constructor({
     createHighlighter: createHighlighterOption,
-    onTokens
+    onTokens,
+    themes = { dark: 'github-dark', light: 'github-light' }
   }: StreamingCodeHighlighterOptions) {
-    this.createHighlighter = createHighlighterOption ?? createDefaultHighlighter
+    this.createHighlighter = createHighlighterOption ?? (() => createDefaultHighlighter(themes))
     this.onTokens = onTokens
+    this.themes = themes
   }
 
   update(input: StreamingCodeHighlightInput): Promise<StreamingCodeHighlight> {
@@ -217,7 +224,7 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
           allowRecalls: true,
           highlighter,
           lang: language,
-          themes: { dark: 'github-dark', light: 'github-light' }
+          themes: this.themes
         })
       )
       const reader = output.getReader()

@@ -12,6 +12,7 @@ import {
 } from './providers/providers-sidebar'
 import { useProviderLibrary } from './providers/provider-library'
 import { ProvidersSection } from './providers/providers-section'
+import { AppearanceSettings } from './appearances/appearance-settings'
 
 function SettingsContent(): React.JSX.Element {
   const initialProviderId = builtInProviderIds[0] ?? 'lm-studio'
@@ -92,7 +93,12 @@ function SettingsContent(): React.JSX.Element {
   )
 }
 
-function SettingsMain(): React.JSX.Element {
+function SettingsMain({
+  page = 'providers'
+}: {
+  page?: 'providers' | 'appearance'
+}): React.JSX.Element {
+  if (page === 'appearance') return <AppearanceSettings />
   return <SettingsContent />
 }
 

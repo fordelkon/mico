@@ -4,24 +4,46 @@ import type { DataFor } from '@shared/data/types'
 
 type Appearance = DataFor<'appearance'>
 type AppearancePreference = DataFor<'appearancePreference'>
+type ThemePreferences = DataFor<'themePreferences'>
+type ThemeState = DataFor<'themeState'>
 
 type AppearanceContextValue = {
   appearance: Appearance
   preference: AppearancePreference
+  theme: ThemeState
   setPreference: (preference: AppearancePreference) => Promise<void>
+  setThemePreferences: (preferences: ThemePreferences) => Promise<void>
 }
 
-const AppearanceContext = React.createContext<AppearanceContextValue | null>(null)
+const defaultTheme: ThemeState = {
+  activeThemePreset: 'mico-default',
+  appearance: 'light',
+  appearancePreference: 'system',
+  codeThemeDark: 'auto',
+  codeThemeLight: 'auto',
+  shikiThemes: { dark: 'github-dark', light: 'github-light' },
+  themePresetDark: 'mico-default',
+  themePresetLight: 'mico-default'
+}
+const AppearanceContext = React.createContext<AppearanceContextValue>({
+  appearance: 'light',
+  preference: 'system',
+  setPreference: async () => undefined,
+  setThemePreferences: async () => undefined,
+  theme: defaultTheme
+})
 
-function applyAppearance(root: HTMLElement, appearance: Appearance): void {
-  root.dataset.appearance = appearance
-  root.classList.toggle('dark', appearance === 'dark')
-  root.style.colorScheme = appearance
+function applyTheme(root: HTMLElement, theme: ThemeState): void {
+  root.dataset.appearance = theme.appearance
+  root.dataset.themePreset = theme.activeThemePreset
+  root.classList.toggle('dark', theme.appearance === 'dark')
+  root.style.colorScheme = theme.appearance
 }
 
 function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.Element {
   const [appearance, setAppearance] = React.useState<Appearance>('light')
   const [preference, setPreferenceState] = React.useState<AppearancePreference>('system')
+  const [theme, setTheme] = React.useState<ThemeState>(defaultTheme)
 
   // Subscribe before the initial read completes so a concurrent main-process update is not lost.
   React.useEffect(() => {
@@ -29,27 +51,32 @@ function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.El
     const unsubscribe = window.api.appearance.onAppearanceChange((nextAppearance) => {
       if (active) setAppearance(nextAppearance)
     })
+    const unsubscribeTheme = window.api.appearance.onThemeChange((nextTheme) => {
+      if (!active) return
+      setTheme(nextTheme)
+      setAppearance(nextTheme.appearance)
+      setPreferenceState(nextTheme.appearancePreference)
+    })
 
-    void Promise.all([
-      window.api.appearance.getPreference(),
-      window.api.appearance.getResolvedAppearance()
-    ]).then(([nextPreference, nextAppearance]) => {
+    void window.api.appearance.getThemeState().then((nextTheme) => {
       if (!active) return
 
-      setPreferenceState(nextPreference)
-      setAppearance(nextAppearance)
+      setTheme(nextTheme)
+      setPreferenceState(nextTheme.appearancePreference)
+      setAppearance(nextTheme.appearance)
     })
 
     return () => {
       active = false
       unsubscribe()
+      unsubscribeTheme()
     }
   }, [])
 
   // Apply before paint to avoid briefly rendering controls in the previous appearance.
   React.useLayoutEffect(() => {
-    applyAppearance(document.documentElement, appearance)
-  }, [appearance])
+    applyTheme(document.documentElement, theme)
+  }, [theme])
 
   const setPreference = React.useCallback(
     async (nextPreference: AppearancePreference): Promise<void> => {
@@ -59,19 +86,23 @@ function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.El
     },
     []
   )
+  const setThemePreferences = React.useCallback(async (nextPreferences: ThemePreferences) => {
+    const nextTheme = await window.api.appearance.setThemePreferences(nextPreferences)
+    setTheme(nextTheme)
+    setAppearance(nextTheme.appearance)
+    setPreferenceState(nextTheme.appearancePreference)
+  }, [])
 
   const value = React.useMemo(
-    () => ({ appearance, preference, setPreference }),
-    [appearance, preference, setPreference]
+    () => ({ appearance, preference, setPreference, setThemePreferences, theme }),
+    [appearance, preference, setPreference, setThemePreferences, theme]
   )
 
   return <AppearanceContext value={value}>{children}</AppearanceContext>
 }
 
 function useAppearance(): AppearanceContextValue {
-  const context = React.useContext(AppearanceContext)
-  if (!context) throw new Error('useAppearance must be used within AppearanceProvider')
-  return context
+  return React.useContext(AppearanceContext)
 }
 
 export { AppearanceProvider, useAppearance }

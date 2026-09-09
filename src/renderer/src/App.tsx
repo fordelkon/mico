@@ -15,6 +15,7 @@ function AppContent(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
   const { flushLibrary } = useProviderLibrary()
   const [activePage, setActivePage] = React.useState<'chat' | 'settings'>('chat')
+  const [settingsPage, setSettingsPage] = React.useState<'providers' | 'appearance'>('providers')
 
   const handleNewChat = (): void => {
     setActivePage('chat')
@@ -32,6 +33,15 @@ function AppContent(): React.JSX.Element {
     await flushLibrary()
     transitionSettingsPage(() => setActivePage('chat'))
   }, [flushLibrary])
+
+  const handleSelectSettingsPage = React.useCallback(
+    (page: 'providers' | 'appearance'): void => {
+      if (page === settingsPage) return
+
+      transitionSettingsPage(() => setSettingsPage(page))
+    },
+    [settingsPage]
+  )
 
   // Keep every sidebar selection on the same conversation handoff path.
   const handleSelectConversation = (
@@ -62,6 +72,8 @@ function AppContent(): React.JSX.Element {
         onOpenSettings={handleOpenSettings}
         onRenameConversation={workspace.renameConversation}
         onSelectConversation={handleSelectConversation}
+        onSelectSettingsPage={handleSelectSettingsPage}
+        settingsPage={settingsPage}
         settingsActive={activePage === 'settings'}
       />
       <WindowControls />
@@ -73,7 +85,11 @@ function AppContent(): React.JSX.Element {
         className="home-workspace__content"
         data-page={activePage}
       >
-        {activePage === 'settings' ? <SettingsMain /> : <ChatMain workspace={workspace} />}
+        {activePage === 'settings' ? (
+          <SettingsMain page={settingsPage} />
+        ) : (
+          <ChatMain workspace={workspace} />
+        )}
       </SidebarInset>
     </SidebarProvider>
   )

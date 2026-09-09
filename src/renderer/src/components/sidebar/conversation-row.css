@@ -37,17 +37,17 @@
   background:
     radial-gradient(
       circle at 24% 42%,
-      color-mix(in oklab, var(--text-tertiary) 42%, transparent) 0 0.8px,
+      var(--sidebar-row-delete-dust-muted) 0 0.8px,
       transparent 1.7px
     ),
     radial-gradient(
       circle at 51% 68%,
-      color-mix(in oklab, var(--sidebar-row-active) 72%, transparent) 0 1.1px,
+      var(--sidebar-row-delete-dust-active) 0 1.1px,
       transparent 2.1px
     ),
     radial-gradient(
       circle at 73% 32%,
-      color-mix(in oklab, var(--text-tertiary) 34%, transparent) 0 0.65px,
+      var(--sidebar-row-delete-dust-subtle) 0 0.65px,
       transparent 1.45px
     );
   animation: conversation-row-delete-dust 240ms ease-out both;

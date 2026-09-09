@@ -56,7 +56,22 @@ const appearance: AppearanceAPI = {
     ipcRenderer.on(IpcChannel.Appearance_Changed, wrappedListener)
     return () => ipcRenderer.removeListener(IpcChannel.Appearance_Changed, wrappedListener)
   },
-  setPreference: (preference) => ipcRenderer.invoke(IpcChannel.Appearance_SetPreference, preference)
+  setPreference: (preference) =>
+    ipcRenderer.invoke(IpcChannel.Appearance_SetPreference, preference),
+  getThemeState: () => ipcRenderer.invoke(IpcChannel.Appearance_GetThemeState),
+  onThemeChange: (listener) => {
+    const wrappedListener = (
+      _event: IpcRendererEvent,
+      theme: Parameters<typeof listener>[0]
+    ): void => {
+      listener(theme)
+    }
+
+    ipcRenderer.on(IpcChannel.Appearance_ThemeChanged, wrappedListener)
+    return () => ipcRenderer.removeListener(IpcChannel.Appearance_ThemeChanged, wrappedListener)
+  },
+  setThemePreferences: (preferences) =>
+    ipcRenderer.invoke(IpcChannel.Appearance_SetThemePreferences, preferences)
 }
 
 const chat: ChatAPI = {

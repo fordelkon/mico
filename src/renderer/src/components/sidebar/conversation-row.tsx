@@ -159,7 +159,7 @@ function ConversationRow({
               onPointerDown={(event) => event.stopPropagation()}
             >
               <IconMenuButton
-                className="text-text-tertiary hover:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] hover:text-text-secondary aria-expanded:bg-[color:color-mix(in_oklab,var(--sidebar-row-active)_78%,var(--sidebar))] aria-expanded:text-text-secondary"
+                className="text-text-tertiary hover:bg-sidebar-row-action hover:text-text-secondary aria-expanded:bg-sidebar-row-action aria-expanded:text-text-secondary"
                 icon={<MoreHorizontalIcon aria-hidden="true" />}
                 label="More actions"
                 size="icon-xs"

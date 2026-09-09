@@ -2,17 +2,6 @@
   --app-sidebar-motion-duration: 300ms;
   --app-sidebar-motion-easing: cubic-bezier(0.22, 1, 0.36, 1);
   --app-sidebar-toolbar-left: calc(var(--sidebar-width) - 6.125rem);
-  --app-sidebar-muted-foreground: color-mix(in oklab, var(--sidebar-foreground) 70%, transparent);
-  --app-sidebar-resize-hint: color-mix(
-    in oklab,
-    var(--sidebar-border) 82%,
-    var(--sidebar-foreground)
-  );
-  --app-sidebar-resize-active: color-mix(
-    in oklab,
-    var(--sidebar-border) 58%,
-    var(--sidebar-foreground)
-  );
 }
 
 .app-sidebar {
@@ -48,23 +37,15 @@
 .app-sidebar [data-slot="sidebar-inner"] {
   position: relative;
   border-radius: var(--app-sidebar-corner-radius);
-  box-shadow:
-    0 1px 2px rgb(20 18 16 / 8%),
-    0 4px 10px -2px rgb(20 18 16 / 10%);
+  box-shadow: var(--sidebar-panel-shadow);
   transition:
     opacity 140ms ease-out 50ms,
     transform 180ms var(--app-sidebar-motion-easing) 50ms;
 }
 
-.dark .app-sidebar [data-slot="sidebar-inner"] {
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 24%),
-    0 4px 10px -2px rgb(0 0 0 / 20%);
-}
-
 .app-sidebar__toolbar {
   left: var(--app-sidebar-toolbar-left);
-  color: var(--app-sidebar-muted-foreground);
+  color: var(--sidebar-toolbar-foreground);
   transition-property: left;
 }
 
@@ -152,7 +133,7 @@
   min-width: 20px;
   height: 20px;
   padding-inline: 4px;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border: 1px solid var(--sidebar-search-kbd-border);
   border-radius: 4px;
   background: var(--background);
   color: inherit;
@@ -161,13 +142,13 @@
 }
 
 .home-workspace[data-resize-edge] .app-sidebar__resize-handle::after {
-  background: var(--app-sidebar-resize-hint);
+  background: var(--sidebar-resize-hint);
 }
 
 .app-sidebar__resize-handle:hover::after,
 .app-sidebar__resize-handle:focus-visible::after,
 .home-workspace[data-resizing] .app-sidebar__resize-handle::after {
-  background: var(--app-sidebar-resize-active);
+  background: var(--sidebar-resize-active);
 }
 
 .home-workspace[data-resize-edge="min"] .app-sidebar__resize-handle {

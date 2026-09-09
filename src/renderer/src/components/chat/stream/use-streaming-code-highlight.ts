@@ -1,6 +1,8 @@
 import { bundledLanguages, type ThemedToken } from 'shiki'
 import * as React from 'react'
 
+import { useAppearance } from '../../appearance-provider'
+
 import {
   createStreamingCodeHighlighter,
   splitStableCode,
@@ -26,6 +28,7 @@ type StreamingCodeHighlightSession = {
   isStreaming: boolean
   language: string
   stableCode: string
+  themesKey: string
 }
 
 const rawCodeState = (code: string, language?: string): StreamingCodeHighlightState => ({
@@ -48,6 +51,9 @@ function useStreamingCodeHighlight({
   )
   const generationRef = React.useRef(0)
   const sessionRef = React.useRef<StreamingCodeHighlightSession | null>(null)
+  const { theme } = useAppearance()
+  const themes = theme.shikiThemes
+  const themesKey = `${themes.light}:${themes.dark}`
   const publishHighlight = React.useEffectEvent((highlight: StreamingCodeHighlight) => {
     setState({
       isFallback: highlight.isFallback,
@@ -70,7 +76,8 @@ function useStreamingCodeHighlight({
     const needsNewSession =
       !currentSession ||
       currentSession.language !== language ||
-      !code.startsWith(currentSession.code)
+      !code.startsWith(currentSession.code) ||
+      currentSession.themesKey !== themesKey
 
     if (needsNewSession) {
       const generation = ++generationRef.current
@@ -86,9 +93,10 @@ function useStreamingCodeHighlight({
           if (generation !== generationRef.current) return
 
           publishHighlight(highlight)
-        }
+        },
+        themes
       })
-      const session = { code, highlighter, isStreaming, language, stableCode }
+      const session = { code, highlighter, isStreaming, language, stableCode, themesKey }
       sessionRef.current = session
       void previousSession?.highlighter.dispose()
 
@@ -107,7 +115,7 @@ function useStreamingCodeHighlight({
     currentSession.stableCode = stableCode
 
     void currentSession.highlighter.update({ code, isStreaming, language })
-  }, [code, isStreaming, language])
+  }, [code, isStreaming, language, themes, themesKey])
 
   React.useEffect(
     () => () => {

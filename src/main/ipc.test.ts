@@ -28,7 +28,9 @@ function createHarness() {
   const preference = {
     getAppearancePreference: vi.fn(),
     getResolvedAppearance: vi.fn(),
-    setAppearancePreference: vi.fn()
+    getThemeState: vi.fn(),
+    setAppearancePreference: vi.fn(),
+    setThemePreferences: vi.fn()
   }
   const provider = {
     addModel: vi.fn(),
@@ -57,7 +59,7 @@ function createHarness() {
     }
   )
 
-  return { chat, handlers, mainWindow, provider }
+  return { chat, handlers, mainWindow, preference, provider }
 }
 
 function createEvent({
@@ -264,5 +266,53 @@ describe('registerIpc provider handlers', () => {
       'Invalid provider ID'
     )
     expect(provider.selectProvider).not.toHaveBeenCalled()
+  })
+})
+
+describe('registerIpc theme handlers', () => {
+  const themePreferences = {
+    appearancePreference: 'system' as const,
+    codeThemeDark: 'dracula' as const,
+    codeThemeLight: 'github-light' as const,
+    themePresetDark: 'tokyo-night' as const,
+    themePresetLight: 'one-nord-light' as const
+  }
+  const themeState = {
+    ...themePreferences,
+    activeThemePreset: 'one-nord-light' as const,
+    appearance: 'light' as const,
+    shikiThemes: { dark: 'dracula', light: 'github-light' }
+  }
+
+  it('returns the complete theme state only to a trusted renderer', () => {
+    const { handlers, mainWindow, preference } = createHarness()
+    preference.getThemeState.mockReturnValue(themeState)
+    const trusted = createEvent({ id: 42 })
+    const untrusted = createEvent({ id: 43, trusted: false })
+    mainWindow.isTrustedRendererUrl.mockReturnValueOnce(true).mockReturnValueOnce(false)
+
+    expect(handlers.get(IpcChannel.Appearance_GetThemeState)?.(trusted.event)).toEqual(themeState)
+    expect(() => handlers.get(IpcChannel.Appearance_GetThemeState)?.(untrusted.event)).toThrow(
+      'Untrusted'
+    )
+  })
+
+  it('validates and persists trusted theme preferences', async () => {
+    const { handlers, preference } = createHarness()
+    preference.setThemePreferences.mockResolvedValue(themeState)
+    const { event } = createEvent({ id: 42 })
+
+    await expect(
+      handlers.get(IpcChannel.Appearance_SetThemePreferences)?.(event, themePreferences)
+    ).resolves.toEqual(themeState)
+    expect(preference.setThemePreferences).toHaveBeenCalledWith(themePreferences)
+
+    await expect(
+      handlers.get(IpcChannel.Appearance_SetThemePreferences)?.(event, {
+        ...themePreferences,
+        codeThemeLight: 'unsupported'
+      })
+    ).rejects.toThrow('Invalid theme preferences')
+    expect(preference.setThemePreferences).toHaveBeenCalledOnce()
   })
 })

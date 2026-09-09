@@ -7,6 +7,12 @@ export enum IpcChannel {
   Appearance_SetPreference = 'appearance:set-preference',
   /** Notifies the renderer that the resolved appearance changed. */
   Appearance_Changed = 'appearance:changed',
+  /** Returns the complete persisted and resolved theme state. */
+  Appearance_GetThemeState = 'appearance:get-theme-state',
+  /** Persists all independent light and dark theme selections. */
+  Appearance_SetThemePreferences = 'appearance:set-theme-preferences',
+  /** Notifies the renderer that the complete resolved theme state changed. */
+  Appearance_ThemeChanged = 'appearance:theme-changed',
 
   /** Cancels a chat request owned by the invoking renderer. */
   Chat_Abort = 'chat:abort',

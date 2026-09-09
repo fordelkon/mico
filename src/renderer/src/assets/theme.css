@@ -1,0 +1,126 @@
+:root {
+  --chat-canvas: var(--background);
+  --chat-composer: var(--surface-primary);
+  --chat-border: var(--border-subtle);
+  --chat-user: var(--surface-user-message);
+  --chat-user-foreground: var(--text-primary);
+  --chat-paper-pattern:
+    linear-gradient(color-mix(in oklab, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
+      transparent 1px
+    ),
+    radial-gradient(
+      circle,
+      color-mix(in oklab, var(--foreground) 5%, transparent) 0.55px,
+      transparent 0.65px
+    );
+  --chat-thinking-active-foreground: color-mix(in oklab, var(--foreground) 58%, transparent);
+  --chat-code-border: color-mix(in oklab, var(--border) 84%, var(--foreground));
+  --chat-code-header-border: color-mix(in oklab, var(--border) 88%, var(--foreground));
+  --chat-code-surface: color-mix(in oklab, var(--surface-secondary) 76%, var(--chat-canvas));
+  --chat-code-header-surface: color-mix(in oklab, var(--surface-secondary) 88%, var(--foreground));
+  --chat-code-body-surface: color-mix(in oklab, var(--surface-primary) 92%, var(--chat-canvas));
+  --chat-code-gutter-border: color-mix(in oklab, var(--border) 86%, transparent);
+  --chat-code-selection: color-mix(in oklab, var(--brand) 28%, transparent);
+  --chat-retry-progress: color-mix(in oklab, currentcolor 55%, transparent);
+  --chat-paper-top-shadow: linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 12%) 0%,
+    rgb(0 0 0 / 7%) 28%,
+    rgb(0 0 0 / 3%) 62%,
+    transparent 100%
+  );
+  --chat-composer-fade: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklab, var(--chat-canvas) 74%, transparent) 56%,
+    var(--chat-canvas)
+  );
+  --chat-composer-shadow: 0 1px 2px rgb(20 18 16 / 8%), 0 8px 20px -8px rgb(20 18 16 / 16%);
+  --chat-composer-focus-shadow: 0 1px 2px rgb(20 18 16 / 10%), 0 10px 24px -8px rgb(20 18 16 / 20%);
+
+  --workspace-paper-feed-surface:
+    linear-gradient(to right, rgb(0 0 0 / 5%), transparent 32px),
+    linear-gradient(to left, rgb(0 0 0 / 5%), transparent 32px), var(--sidebar);
+  --workspace-paper-feed-shadow: inset 0 2px 4px rgb(0 0 0 / 8%);
+  --workspace-paper-slot-surface: rgb(0 0 0 / 60%);
+  --workspace-paper-slot-shadow: inset 0 1px 3px rgb(0 0 0 / 80%);
+
+  --sidebar-row-hover: #eeece5;
+  --sidebar-row-active: #e7e5dd;
+  --sidebar-row-action: color-mix(in oklab, var(--sidebar-row-active) 78%, var(--sidebar));
+  --sidebar-row-delete-dust-muted: color-mix(in oklab, var(--text-tertiary) 42%, transparent);
+  --sidebar-row-delete-dust-active: color-mix(in oklab, var(--sidebar-row-active) 72%, transparent);
+  --sidebar-row-delete-dust-subtle: color-mix(in oklab, var(--text-tertiary) 34%, transparent);
+  --sidebar-toolbar-foreground: color-mix(in oklab, var(--sidebar-foreground) 70%, transparent);
+  --sidebar-resize-hint: color-mix(in oklab, var(--sidebar-border) 82%, var(--sidebar-foreground));
+  --sidebar-resize-active: color-mix(
+    in oklab,
+    var(--sidebar-border) 58%,
+    var(--sidebar-foreground)
+  );
+  --sidebar-panel-shadow: 0 1px 2px rgb(20 18 16 / 8%), 0 4px 10px -2px rgb(20 18 16 / 10%);
+  --sidebar-search-kbd-border: color-mix(in srgb, var(--border) 70%, transparent);
+
+  --window-control-hover: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --window-control-active: color-mix(in srgb, var(--foreground) 15%, transparent);
+  --window-control-close-hover: #e81123;
+  --window-control-close-active: #c50e1f;
+  --window-traffic-light-border: rgb(0 0 0 / 12%);
+  --window-traffic-light-foreground: rgb(24 24 24 / 62%);
+  --window-traffic-light-highlight: rgb(255 255 255 / 30%);
+  --window-traffic-light-shadow: rgb(0 0 0 / 8%);
+  --window-traffic-light-close: #ff5f57;
+  --window-traffic-light-minimize: #febc2e;
+  --window-traffic-light-zoom: #28c840;
+  --window-traffic-light-active-shadow: rgb(0 0 0 / 22%);
+  --window-traffic-light-active-highlight: rgb(255 255 255 / 14%);
+  --window-traffic-light-inactive-border: color-mix(
+    in srgb,
+    var(--muted-foreground) 20%,
+    transparent
+  );
+  --window-traffic-light-inactive-surface: color-mix(
+    in srgb,
+    var(--muted-foreground) 68%,
+    var(--background)
+  );
+  --window-traffic-light-inactive-highlight: rgb(255 255 255 / 20%);
+  --window-traffic-light-inactive-shadow: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.dark {
+  --chat-paper-top-shadow: linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 38%) 0%,
+    rgb(0 0 0 / 22%) 32%,
+    rgb(0 0 0 / 8%) 68%,
+    transparent 100%
+  );
+  --chat-composer-shadow: 0 1px 2px rgb(0 0 0 / 26%), 0 8px 20px -8px rgb(0 0 0 / 34%);
+  --chat-composer-focus-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 24px -8px rgb(0 0 0 / 40%);
+
+  --workspace-paper-feed-surface:
+    linear-gradient(to right, rgb(0 0 0 / 20%), transparent 32px),
+    linear-gradient(to left, rgb(0 0 0 / 20%), transparent 32px), var(--sidebar);
+  --workspace-paper-feed-shadow: inset 0 3px 6px rgb(0 0 0 / 50%);
+  --workspace-paper-slot-surface: rgb(0 0 0 / 90%);
+  --workspace-paper-slot-shadow: inset 0 1px 4px rgb(0 0 0 / 90%);
+
+  --sidebar-row-hover: #292826;
+  --sidebar-row-active: var(--surface-primary);
+  --sidebar-panel-shadow: 0 1px 2px rgb(0 0 0 / 24%), 0 4px 10px -2px rgb(0 0 0 / 20%);
+}
+
+@theme inline {
+  --color-chat-canvas: var(--chat-canvas);
+  --color-chat-composer: var(--chat-composer);
+  --color-chat-border: var(--chat-border);
+  --color-chat-user: var(--chat-user);
+  --color-chat-user-foreground: var(--chat-user-foreground);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-sidebar-row-active: var(--sidebar-row-active);
+  --color-sidebar-row-action: var(--sidebar-row-action);
+}

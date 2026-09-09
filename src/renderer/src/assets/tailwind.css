@@ -1,4 +1,6 @@
 @import "tailwindcss";
 @import "@mico/ui/styles/theme.css";
+@import "./theme.css";
+@import "./theme-presets.css";
 
 @source "../../../../packages/ui/src/**/*.{js,ts,jsx,tsx}";

@@ -2,18 +2,7 @@
   position: relative;
   isolation: isolate;
   background-color: var(--chat-canvas);
-  background-image:
-    linear-gradient(color-mix(in oklab, var(--foreground) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(
-      90deg,
-      color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
-      transparent 1px
-    ),
-    radial-gradient(
-      circle,
-      color-mix(in oklab, var(--foreground) 5%, transparent) 0.55px,
-      transparent 0.65px
-    );
+  background-image: var(--chat-paper-pattern);
   background-position:
     12px 12px,
     12px 12px,
@@ -80,7 +69,7 @@
 }
 
 .thinking-block__label--active {
-  color: color-mix(in oklab, var(--foreground) 58%, transparent);
+  color: var(--chat-thinking-active-foreground);
 }
 
 .thinking-block__label--active::before {
@@ -235,29 +224,29 @@
 }
 
 .chat-code-block {
-  border-color: color-mix(in oklab, var(--border) 84%, var(--foreground));
-  background: color-mix(in oklab, var(--surface-secondary) 76%, var(--chat-canvas));
+  border-color: var(--chat-code-border);
+  background: var(--chat-code-surface);
   color: var(--foreground);
   font-variant-ligatures: none;
 }
 
 .chat-code-block__header {
-  border-bottom: 1px solid color-mix(in oklab, var(--border) 88%, var(--foreground));
-  background: color-mix(in oklab, var(--surface-secondary) 88%, var(--foreground));
+  border-bottom: 1px solid var(--chat-code-header-border);
+  background: var(--chat-code-header-surface);
   color: var(--text-secondary);
 }
 
 .chat-code-block__body {
-  background: color-mix(in oklab, var(--surface-primary) 92%, var(--chat-canvas));
+  background: var(--chat-code-body-surface);
 }
 
 .chat-code-block__gutter {
-  border-right: 1px solid color-mix(in oklab, var(--border) 86%, transparent);
+  border-right: 1px solid var(--chat-code-gutter-border);
   color: var(--text-tertiary);
 }
 
 .chat-code-block code::selection {
-  background: color-mix(in oklab, var(--brand) 28%, transparent);
+  background: var(--chat-code-selection);
 }
 
 .dark .chat-code-block [data-code-token] {
@@ -280,7 +269,7 @@
   height: 1px;
   transform: scaleX(0);
   transform-origin: left;
-  background-color: color-mix(in oklab, currentcolor 55%, transparent);
+  background-color: var(--chat-retry-progress);
   animation: chat-retry-progress var(--retry-delay) linear forwards;
 }
 
@@ -355,24 +344,11 @@
   height: 30px;
   content: "";
   pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    rgb(0 0 0 / 12%) 0%,
-    rgb(0 0 0 / 7%) 28%,
-    rgb(0 0 0 / 3%) 62%,
-    transparent 100%
-  );
+  background: var(--chat-paper-top-shadow);
   mix-blend-mode: multiply;
 }
 
 .dark .chat-paper::before {
-  background: linear-gradient(
-    to bottom,
-    rgb(0 0 0 / 38%) 0%,
-    rgb(0 0 0 / 22%) 32%,
-    rgb(0 0 0 / 8%) 68%,
-    transparent 100%
-  );
   mix-blend-mode: normal;
 }
 
@@ -417,35 +393,14 @@
   z-index: -1;
   content: "";
   pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in oklab, var(--chat-canvas) 74%, transparent) 56%,
-    var(--chat-canvas)
-  );
+  background: var(--chat-composer-fade);
 }
 
 .chat-composer__surface {
-  box-shadow:
-    0 1px 2px rgb(20 18 16 / 8%),
-    0 8px 20px -8px rgb(20 18 16 / 16%);
+  box-shadow: var(--chat-composer-shadow);
   transition-property: border-color, box-shadow;
 }
 
-.dark .chat-composer__surface {
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 26%),
-    0 8px 20px -8px rgb(0 0 0 / 34%);
-}
-
 .chat-composer__surface:focus-within {
-  box-shadow:
-    0 1px 2px rgb(20 18 16 / 10%),
-    0 10px 24px -8px rgb(20 18 16 / 20%);
-}
-
-.dark .chat-composer__surface:focus-within {
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 30%),
-    0 10px 24px -8px rgb(0 0 0 / 40%);
+  box-shadow: var(--chat-composer-focus-shadow);
 }

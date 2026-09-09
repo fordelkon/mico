@@ -1,6 +1,6 @@
-import { Button, Input, Popover, PopoverContent, PopoverTrigger } from '@mico/ui'
+import { Button, SearchPopover } from '@mico/ui'
 import type { CustomProvider, ModelEntry, ProviderLibrary } from '@shared/data/schemas/provider'
-import { ChevronDownIcon, SearchIcon } from 'lucide-react'
+import { ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ProviderIcon } from '@renderer/components/providers/provider-icon'
@@ -43,34 +43,22 @@ function getEligibleModels(library: ProviderLibrary | null): EligibleModel[] {
 }
 
 function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React.JSX.Element {
-  const [isOpen, setIsOpen] = React.useState(false)
-  const [query, setQuery] = React.useState('')
   const eligibleModels = getEligibleModels(library)
   const selectedModel = eligibleModels.find(({ id }) => id === library?.selectedModelId)
-  const normalizedQuery = query.trim().toLocaleLowerCase()
-  const visibleModels = normalizedQuery
-    ? eligibleModels.filter(({ displayName, modelId, providerLabel }) =>
-        [displayName, modelId, providerLabel].some((value) =>
-          value.toLocaleLowerCase().includes(normalizedQuery)
-        )
-      )
-    : eligibleModels
-  const modelsByProvider = Map.groupBy(visibleModels, ({ provider }) => provider)
-
-  function handleOpenChange(open: boolean) {
-    setIsOpen(open)
-    if (!open) setQuery('')
-  }
-
-  function handleSelect(modelId: string) {
-    onSelect(modelId)
-    handleOpenChange(false)
-  }
 
   return (
-    <Popover open={isOpen} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild disabled={!library}>
-        <Button className="h-8 gap-1.5 px-2 text-xs" type="button" variant="ghost">
+    <SearchPopover
+      align="start"
+      contentClassName="w-96"
+      searchLabel="Search models"
+      searchPlaceholder="Search models"
+      trigger={
+        <Button
+          className="h-8 gap-1.5 px-2 text-xs"
+          disabled={!library}
+          type="button"
+          variant="ghost"
+        >
           {selectedModel ? (
             <ProviderIcon
               className="size-4 shrink-0 rounded-sm"
@@ -81,21 +69,20 @@ function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React
           <span className="max-w-44 truncate">{selectedModel?.displayName ?? 'Select model'}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-96 gap-0 overflow-hidden p-0">
-        <div className="border-b border-border/70 px-3 transition-colors hover:bg-accent/40">
-          <div className="flex h-10 items-center gap-2">
-            <SearchIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-            <Input
-              autoFocus
-              className="h-8 rounded-none border-0 bg-transparent px-0 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
-              placeholder="Search models"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-        </div>
-        {modelsByProvider.size ? (
+      }
+    >
+      {({ close, query }) => {
+        const normalizedQuery = query.trim().toLocaleLowerCase()
+        const visibleModels = normalizedQuery
+          ? eligibleModels.filter(({ displayName, modelId, providerLabel }) =>
+              [displayName, modelId, providerLabel].some((item) =>
+                item.toLocaleLowerCase().includes(normalizedQuery)
+              )
+            )
+          : eligibleModels
+        const modelsByProvider = Map.groupBy(visibleModels, ({ provider }) => provider)
+
+        return modelsByProvider.size ? (
           <div
             aria-label="Available models"
             className="max-h-80 overflow-y-auto p-1"
@@ -125,7 +112,10 @@ function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React
                         aria-selected={model.id === library?.selectedModelId}
                         className="h-auto min-h-8 w-full justify-between gap-3 px-2 py-1.5 text-left text-sm focus-visible:border-transparent focus-visible:bg-accent focus-visible:ring-0"
                         key={model.id}
-                        onClick={() => handleSelect(model.id)}
+                        onClick={() => {
+                          onSelect(model.id)
+                          close()
+                        }}
                         role="option"
                         type="button"
                         variant="ghost"
@@ -145,9 +135,9 @@ function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React
           <p className="px-2 py-3 text-xs text-muted-foreground">
             Enable a provider and model in Settings to chat.
           </p>
-        )}
-      </PopoverContent>
-    </Popover>
+        )
+      }}
+    </SearchPopover>
   )
 }
 

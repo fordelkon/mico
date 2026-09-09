@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'e
 
 import { ChatRequestIdSchema, ChatStartRequestSchema } from '@shared/data/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
+import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
 import {
   CustomProviderSchema,
   CustomProviderIdSchema,
@@ -44,7 +45,11 @@ interface IpcServices {
   >
   preference: Pick<
     PreferenceService,
-    'getAppearancePreference' | 'getResolvedAppearance' | 'setAppearancePreference'
+    | 'getAppearancePreference'
+    | 'getResolvedAppearance'
+    | 'getThemeState'
+    | 'setAppearancePreference'
+    | 'setThemePreferences'
   >
   provider: Pick<
     ProviderService,
@@ -127,6 +132,17 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid appearance preference')
 
     return preference.setAppearancePreference(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Appearance_GetThemeState, (event) => {
+    getCallingWindow(event)
+    return preference.getThemeState()
+  })
+  dependencies.ipcMain.handle(IpcChannel.Appearance_SetThemePreferences, async (event, input) => {
+    getCallingWindow(event)
+    const result = ThemePreferencesSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid theme preferences')
+
+    return preference.setThemePreferences(result.data)
   })
 
   dependencies.ipcMain.handle(IpcChannel.Chat_Start, (event, input) => {

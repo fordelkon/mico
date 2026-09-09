@@ -1,0 +1,216 @@
+html[data-theme-preset="one-nord-light"][data-appearance="light"] {
+  --brand: #5e81ac;
+  --surface-primary: #eceff4;
+  --surface-secondary: #e5e9f0;
+  --surface-tertiary: #d8dee9;
+  --surface-sidebar: #e5e9f0;
+  --surface-user-message: #d8dee9;
+  --text-primary: #2e3440;
+  --text-secondary: #3b4252;
+  --text-tertiary: #4c566a;
+  --border-default: rgb(46 52 64 / 30%);
+}
+html[data-theme-preset="nord"][data-appearance="dark"] {
+  --brand: #88c0d0;
+  --surface-primary: #3b4252;
+  --surface-secondary: #2e3440;
+  --surface-tertiary: #242933;
+  --surface-sidebar: #2e3440;
+  --surface-user-message: #434c5e;
+  --text-primary: #eceff4;
+  --text-secondary: #d8dee9;
+  --text-tertiary: #aeb7c6;
+  --border-default: rgb(236 239 244 / 30%);
+}
+html[data-theme-preset="tokyo-night"][data-appearance="dark"] {
+  --brand: #7aa2f7;
+  --surface-primary: #24283b;
+  --surface-secondary: #1f2335;
+  --surface-tertiary: #1a1b26;
+  --surface-sidebar: #1f2335;
+  --surface-user-message: #292e42;
+  --text-primary: #c0caf5;
+  --text-secondary: #a9b1d6;
+  --text-tertiary: #737aa2;
+  --border-default: rgb(192 202 245 / 28%);
+}
+html[data-theme-preset="catppuccin-mocha"] {
+  --brand: #cba6f7;
+  --surface-primary: #1e1e2e;
+  --surface-secondary: #181825;
+  --surface-tertiary: #11111b;
+  --surface-sidebar: #181825;
+  --surface-user-message: #313244;
+  --text-primary: #cdd6f4;
+  --text-secondary: #bac2de;
+  --text-tertiary: #a6adc8;
+  --border-default: rgb(205 214 244 / 28%);
+}
+html[data-theme-preset="catppuccin-latte"] {
+  --brand: #8839ef;
+  --surface-primary: #eff1f5;
+  --surface-secondary: #e6e9ef;
+  --surface-tertiary: #dce0e8;
+  --surface-sidebar: #e6e9ef;
+  --surface-user-message: #dce0e8;
+  --text-primary: #4c4f69;
+  --text-secondary: #5c5f77;
+  --text-tertiary: #6c6f85;
+  --border-default: rgb(76 79 105 / 28%);
+}
+html[data-theme-preset="gruvbox-dark"] {
+  --brand: #d79921;
+  --surface-primary: #3c3836;
+  --surface-secondary: #282828;
+  --surface-tertiary: #1d2021;
+  --surface-sidebar: #282828;
+  --surface-user-message: #504945;
+  --text-primary: #ebdbb2;
+  --text-secondary: #d5c4a1;
+  --text-tertiary: #bdae93;
+  --border-default: rgb(235 219 178 / 28%);
+}
+html[data-theme-preset="gruvbox-light"] {
+  --brand: #b57614;
+  --surface-primary: #fbf1c7;
+  --surface-secondary: #f2e5bc;
+  --surface-tertiary: #ebdbb2;
+  --surface-sidebar: #f2e5bc;
+  --surface-user-message: #ebdbb2;
+  --text-primary: #3c3836;
+  --text-secondary: #504945;
+  --text-tertiary: #665c54;
+  --border-default: rgb(60 56 54 / 28%);
+}
+html[data-theme-preset="material-palenight"] {
+  --brand: #c792ea;
+  --surface-primary: #292d3e;
+  --surface-secondary: #1b1e2b;
+  --surface-tertiary: #171a25;
+  --surface-sidebar: #1b1e2b;
+  --surface-user-message: #3b4055;
+  --text-primary: #a6accd;
+  --text-secondary: #959dcb;
+  --text-tertiary: #7f86b3;
+  --border-default: rgb(166 172 205 / 28%);
+}
+html[data-theme-preset="material-lighter"] {
+  --brand: #7c4dff;
+  --surface-primary: #fafafa;
+  --surface-secondary: #f5f5f5;
+  --surface-tertiary: #eee;
+  --surface-sidebar: #f5f5f5;
+  --surface-user-message: #eee;
+  --text-primary: #263238;
+  --text-secondary: #455a64;
+  --text-tertiary: #607d8b;
+  --border-default: rgb(38 50 56 / 28%);
+}
+html[data-theme-preset="rose-pine-moon"] {
+  --brand: #c4a7e7;
+  --surface-primary: #232136;
+  --surface-secondary: #191724;
+  --surface-tertiary: #17151f;
+  --surface-sidebar: #191724;
+  --surface-user-message: #393552;
+  --text-primary: #e0def4;
+  --text-secondary: #908caa;
+  --text-tertiary: #6e6a86;
+  --border-default: rgb(224 222 244 / 28%);
+}
+html[data-theme-preset="rose-pine-dawn"] {
+  --brand: #907aa9;
+  --surface-primary: #faf4ed;
+  --surface-secondary: #fffaf3;
+  --surface-tertiary: #f2e9de;
+  --surface-sidebar: #fffaf3;
+  --surface-user-message: #f2e9de;
+  --text-primary: #575279;
+  --text-secondary: #6e6a86;
+  --text-tertiary: #797593;
+  --border-default: rgb(87 82 121 / 28%);
+}
+html[data-theme-preset="solarized-dark"] {
+  --brand: #268bd2;
+  --surface-primary: #073642;
+  --surface-secondary: #002b36;
+  --surface-tertiary: #00212a;
+  --surface-sidebar: #002b36;
+  --surface-user-message: #094554;
+  --text-primary: #fdf6e3;
+  --text-secondary: #93a1a1;
+  --text-tertiary: #839496;
+  --border-default: rgb(253 246 227 / 28%);
+}
+html[data-theme-preset="solarized-light"] {
+  --brand: #268bd2;
+  --surface-primary: #fdf6e3;
+  --surface-secondary: #eee8d5;
+  --surface-tertiary: #e4ddc8;
+  --surface-sidebar: #eee8d5;
+  --surface-user-message: #e4ddc8;
+  --text-primary: #073642;
+  --text-secondary: #586e75;
+  --text-tertiary: #657b83;
+  --border-default: rgb(7 54 66 / 28%);
+}
+html[data-theme-preset="vitesse-dark"] {
+  --brand: #4d9375;
+  --surface-primary: #1e1e1e;
+  --surface-secondary: #121212;
+  --surface-tertiary: #0d0d0d;
+  --surface-sidebar: #121212;
+  --surface-user-message: #2a2a2a;
+  --text-primary: #dbd7ca;
+  --text-secondary: #a8a49a;
+  --text-tertiary: #85817a;
+  --border-default: rgb(219 215 202 / 24%);
+}
+html[data-theme-preset="vitesse-light"] {
+  --brand: #1c6b48;
+  --surface-primary: #fff;
+  --surface-secondary: #f8fafc;
+  --surface-tertiary: #f1f5f9;
+  --surface-sidebar: #f8fafc;
+  --surface-user-message: #f1f5f9;
+  --text-primary: #393a34;
+  --text-secondary: #5f605a;
+  --text-tertiary: #7a7b75;
+  --border-default: rgb(57 58 52 / 22%);
+}
+html[data-theme-preset="dracula"] {
+  --brand: #bd93f9;
+  --surface-primary: #282a36;
+  --surface-secondary: #21222c;
+  --surface-tertiary: #191a21;
+  --surface-sidebar: #21222c;
+  --surface-user-message: #44475a;
+  --text-primary: #f8f8f2;
+  --text-secondary: #d0d0c8;
+  --text-tertiary: #aaa;
+  --border-default: rgb(248 248 242 / 26%);
+}
+html[data-theme-preset="monokai"] {
+  --brand: #f92672;
+  --surface-primary: #272822;
+  --surface-secondary: #1e1f1c;
+  --surface-tertiary: #171814;
+  --surface-sidebar: #1e1f1c;
+  --surface-user-message: #3e3d32;
+  --text-primary: #f8f8f2;
+  --text-secondary: #cfcfc2;
+  --text-tertiary: #a6a695;
+  --border-default: rgb(248 248 242 / 25%);
+}
+html[data-theme-preset="one-dark-pro"] {
+  --brand: #c678dd;
+  --surface-primary: #282c34;
+  --surface-secondary: #21252b;
+  --surface-tertiary: #1b1e24;
+  --surface-sidebar: #21252b;
+  --surface-user-message: #3a404a;
+  --text-primary: #abb2bf;
+  --text-secondary: #9da5b4;
+  --text-tertiary: #7f8795;
+  --border-default: rgb(171 178 191 / 25%);
+}

@@ -68,18 +68,7 @@ body {
 
 .paper-canvas {
   background-color: var(--chat-canvas);
-  background-image:
-    linear-gradient(color-mix(in oklab, var(--foreground) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(
-      90deg,
-      color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
-      transparent 1px
-    ),
-    radial-gradient(
-      circle,
-      color-mix(in oklab, var(--foreground) 5%, transparent) 0.55px,
-      transparent 0.65px
-    );
+  background-image: var(--chat-paper-pattern);
   background-position:
     12px 12px,
     12px 12px,
@@ -129,18 +118,9 @@ html[data-navigation-transition="settings"]::view-transition-new(workspace-conte
   justify-content: center;
   pointer-events: none;
   border-radius: 8px;
-  background:
-    linear-gradient(to right, rgb(0 0 0 / 5%), transparent 32px),
-    linear-gradient(to left, rgb(0 0 0 / 5%), transparent 32px), var(--sidebar);
-  box-shadow: inset 0 2px 4px rgb(0 0 0 / 8%);
+  background: var(--workspace-paper-feed-surface);
+  box-shadow: var(--workspace-paper-feed-shadow);
   transition: left var(--app-sidebar-motion-duration) var(--app-sidebar-motion-easing);
-}
-
-.dark .home-workspace__paper-feed {
-  background:
-    linear-gradient(to right, rgb(0 0 0 / 20%), transparent 32px),
-    linear-gradient(to left, rgb(0 0 0 / 20%), transparent 32px), var(--sidebar);
-  box-shadow: inset 0 3px 6px rgb(0 0 0 / 50%);
 }
 
 .home-workspace__paper-slot {
@@ -149,13 +129,8 @@ html[data-navigation-transition="settings"]::view-transition-new(workspace-conte
   margin: 0 32px;
   flex: 1;
   border-radius: 1px;
-  background: rgb(0 0 0 / 60%);
-  box-shadow: inset 0 1px 3px rgb(0 0 0 / 80%);
-}
-
-.dark .home-workspace__paper-slot {
-  background: rgb(0 0 0 / 90%);
-  box-shadow: inset 0 1px 4px rgb(0 0 0 / 90%);
+  background: var(--workspace-paper-slot-surface);
+  box-shadow: var(--workspace-paper-slot-shadow);
 }
 
 .home-workspace[data-state="collapsed"] .home-workspace__paper-feed {

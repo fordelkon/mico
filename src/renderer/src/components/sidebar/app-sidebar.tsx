@@ -20,7 +20,7 @@ import {
   useSidebar
 } from '@mico/ui'
 import type { Conversation } from '@renderer/types/chat'
-import { ArrowLeft, Bot, Moon, PanelLeft, Search, Settings, SquarePen } from 'lucide-react'
+import { ArrowLeft, Bot, Moon, Palette, PanelLeft, Search, Settings, SquarePen } from 'lucide-react'
 import * as React from 'react'
 
 import { useAppearance } from '../appearance-provider'
@@ -36,6 +36,8 @@ type AppSidebarProps = {
   onOpenSettings: () => void
   onRenameConversation: (conversationId: string, title: string) => void
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
+  onSelectSettingsPage?: (page: 'providers' | 'appearance') => void
+  settingsPage?: 'providers' | 'appearance'
   settingsActive: boolean
 }
 
@@ -60,6 +62,8 @@ function AppSidebar({
   onOpenSettings,
   onRenameConversation,
   onSelectConversation,
+  onSelectSettingsPage,
+  settingsPage = 'providers',
   settingsActive
 }: AppSidebarProps): React.JSX.Element {
   const { state, toggleSidebar } = useSidebar()
@@ -93,11 +97,29 @@ function AppSidebar({
         <SidebarContent className="pt-[60px]">
           <SidebarGroup>
             {settingsActive ? (
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton aria-current="page" isActive tooltip="Providers">
+              <SidebarMenu aria-label="Settings">
+                <SidebarMenuItem className="mx-1.5 my-px">
+                  <SidebarMenuButton
+                    aria-current={settingsPage === 'providers' ? 'page' : undefined}
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    isActive={settingsPage === 'providers'}
+                    onClick={() => onSelectSettingsPage?.('providers')}
+                    tooltip="Providers"
+                  >
                     <Bot aria-hidden="true" />
                     <span>Providers</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem className="mx-1.5 my-px">
+                  <SidebarMenuButton
+                    aria-current={settingsPage === 'appearance' ? 'page' : undefined}
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    isActive={settingsPage === 'appearance'}
+                    onClick={() => onSelectSettingsPage?.('appearance')}
+                    tooltip="Appearance"
+                  >
+                    <Palette aria-hidden="true" />
+                    <span>Appearance</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>

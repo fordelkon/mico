@@ -161,6 +161,12 @@ beforeEach(() => {
 })
 
 describe('SettingsMain', () => {
+  it('renders the Appearance settings page', () => {
+    render(<SettingsMain page="appearance" />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Appearance' })).toBeVisible()
+  })
+
   it('does not replace the persisted library while Strict Mode hydrates settings', async () => {
     persistedLibrary = {
       ...persistedLibrary,
@@ -713,9 +719,7 @@ describe('SettingsMain', () => {
     expect(apiKey).toHaveAttribute('type', 'password')
     expect(apiKey).toHaveValue('')
     expect(screen.getByLabelText('Custom headers (JSON)')).toHaveValue('')
-    expect(
-      screen.getByRole('button', { name: 'Chat Completions (/chat/completions)' })
-    ).toBeVisible()
+    expect(screen.getByRole('button', { name: 'API format' })).toBeVisible()
 
     await user.click(screen.getByRole('button', { name: 'Show API key' }))
 
