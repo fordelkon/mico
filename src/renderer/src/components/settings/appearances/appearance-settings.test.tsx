@@ -36,6 +36,8 @@ describe('AppearanceSettings', () => {
     appearanceApi.getThemeState.mockResolvedValue(initialTheme)
     appearanceApi.onAppearanceChange.mockClear()
     appearanceApi.onThemeChange.mockClear()
+    appearanceApi.setPreference.mockReset()
+    appearanceApi.setPreference.mockResolvedValue('dark')
     appearanceApi.setThemePreferences.mockReset()
     appearanceApi.setThemePreferences.mockImplementation(
       async (preferences: ThemePreferences): Promise<ThemeState> => ({
@@ -65,5 +67,31 @@ describe('AppearanceSettings', () => {
       expect(document.documentElement).toHaveAttribute('data-theme-preset', 'tokyo-night')
       expect(document.documentElement).toHaveAttribute('data-appearance', 'dark')
     })
+  })
+
+  it('persists the selected appearance preference and marks its theme card as selected', async () => {
+    const user = userEvent.setup()
+    render(
+      <AppearanceProvider>
+        <AppearanceSettings />
+      </AppearanceProvider>
+    )
+
+    const darkTheme = await screen.findByRole('radio', { name: 'Dark' })
+    await user.click(darkTheme)
+
+    expect(appearanceApi.setPreference).toHaveBeenCalledWith('dark')
+    expect(darkTheme).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('shows only the system-resolved mode theme when the preference is system', async () => {
+    render(
+      <AppearanceProvider>
+        <AppearanceSettings />
+      </AppearanceProvider>
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Dark Mode Theme' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Light Mode Theme' })).not.toBeInTheDocument()
   })
 })

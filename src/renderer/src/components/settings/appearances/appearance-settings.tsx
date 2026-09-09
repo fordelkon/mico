@@ -1,6 +1,6 @@
 import { Separator } from '@mico/ui'
 import { type Appearance, getCodeThemes, getThemePresets } from '@shared/theme/theme-registry'
-import { Moon, Palette, Sun } from 'lucide-react'
+import { Monitor, Moon, Palette, Sun } from 'lucide-react'
 import * as React from 'react'
 
 import { useAppearance } from '../../appearance-provider'
@@ -8,6 +8,55 @@ import { CodeThemeMenu } from './code-theme-menu'
 import './appearance-settings.css'
 
 const modeLabels = { dark: 'Dark Mode Theme', light: 'Light Mode Theme' } as const
+const appearanceOptions = [
+  { icon: Sun, label: 'Light', value: 'light' },
+  { icon: Moon, label: 'Dark', value: 'dark' },
+  { icon: Monitor, label: 'System', value: 'system' }
+] as const
+
+function ThemePreferenceSection(): React.JSX.Element {
+  const { preference, setPreference } = useAppearance()
+
+  return (
+    <section aria-labelledby="theme-heading" className="appearance-settings__section">
+      <div className="appearance-settings__section-heading">
+        <Palette aria-hidden="true" />
+        <div>
+          <h2 id="theme-heading">Theme</h2>
+          <p>Choose how Mico matches your preferred appearance.</p>
+        </div>
+      </div>
+      <div
+        aria-label="Theme preference"
+        className="appearance-settings__theme-cards"
+        role="radiogroup"
+      >
+        {appearanceOptions.map(({ icon: Icon, label, value }) => {
+          const selected = preference === value
+          return (
+            <button
+              aria-checked={selected}
+              className="appearance-settings__theme-card"
+              key={value}
+              onClick={() => void setPreference(value)}
+              role="radio"
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="appearance-settings__theme-preview"
+                data-appearance={value}
+              >
+                <Icon />
+              </span>
+              <span>{label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
 
 function AppearanceSection({ appearance }: { appearance: Appearance }): React.JSX.Element {
   const { setThemePreferences, theme } = useAppearance()
@@ -95,6 +144,9 @@ function AppearanceSection({ appearance }: { appearance: Appearance }): React.JS
 }
 
 function AppearanceSettings(): React.JSX.Element {
+  const { appearance, preference } = useAppearance()
+  const selectedAppearance = preference === 'system' ? appearance : preference
+
   return (
     <div className="paper-canvas flex min-h-0 flex-1 flex-col overflow-hidden">
       <header className="shrink-0 px-8 py-6">
@@ -105,8 +157,8 @@ function AppearanceSettings(): React.JSX.Element {
       </header>
       <Separator className="bg-border-subtle" />
       <main className="appearance-settings__content min-h-0 flex-1 overflow-y-auto p-6">
-        <AppearanceSection appearance="dark" />
-        <AppearanceSection appearance="light" />
+        <ThemePreferenceSection />
+        <AppearanceSection appearance={selectedAppearance} />
       </main>
     </div>
   )
