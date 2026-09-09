@@ -45,6 +45,10 @@ html[data-theme-preset="catppuccin-mocha"] {
   --text-secondary: #bac2de;
   --text-tertiary: #a6adc8;
   --border-default: rgb(205 214 244 / 28%);
+  --sidebar-row-hover: #313244;
+  --sidebar-row-active: #45475a;
+  --sidebar-row-action: #313244;
+  --sidebar-accent: var(--sidebar-row-active);
 }
 html[data-theme-preset="catppuccin-latte"] {
   --brand: #8839ef;
@@ -57,6 +61,10 @@ html[data-theme-preset="catppuccin-latte"] {
   --text-secondary: #5c5f77;
   --text-tertiary: #6c6f85;
   --border-default: rgb(76 79 105 / 28%);
+  --sidebar-row-hover: #ccd0da;
+  --sidebar-row-active: #bcc0cc;
+  --sidebar-row-action: #ccd0da;
+  --sidebar-accent: var(--sidebar-row-active);
 }
 html[data-theme-preset="gruvbox-dark"] {
   --brand: #d79921;
@@ -108,27 +116,35 @@ html[data-theme-preset="material-lighter"] {
 }
 html[data-theme-preset="rose-pine-moon"] {
   --brand: #c4a7e7;
-  --surface-primary: #232136;
-  --surface-secondary: #191724;
-  --surface-tertiary: #17151f;
-  --surface-sidebar: #191724;
+  --surface-primary: #2a273f;
+  --surface-secondary: #232136;
+  --surface-tertiary: #393552;
+  --surface-sidebar: #232136;
   --surface-user-message: #393552;
   --text-primary: #e0def4;
   --text-secondary: #908caa;
   --text-tertiary: #6e6a86;
   --border-default: rgb(224 222 244 / 28%);
+  --sidebar-row-hover: #2a283e;
+  --sidebar-row-active: #44415a;
+  --sidebar-row-action: #2a283e;
+  --sidebar-accent: var(--sidebar-row-active);
 }
 html[data-theme-preset="rose-pine-dawn"] {
   --brand: #907aa9;
-  --surface-primary: #faf4ed;
-  --surface-secondary: #fffaf3;
+  --surface-primary: #fffaf3;
+  --surface-secondary: #faf4ed;
   --surface-tertiary: #f2e9de;
-  --surface-sidebar: #fffaf3;
+  --surface-sidebar: #faf4ed;
   --surface-user-message: #f2e9de;
   --text-primary: #575279;
-  --text-secondary: #6e6a86;
-  --text-tertiary: #797593;
+  --text-secondary: #797593;
+  --text-tertiary: #9893a5;
   --border-default: rgb(87 82 121 / 28%);
+  --sidebar-row-hover: #f4ede8;
+  --sidebar-row-active: #dfdad9;
+  --sidebar-row-action: #f4ede8;
+  --sidebar-accent: var(--sidebar-row-active);
 }
 html[data-theme-preset="solarized-dark"] {
   --brand: #268bd2;
@@ -189,6 +205,10 @@ html[data-theme-preset="dracula"] {
   --text-secondary: #d0d0c8;
   --text-tertiary: #aaa;
   --border-default: rgb(248 248 242 / 26%);
+  --sidebar-row-hover: #424450;
+  --sidebar-row-active: #44475a;
+  --sidebar-row-action: #424450;
+  --sidebar-accent: var(--sidebar-row-active);
 }
 html[data-theme-preset="monokai"] {
   --brand: #f92672;

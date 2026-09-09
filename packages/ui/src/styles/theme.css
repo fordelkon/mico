@@ -17,9 +17,9 @@
   --text-secondary: #3d3d3a;
   --text-tertiary: #73726c;
   --text-inverse: #ffffff;
-  --border-subtle: rgb(31 30 29 / 15%);
+  --border-subtle: color-mix(in srgb, var(--text-primary) 15%, transparent);
   --border-default: rgb(31 30 29 / 30%);
-  --border-strong: rgb(31 30 29 / 40%);
+  --border-strong: color-mix(in srgb, var(--text-primary) 40%, transparent);
   --danger: #7f2c28;
   --danger-surface: #f7ecec;
   --danger-border: #a73d39;
@@ -63,7 +63,7 @@
   --sidebar-foreground: var(--text-secondary);
   --sidebar-primary: var(--text-primary);
   --sidebar-primary-foreground: var(--text-inverse);
-  --sidebar-accent: #e7e5dd;
+  --sidebar-accent: var(--sidebar-row-active);
   --sidebar-accent-foreground: var(--text-primary);
   --sidebar-border: var(--border-subtle);
   --sidebar-ring: var(--text-secondary);
@@ -81,9 +81,9 @@
   --text-secondary: #c2c0b6;
   --text-tertiary: #9c9a92;
   --text-inverse: #141413;
-  --border-subtle: rgb(222 220 209 / 15%);
+  --border-subtle: color-mix(in srgb, var(--text-primary) 15%, transparent);
   --border-default: rgb(222 220 209 / 30%);
-  --border-strong: rgb(222 220 209 / 40%);
+  --border-strong: color-mix(in srgb, var(--text-primary) 40%, transparent);
   --danger: #ee8884;
   --danger-surface: #602a28;
   --danger-border: #cd5c58;
@@ -116,7 +116,7 @@
   --sidebar-foreground: var(--text-secondary);
   --sidebar-primary: var(--text-primary);
   --sidebar-primary-foreground: var(--text-inverse);
-  --sidebar-accent: var(--surface-primary);
+  --sidebar-accent: var(--sidebar-row-active);
   --sidebar-accent-foreground: var(--text-primary);
   --sidebar-border: var(--border-subtle);
   --sidebar-ring: var(--text-secondary);
