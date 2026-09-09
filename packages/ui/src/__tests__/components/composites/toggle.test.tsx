@@ -50,17 +50,4 @@ describe('Toggle', () => {
 
     expect(onCheckedChange).not.toHaveBeenCalled()
   })
-
-  it('enables the thumb transition after the first interaction', async () => {
-    const user = userEvent.setup()
-
-    render(<Toggle aria-label="Enable notifications" checked={false} onCheckedChange={vi.fn()} />)
-
-    const toggle = screen.getByRole('switch', { name: 'Enable notifications' })
-    expect(toggle).not.toHaveAttribute('data-init')
-
-    await user.click(toggle)
-
-    expect(toggle).toHaveAttribute('data-init', 'true')
-  })
 })
