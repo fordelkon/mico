@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+import Database from 'better-sqlite3'
 
 import type { ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
 import type { ChatProvider } from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
+import { SessionRuntimeService } from '../sessions/session-runtime-service'
+import { SessionDatabase } from '../../data/session-database'
 import { createChatProviderResolver } from './chat-provider-resolver'
 import { ChatService } from './chat-service'
 
@@ -16,6 +19,24 @@ const textChunk: UIMessageChunk = {
   type: 'text-delta',
   id: 'part-1',
   delta: 'Hi'
+}
+
+const configuration = {
+  provider: 'ollama' as const,
+  baseUrl: 'http://localhost:11434',
+  modelId: 'qwen3:8b'
+}
+
+async function createRuntime(): Promise<{
+  database: SessionDatabase
+  runtime: SessionRuntimeService
+}> {
+  const database = new SessionDatabase({
+    getUserDataPath: () => 'unused-for-memory-database',
+    openDatabase: () => new Database(':memory:')
+  })
+  await database.initialize()
+  return { database, runtime: new SessionRuntimeService({ database }) }
 }
 
 async function waitFor(assertion: () => void): Promise<void> {
@@ -87,6 +108,188 @@ describe('ChatService', () => {
         { type: 'finish', requestId: 'request-1' }
       ])
     })
+  })
+
+  it('persists a completed visible transcript for a session', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+    let resolveFinish: () => void
+    const finished = new Promise<void>((resolve) => {
+      resolveFinish = resolve
+    })
+    const service = new ChatService(() => createProvider(async () => streamFrom([textChunk])), {
+      getSelectedChatConfiguration: () => configuration,
+      runtime
+    })
+
+    service.start(
+      { ownerId: 'window-1', request: { ...request, conversationId: session.id } },
+      (event) => {
+        if (event.type === 'finish') resolveFinish()
+      }
+    )
+
+    await finished
+    expect(runtime.loadSession(session.id).messages).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }
+    ])
+  })
+
+  it('completes a persisted run when the provider returns no visible text', async () => {
+    const { database, runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+    let resolveFinish: () => void
+    const finished = new Promise<void>((resolve) => {
+      resolveFinish = resolve
+    })
+    const service = new ChatService(() => createProvider(async () => streamFrom([])), {
+      getSelectedChatConfiguration: () => configuration,
+      runtime
+    })
+
+    service.start(
+      { ownerId: 'window-1', request: { ...request, conversationId: session.id } },
+      (event) => {
+        if (event.type === 'finish') resolveFinish()
+      }
+    )
+
+    await finished
+    expect(database.connection.prepare('SELECT status FROM runs').all()).toEqual([
+      { status: 'completed' }
+    ])
+    expect(runtime.loadSession(session.id).messages).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: '' }] }
+    ])
+  })
+
+  it('records a failed run without persisting assistant output', async () => {
+    const { database, runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+    let resolveError: () => void
+    const failed = new Promise<void>((resolve) => {
+      resolveError = resolve
+    })
+    const service = new ChatService(
+      () =>
+        createProvider(async () => {
+          throw new Error('upstream failure')
+        }),
+      { getSelectedChatConfiguration: () => configuration, maxAttempts: 1, runtime }
+    )
+
+    service.start(
+      { ownerId: 'window-1', request: { ...request, conversationId: session.id } },
+      (event) => {
+        if (event.type === 'error') resolveError()
+      }
+    )
+
+    await failed
+    expect(runtime.loadSession(session.id).messages).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
+    ])
+    expect(database.connection.prepare('SELECT status FROM runs').all()).toEqual([
+      { status: 'failed' }
+    ])
+  })
+
+  it('cancels a persisted run when its request is aborted', async () => {
+    const { database, runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+    let resolveProviderStart: () => void
+    const providerStarted = new Promise<void>((resolve) => {
+      resolveProviderStart = resolve
+    })
+    const service = new ChatService(
+      () =>
+        createProvider(async ({ signal }) => {
+          resolveProviderStart()
+          return pendingStream(signal)
+        }),
+      { getSelectedChatConfiguration: () => configuration, runtime }
+    )
+
+    service.start(
+      { ownerId: 'window-1', request: { ...request, conversationId: session.id } },
+      () => undefined
+    )
+    await providerStarted
+    service.abort({ ownerId: 'window-1', requestId: request.requestId })
+
+    expect(runtime.loadSession(session.id).messages).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
+    ])
+    expect(database.connection.prepare('SELECT status FROM runs').all()).toEqual([
+      { status: 'cancelled' }
+    ])
+  })
+
+  it('builds the provider request from persisted session context', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+    const firstRun = runtime.startTurn({
+      sessionId: session.id,
+      requestId: 'request-0',
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Saved prompt' }] },
+      profile: {
+        providerId: 'ollama',
+        modelId: 'qwen3:8b',
+        thinkingEffort: 'default',
+        configurationDigest: 'saved-configuration'
+      }
+    })
+    runtime.finalizeRun(firstRun.runId, {
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Saved answer' }]
+    })
+    const stream = vi.fn(async () => streamFrom([]))
+    const service = new ChatService(() => createProvider(stream), {
+      getSelectedChatConfiguration: () => configuration,
+      runtime
+    })
+
+    service.start(
+      {
+        ownerId: 'window-1',
+        request: {
+          ...request,
+          conversationId: session.id,
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Current prompt' }] }]
+        }
+      },
+      () => undefined
+    )
+
+    await waitFor(() =>
+      expect(stream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: 'user', parts: [{ type: 'text', text: 'Saved prompt' }] },
+            { role: 'assistant', parts: [{ type: 'text', text: 'Saved answer' }] },
+            { role: 'user', parts: [{ type: 'text', text: 'Current prompt' }] }
+          ]
+        })
+      )
+    )
+  })
+
+  it('reports runtime setup errors without calling the provider', async () => {
+    const { runtime } = await createRuntime()
+    const stream = vi.fn(async () => streamFrom([]))
+    const service = new ChatService(() => createProvider(stream), {
+      getSelectedChatConfiguration: () => configuration,
+      runtime
+    })
+    const events: ChatStreamEvent[] = []
+
+    service.start({ ownerId: 'window-1', request }, (event) => events.push(event))
+
+    await waitFor(() => expect(events).toHaveLength(1))
+    expect(events[0]).toMatchObject({ type: 'error', requestId: request.requestId })
+    expect(stream).not.toHaveBeenCalled()
   })
 
   it('aborts only the matching owner and request without a finish event', async () => {

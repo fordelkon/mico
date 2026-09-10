@@ -6,8 +6,7 @@ const sessions = sqliteTable('sessions', {
   defaultExecutionProfileJson: text('default_execution_profile_json'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
-  lastActivityAt: integer('last_activity_at').notNull(),
-  archivedAt: integer('archived_at')
+  lastActivityAt: integer('last_activity_at').notNull()
 })
 
 const turns = sqliteTable(

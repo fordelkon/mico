@@ -3,6 +3,7 @@ import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'e
 import { ChatRequestIdSchema, ChatStartRequestSchema } from '@shared/data/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
 import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
+import { SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
 import {
   CustomProviderSchema,
   CustomProviderIdSchema,
@@ -19,10 +20,11 @@ import {
   SyncModelsRequestSchema,
   TestModelRequestSchema
 } from '@shared/ipc/schemas/providers'
-import type { ChatService } from './ai/chat-service'
+import type { ChatService } from './ai/chat/chat-service'
 import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
-import type { ProviderService } from './services/provider-service'
+import type { ProviderService } from './ai/providers/provider-service'
+import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
 
 type IpcMainRegistrar = Pick<IpcMain, 'handle'>
 type IpcDependencies = {
@@ -69,10 +71,14 @@ interface IpcServices {
     | 'selectProvider'
     | 'testModel'
   >
+  session: Pick<
+    SessionRuntimeService,
+    'createSession' | 'listSessions' | 'loadSession' | 'renameSession' | 'deleteSession'
+  >
 }
 
 function registerIpc(
-  { chat, mainWindow, preference, provider }: IpcServices,
+  { chat, mainWindow, preference, provider, session }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
     ipcMain
@@ -184,6 +190,40 @@ function registerIpc(
     if (!result.success) throw new Error('Invalid chat request')
 
     chat.abort({ ownerId: String(event.sender.id), requestId: result.data })
+  })
+
+  dependencies.ipcMain.handle(IpcChannel.Sessions_List, (event) => {
+    getCallingWindow(event)
+    return session.listSessions()
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_Create, (event, input) => {
+    getCallingWindow(event)
+    const result = SessionTitleSchema.safeParse(input?.title)
+    if (!result.success) throw new Error('Invalid session title')
+
+    return session.createSession({ title: result.data, defaultProfile: null })
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_Delete, (event, input) => {
+    getCallingWindow(event)
+    const result = SessionIdSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid session ID')
+
+    return session.deleteSession(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_Load, (event, input) => {
+    getCallingWindow(event)
+    const result = SessionIdSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid session ID')
+
+    return session.loadSession(result.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_Rename, (event, input) => {
+    getCallingWindow(event)
+    const sessionId = SessionIdSchema.safeParse(input?.sessionId)
+    const title = SessionTitleSchema.safeParse(input?.title)
+    if (!sessionId.success || !title.success) throw new Error('Invalid session rename')
+
+    return session.renameSession(sessionId.data, title.data)
   })
 
   dependencies.ipcMain.handle(IpcChannel.Providers_GetLibrary, (event) => {

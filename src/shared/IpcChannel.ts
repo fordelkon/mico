@@ -23,6 +23,17 @@ export enum IpcChannel {
   /** Starts a chat request owned by the invoking renderer. */
   Chat_Start = 'chat:start',
 
+  /** Creates a persisted session before its first message. */
+  Sessions_Create = 'sessions:create',
+  /** Permanently removes a session and its runtime records. */
+  Sessions_Delete = 'sessions:delete',
+  /** Returns session summaries. */
+  Sessions_List = 'sessions:list',
+  /** Returns one session's visible persisted transcript. */
+  Sessions_Load = 'sessions:load',
+  /** Changes a session title. */
+  Sessions_Rename = 'sessions:rename',
+
   /** Adds a model entry to the provider library. */
   Providers_AddModel = 'providers:add-model',
   /** Adds a custom provider to the provider library. */

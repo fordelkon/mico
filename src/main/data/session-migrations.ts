@@ -13,8 +13,7 @@ const sessionMigrations: readonly SessionMigration[] = [
         default_execution_profile_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
-        last_activity_at INTEGER NOT NULL,
-        archived_at INTEGER
+        last_activity_at INTEGER NOT NULL
       );
 
       CREATE INDEX sessions_last_activity_at ON sessions(last_activity_at DESC);

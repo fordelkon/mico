@@ -3,11 +3,48 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatStreamEvent, ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
+import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import { useChatWorkspaceState } from './use-chat-workspace-state'
 
 class FakeChatAPI implements ChatAPI {
   readonly startedRequests: Parameters<ChatAPI['start']>[0][] = []
   readonly listeners = new Set<Parameters<ChatAPI['onEvent']>[0]>()
+  readonly createSession = vi.fn(async (_input: { title: string }) => ({
+    id: 'session-new',
+    title: 'New chat',
+    defaultProfile: null,
+    createdAt: 1,
+    updatedAt: 1,
+    lastActivityAt: 1
+  }))
+  readonly sessions: SessionsAPI = {
+    create: (input) => this.createSession(input),
+    delete: async (): Promise<void> => {},
+    list: async () => [],
+    load: async () => ({
+      id: 'session-1',
+      title: 'Saved chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 2,
+      lastActivityAt: 2,
+      messages: [
+        { role: 'user' as const, parts: [{ type: 'text' as const, text: 'Saved prompt' }] },
+        {
+          role: 'assistant' as const,
+          parts: [{ type: 'text' as const, text: 'Saved answer' }]
+        }
+      ]
+    }),
+    rename: async () => ({
+      id: 'session-1',
+      title: 'Renamed chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 3,
+      lastActivityAt: 2
+    })
+  }
 
   async abort(): Promise<void> {}
 
@@ -29,6 +66,13 @@ class FakeChatAPI implements ChatAPI {
   }
 }
 
+function exposeApi(chat: FakeChatAPI): void {
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    value: { chat, sessions: chat.sessions }
+  })
+}
+
 const originalApi = Object.getOwnPropertyDescriptor(window, 'api')
 
 afterEach(() => {
@@ -45,7 +89,7 @@ describe('useChatWorkspaceState', () => {
       resolveCapabilities = resolve
     })
     api.getCapabilities = () => capabilities
-    Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })
+    exposeApi(api)
     const { result } = renderHook(() => useChatWorkspaceState())
 
     act(() => result.current.setThinkingEffort('high'))
@@ -66,7 +110,7 @@ describe('useChatWorkspaceState', () => {
     api.getCapabilities = async () => {
       throw new Error('offline')
     }
-    Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })
+    exposeApi(api)
     const { result } = renderHook(() => useChatWorkspaceState())
 
     await waitFor(() => expect(result.current.reasoningCapabilities).toBeNull())
@@ -75,10 +119,23 @@ describe('useChatWorkspaceState', () => {
     await waitFor(() => expect(api.startedRequests[0]?.thinkingEffort).toBe('default'))
   })
 
+  it('uses the persisted session ID when sending the first message', async () => {
+    const api = new FakeChatAPI()
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    act(() => result.current.sendMessage('Hello'))
+
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    expect(api.createSession).toHaveBeenCalledOnce()
+    expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat' })
+    expect(api.startedRequests[0]?.conversationId).toBe('session-new')
+  })
+
   it('batches rapid streamed text updates before committing the transcript', async () => {
     vi.useFakeTimers()
     const api = new FakeChatAPI()
-    Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })
+    exposeApi(api)
     const { result } = renderHook(() => useChatWorkspaceState())
 
     act(() => result.current.sendMessage('Hello'))
@@ -125,7 +182,7 @@ describe('useChatWorkspaceState', () => {
 
   it('keeps a provider error on its conversation and clears it when the next send begins', async () => {
     const api = new FakeChatAPI()
-    Object.defineProperty(window, 'api', { configurable: true, value: { chat: api } })
+    exposeApi(api)
     const { result } = renderHook(() => useChatWorkspaceState())
 
     act(() => result.current.sendMessage('First message'))
@@ -151,5 +208,62 @@ describe('useChatWorkspaceState', () => {
     await waitFor(() => expect(api.startedRequests).toHaveLength(2))
     expect(result.current.response).toMatchObject({ conversationId })
     expect(result.current.response.status).not.toBe('error')
+  })
+
+  it('hydrates a selected saved session with its persisted messages', async () => {
+    const api = new FakeChatAPI()
+    api.sessions.list = async () => [
+      {
+        id: 'session-1',
+        title: 'Saved chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2
+      }
+    ]
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() =>
+      expect(result.current.conversations).toEqual([{ id: 'session-1', title: 'Saved chat' }])
+    )
+    act(() => result.current.selectConversation('session-1'))
+
+    await waitFor(() =>
+      expect(
+        result.current.activeMessages.map(({ parts, role }) => ({
+          role,
+          text: parts.find((part) => part.type === 'text')?.text
+        }))
+      ).toEqual([
+        { role: 'user', text: 'Saved prompt' },
+        { role: 'assistant', text: 'Saved answer' }
+      ])
+    )
+  })
+
+  it('permanently deletes a persisted session after the delete request succeeds', async () => {
+    const api = new FakeChatAPI()
+    const remove = vi.fn(async (): Promise<void> => {})
+    api.sessions.delete = remove
+    api.sessions.list = async () => [
+      {
+        id: 'session-1',
+        title: 'Saved chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2
+      }
+    ]
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() => expect(result.current.conversations).toHaveLength(1))
+    act(() => result.current.deleteConversation('session-1'))
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('session-1'))
+    await waitFor(() => expect(result.current.conversations).toEqual([]))
   })
 })

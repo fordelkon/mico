@@ -3,6 +3,7 @@ import { ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
+import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
 import { IpcChannel } from '@shared/IpcChannel'
 
@@ -115,7 +116,15 @@ const providers: ProvidersAPI = {
   testModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_TestModel, model)
 }
 
-const api = { appearance, chat, providers, windowControls }
+const sessions: SessionsAPI = {
+  create: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Create, input),
+  delete: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Delete, sessionId),
+  list: () => ipcRenderer.invoke(IpcChannel.Sessions_List),
+  load: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Load, sessionId),
+  rename: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Rename, input)
+}
+
+const api = { appearance, chat, providers, sessions, windowControls }
 
 export { api, type WindowApiType }
 

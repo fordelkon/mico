@@ -8,7 +8,11 @@ import {
   type MicoUIMessage
 } from '@renderer/types/chat'
 import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
+import type {
+  ChatMessage,
+  ModelReasoningCapabilities,
+  ThinkingSelection
+} from '@shared/data/schemas/chat'
 
 const EMPTY_MESSAGES: MicoUIMessage[] = []
 // A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
@@ -53,6 +57,17 @@ type ActiveChatSession = {
   conversationId: string
   chat: Chat<MicoUIMessage>
 }
+type PendingMessage = { content: string; session: ChatSession }
+
+function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
+  return messages.map((message) => ({
+    id: crypto.randomUUID(),
+    role: message.role,
+    parts: message.parts.flatMap((part) =>
+      part.type === 'text' ? [{ type: 'text', text: part.text, state: 'done' as const }] : []
+    )
+  }))
+}
 
 function useChatWorkspaceState(): ChatWorkspace {
   // Keep sessions alive across selection changes so background responses can continue.
@@ -60,6 +75,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   const [conversations, setConversations] = React.useState<Conversation[]>([])
   const [activeSession, setActiveSession] = React.useState<ActiveChatSession | null>(null)
   const [response, setResponse] = React.useState<ChatResponseState>(IDLE_CHAT_RESPONSE)
+  const [pendingMessage, setPendingMessage] = React.useState<PendingMessage | null>(null)
   const [reasoningCapabilities, setReasoningCapabilities] =
     React.useState<ModelReasoningCapabilities | null>(null)
   const [thinkingEffort, setThinkingEffortState] = React.useState<ThinkingSelection>('default')
@@ -70,6 +86,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   )
   // Response actions can run before React commits, so they need the latest synchronous value.
   const responseRef = React.useRef<ChatResponseState>(IDLE_CHAT_RESPONSE)
+  const isCreatingSessionRef = React.useRef(false)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
   const [idleChat] = React.useState(
     () =>
@@ -116,6 +133,27 @@ function useChatWorkspaceState(): ChatWorkspace {
     }
   }, [thinkingEffortStore])
 
+  React.useEffect(() => {
+    let active = true
+
+    void window.api.sessions.list().then(
+      (sessions) => {
+        if (!active) return
+
+        setConversations((current) =>
+          current.length ? current : sessions.map(({ id, title }) => ({ id, title }))
+        )
+      },
+      () => {
+        if (active) setConversations([])
+      }
+    )
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const setResponseState = React.useCallback((next: ChatResponseState): void => {
     responseRef.current = next
     setResponse(next)
@@ -134,9 +172,10 @@ function useChatWorkspaceState(): ChatWorkspace {
   )
 
   const createSession = React.useCallback(
-    (conversation: Conversation): ChatSession => {
+    (conversation: Conversation, messages: ChatMessage[] = []): ChatSession => {
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
+        messages: toUiMessages(messages),
         transport: new ElectronChatTransport(window.api.chat, {
           conversationId: conversation.id,
           getThinkingEffort,
@@ -187,6 +226,12 @@ function useChatWorkspaceState(): ChatWorkspace {
   })
   const activeMessages = activeSession ? subscribedMessages : EMPTY_MESSAGES
 
+  React.useEffect(() => {
+    if (!pendingMessage) return
+
+    void pendingMessage.session.chat.sendMessage({ text: pendingMessage.content })
+  }, [pendingMessage])
+
   // Do not let a newly selected session inherit the status of another conversation's response.
   React.useEffect(() => {
     const currentResponse = responseRef.current
@@ -213,13 +258,23 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const selectConversation = React.useCallback(
     (conversationId: string, { focusComposer = true }: { focusComposer?: boolean } = {}): void => {
-      const session = sessionsRef.current.get(conversationId)
-      if (!session) return
+      const existing = sessionsRef.current.get(conversationId)
+      if (existing) {
+        setActiveSession({ conversationId, chat: existing.chat })
+        if (focusComposer) setComposerFocusKey((key) => key + 1)
+        return
+      }
 
-      setActiveSession({ conversationId, chat: session.chat })
-      if (focusComposer) setComposerFocusKey((key) => key + 1)
+      void window.api.sessions.load(conversationId).then((persisted) => {
+        const session = createSession(
+          { id: persisted.id, title: persisted.title },
+          persisted.messages
+        )
+        setActiveSession({ conversationId: persisted.id, chat: session.chat })
+        if (focusComposer) setComposerFocusKey((key) => key + 1)
+      })
     },
-    []
+    [createSession]
   )
 
   const renameConversation = React.useCallback((conversationId: string, title: string): void => {
@@ -239,19 +294,25 @@ function useChatWorkspaceState(): ChatWorkspace {
   const deleteConversation = React.useCallback(
     (conversationId: string): void => {
       const session = sessionsRef.current.get(conversationId)
-      if (!session) return
-
-      const currentResponse = responseRef.current
-      if (currentResponse.status !== 'idle' && currentResponse.conversationId === conversationId) {
-        void session.chat.stop()
-        setResponseState(IDLE_CHAT_RESPONSE)
+      const deletePersistedSession = async (): Promise<void> => {
+        const currentResponse = responseRef.current
+        if (
+          session &&
+          currentResponse.status !== 'idle' &&
+          currentResponse.conversationId === conversationId
+        ) {
+          await session.chat.stop()
+          setResponseState(IDLE_CHAT_RESPONSE)
+        }
+        await window.api.sessions.delete(conversationId)
+        sessionsRef.current.delete(conversationId)
+        setConversations((current) =>
+          current.filter((conversation) => conversation.id !== conversationId)
+        )
+        setActiveSession((current) => (current?.conversationId === conversationId ? null : current))
       }
 
-      sessionsRef.current.delete(conversationId)
-      setConversations((current) =>
-        current.filter((conversation) => conversation.id !== conversationId)
-      )
-      setActiveSession((current) => (current?.conversationId === conversationId ? null : current))
+      void deletePersistedSession()
     },
     [setResponseState]
   )
@@ -267,19 +328,32 @@ function useChatWorkspaceState(): ChatWorkspace {
         return
       }
 
-      let session = activeSession
+      const existingSession = activeSession
         ? sessionsRef.current.get(activeSession.conversationId)
         : undefined
 
-      if (!session) {
-        const conversation = { id: crypto.randomUUID(), title: 'New chat' }
-        session = createSession(conversation)
-        setConversations((current) => [...current, conversation])
-        setActiveSession({ conversationId: conversation.id, chat: session.chat })
+      if (existingSession) {
+        setResponseState({ status: 'submitted', conversationId: existingSession.conversation.id })
+        void existingSession.chat.sendMessage({ text: content })
+        return
       }
 
-      setResponseState({ status: 'submitted', conversationId: session.conversation.id })
-      void session.chat.sendMessage({ text: content })
+      if (isCreatingSessionRef.current) return
+
+      isCreatingSessionRef.current = true
+      void window.api.sessions
+        .create({ title: 'New chat' })
+        .then((summary) => {
+          const conversation = { id: summary.id, title: summary.title }
+          const session = createSession(conversation)
+          setConversations((current) => [...current, conversation])
+          setActiveSession({ conversationId: conversation.id, chat: session.chat })
+          setResponseState({ status: 'submitted', conversationId: conversation.id })
+          setPendingMessage({ content, session })
+        })
+        .finally(() => {
+          isCreatingSessionRef.current = false
+        })
     },
     [activeSession, createSession, setResponseState]
   )
