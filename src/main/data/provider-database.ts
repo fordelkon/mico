@@ -5,6 +5,7 @@ import { app } from 'electron'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 
 import { providerLibraryState, providers } from './provider-schema'
+import { providerMigrations } from './provider-migrations'
 import * as schema from './provider-schema'
 
 type ProviderDatabaseDependencies = {
@@ -41,67 +42,40 @@ class ProviderDatabase {
     await mkdir(userDataPath, { recursive: true })
 
     const sqlite = this.dependencies.openDatabase(join(userDataPath, 'providers.db'))
-    sqlite.pragma('foreign_keys = ON')
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS providers (
-        id TEXT PRIMARY KEY NOT NULL,
-        kind TEXT NOT NULL,
-        api_format TEXT,
-        api_key TEXT,
-        base_url TEXT NOT NULL,
-        enabled INTEGER NOT NULL DEFAULT 0,
-        enabled_order INTEGER,
-        headers TEXT NOT NULL DEFAULT '{}',
-        icon TEXT,
-        max_tokens INTEGER,
-        name TEXT,
-        use_max_completion_tokens INTEGER
-      );
-      CREATE TABLE IF NOT EXISTS provider_models (
-        id TEXT PRIMARY KEY NOT NULL,
-        provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
-        model_id TEXT NOT NULL,
-        display_name TEXT NOT NULL,
-        enabled INTEGER NOT NULL DEFAULT 0,
-        discovery_order INTEGER NOT NULL DEFAULT 0,
-        enabled_order INTEGER,
-        CONSTRAINT provider_models_provider_model UNIQUE(provider_id, model_id)
-      );
-      CREATE TABLE IF NOT EXISTS provider_library_state (
-        id INTEGER PRIMARY KEY NOT NULL,
-        selected_model_id TEXT,
-        selected_provider_id TEXT
-      );
-    `)
-    // SAFETY: SQLite's table_info pragma always returns a `name` column for each table column.
-    const modelColumns = sqlite.prepare('PRAGMA table_info(provider_models)').all() as Array<{
-      name: string
-    }>
-    if (!modelColumns.some(({ name }) => name === 'enabled'))
-      sqlite.exec('ALTER TABLE provider_models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1')
-    if (!modelColumns.some(({ name }) => name === 'discovery_order'))
-      sqlite.exec(
-        'ALTER TABLE provider_models ADD COLUMN discovery_order INTEGER NOT NULL DEFAULT 0'
+    try {
+      sqlite.pragma('foreign_keys = ON')
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS provider_schema_migrations (
+          id TEXT PRIMARY KEY NOT NULL,
+          applied_at INTEGER NOT NULL
+        );
+      `)
+      const appliedMigrationIds = new Set(
+        sqlite
+          .prepare('SELECT id FROM provider_schema_migrations ORDER BY id')
+          .pluck()
+          .all()
+          .map(String)
       )
-    if (!modelColumns.some(({ name }) => name === 'enabled_order'))
-      sqlite.exec('ALTER TABLE provider_models ADD COLUMN enabled_order INTEGER')
-    // SAFETY: SQLite's table_info pragma always returns a `name` column for each table column.
-    const providerColumns = sqlite.prepare('PRAGMA table_info(providers)').all() as Array<{
-      name: string
-    }>
-    if (!providerColumns.some(({ name }) => name === 'enabled_order'))
-      sqlite.exec('ALTER TABLE providers ADD COLUMN enabled_order INTEGER')
-    sqlite.exec(
-      'UPDATE providers SET enabled_order = rowid WHERE enabled = 1 AND enabled_order IS NULL'
-    )
-    // SAFETY: SQLite's table_info pragma always returns a `name` column for each table column.
-    const libraryStateColumns = sqlite
-      .prepare('PRAGMA table_info(provider_library_state)')
-      .all() as Array<{
-      name: string
-    }>
-    if (!libraryStateColumns.some(({ name }) => name === 'selected_provider_id'))
-      sqlite.exec('ALTER TABLE provider_library_state ADD COLUMN selected_provider_id TEXT')
+      const knownMigrationIds = new Set<string>(providerMigrations.map((migration) => migration.id))
+      const unknownMigrationId = [...appliedMigrationIds].find((id) => !knownMigrationIds.has(id))
+      if (unknownMigrationId)
+        throw new Error(`Provider database contains unknown migration ${unknownMigrationId}.`)
+
+      const recordMigration = sqlite.prepare(
+        'INSERT INTO provider_schema_migrations (id, applied_at) VALUES (?, ?)'
+      )
+      for (const migration of providerMigrations) {
+        if (appliedMigrationIds.has(migration.id)) continue
+        sqlite.transaction(() => {
+          migration.apply(sqlite)
+          recordMigration.run(migration.id, Date.now())
+        })()
+      }
+    } catch (error) {
+      sqlite.close()
+      throw error
+    }
 
     this.sqlite = sqlite
     this.database = drizzle(sqlite, { schema })
