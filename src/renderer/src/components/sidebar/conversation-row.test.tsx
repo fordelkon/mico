@@ -16,6 +16,7 @@ describe('ConversationRow', () => {
       <SidebarProvider>
         <ConversationRow
           conversation={{ id: 'conversation-1', title: 'Design notes' }}
+          isResponding={false}
           onDelete={vi.fn()}
           onRename={vi.fn()}
           onSelect={vi.fn()}
@@ -35,5 +36,28 @@ describe('ConversationRow', () => {
     expect(input).toHaveValue('Design notes')
     expect(input.selectionStart).toBe(0)
     expect(input.selectionEnd).toBe('Design notes'.length)
+  })
+
+  it('shows a streaming indicator without blocking conversation actions', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SidebarProvider>
+        <ConversationRow
+          conversation={{ id: 'conversation-1', title: 'Design notes' }}
+          isResponding
+          onDelete={vi.fn()}
+          onRename={vi.fn()}
+          onSelect={vi.fn()}
+          selected={true}
+        />
+      </SidebarProvider>
+    )
+
+    expect(screen.getByRole('status', { name: 'Generating response' })).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'More actions' }))
+
+    expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeVisible()
   })
 })

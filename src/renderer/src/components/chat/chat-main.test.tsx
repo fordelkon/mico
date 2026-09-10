@@ -26,6 +26,7 @@ function createWorkspace(): ChatWorkspace {
       retryDelayMs: 2_000,
       startedAt: Date.now()
     },
+    respondingConversationIds: ['conversation-1'],
     reasoningCapabilities: null,
     thinkingEffort: 'medium',
     setThinkingEffort: vi.fn(),

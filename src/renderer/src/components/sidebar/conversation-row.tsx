@@ -17,7 +17,8 @@ import {
   IconMenuButton,
   Input,
   SidebarMenuButton,
-  SidebarMenuItem
+  SidebarMenuItem,
+  Spinner
 } from '@mico/ui'
 import type { Conversation } from '@renderer/types/chat'
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
@@ -27,6 +28,7 @@ import './conversation-row.css'
 
 type ConversationRowProps = {
   conversation: Conversation
+  isResponding: boolean
   selected: boolean
   onSelect: (options?: { focusComposer?: boolean }) => void
   onRename: (title: string) => void
@@ -35,6 +37,7 @@ type ConversationRowProps = {
 
 function ConversationRow({
   conversation,
+  isResponding,
   selected,
   onSelect,
   onRename,
@@ -109,6 +112,7 @@ function ConversationRow({
           aria-busy={deleting || undefined}
           className="conversation-row mx-1.5 my-px"
           data-deleting={deleting || undefined}
+          data-responding={isResponding || undefined}
           onAnimationEnd={handleDeleteAnimationEnd}
         >
           {editing ? (
@@ -178,6 +182,12 @@ function ConversationRow({
                 </DropdownMenuItem>
               </IconMenuButton>
             </div>
+          )}
+          {!editing && !deleting && isResponding && (
+            <Spinner
+              aria-label="Generating response"
+              className="conversation-row__status size-3.5 text-text-tertiary"
+            />
           )}
           <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
             <AlertDialogContent>

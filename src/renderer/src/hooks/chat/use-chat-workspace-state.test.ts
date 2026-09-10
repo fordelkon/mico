@@ -132,6 +132,35 @@ describe('useChatWorkspaceState', () => {
     expect(api.startedRequests[0]?.conversationId).toBe('session-new')
   })
 
+  it('tracks concurrent responses independently when starting a new chat', async () => {
+    const api = new FakeChatAPI()
+    const sessionIds = ['session-one', 'session-two']
+    api.createSession.mockImplementation(async () => ({
+      id: sessionIds.shift() ?? 'unexpected-session',
+      title: 'New chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 1,
+      lastActivityAt: 1
+    }))
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    act(() => result.current.sendMessage('First message'))
+    await waitFor(() => expect(result.current.respondingConversationIds).toEqual(['session-one']))
+
+    act(() => result.current.startNewChat())
+    act(() => result.current.sendMessage('Second message'))
+
+    await waitFor(() =>
+      expect(result.current.respondingConversationIds).toEqual(['session-one', 'session-two'])
+    )
+
+    api.emit({ type: 'finish', requestId: api.startedRequests[0].requestId })
+
+    await waitFor(() => expect(result.current.respondingConversationIds).toEqual(['session-two']))
+  })
+
   it('batches rapid streamed text updates before committing the transcript', async () => {
     vi.useFakeTimers()
     const api = new FakeChatAPI()

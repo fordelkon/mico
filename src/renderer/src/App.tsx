@@ -66,6 +66,7 @@ function AppContent(): React.JSX.Element {
       <AppSidebar
         activeConversationId={workspace.activeConversation?.id ?? null}
         conversations={workspace.conversations}
+        respondingConversationIds={workspace.respondingConversationIds}
         onDeleteConversation={workspace.deleteConversation}
         onBackFromSettings={handleBackFromSettings}
         onNewChat={handleNewChat}

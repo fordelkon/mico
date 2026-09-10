@@ -30,6 +30,7 @@ import './app-sidebar.css'
 type AppSidebarProps = {
   conversations: Conversation[]
   activeConversationId: string | null
+  respondingConversationIds: string[]
   onDeleteConversation: (conversationId: string) => void
   onBackFromSettings: () => void
   onNewChat: () => void
@@ -56,6 +57,7 @@ function nextAppearancePreference(preference: keyof typeof appearancePreferenceL
 function AppSidebar({
   conversations,
   activeConversationId,
+  respondingConversationIds,
   onDeleteConversation,
   onBackFromSettings,
   onNewChat,
@@ -129,6 +131,7 @@ function AppSidebar({
                   <ConversationRow
                     key={conversation.id}
                     conversation={conversation}
+                    isResponding={respondingConversationIds.includes(conversation.id)}
                     selected={conversation.id === activeConversationId}
                     onDelete={() => onDeleteConversation(conversation.id)}
                     onRename={(title) => onRenameConversation(conversation.id, title)}
