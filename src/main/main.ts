@@ -2,18 +2,21 @@ import { app, ipcMain, type BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 
 import icon from '../../build/icon.png?asset'
-import { ChatService } from './ai/chat-service'
-import { createChatProviderResolver } from './ai/chat-provider-resolver'
+import { createChatProviderResolver } from './ai/chat/chat-provider-resolver'
+import { ChatService } from './ai/chat/chat-service'
 import { createChatProvider } from '@mico/ai-providers'
 import { IpcChannel } from '@shared/IpcChannel'
 import { registerIpc } from './ipc'
 import { MainWindowService } from './services/main-window-service'
 import { PreferenceService } from './services/preference-service'
-import { ProviderService } from './services/provider-service'
+import { ProviderService } from './ai/providers/provider-service'
+import { SessionRuntimeService } from './ai/sessions/session-runtime-service'
+import { SessionDatabase } from './data/session-database'
 import { TrayService } from './services/tray-service'
 
 const preferenceService = new PreferenceService()
 const providerService = new ProviderService()
+const sessionDatabase = new SessionDatabase()
 const pendingProviderDraftFlushes = new Map<number, () => void>()
 ipcMain.on(IpcChannel.Providers_DraftFlushed, (event) => {
   pendingProviderDraftFlushes.get(event.sender.id)?.()
@@ -37,6 +40,7 @@ function flushProviderDraft(window: BrowserWindow): Promise<void> {
 
 let trayService: TrayService
 let chatService: ChatService | undefined
+let sessionRuntimeService: SessionRuntimeService | undefined
 const mainWindowService = new MainWindowService(
   () => trayService.shouldKeepWindowOpen(),
   flushProviderDraft
@@ -86,11 +90,18 @@ if (gotTheLock) {
 
     await preferenceService.initialize()
     await providerService.initialize()
+    await sessionDatabase.initialize()
+    sessionRuntimeService = new SessionRuntimeService({ database: sessionDatabase })
+    sessionRuntimeService.recoverInterruptedRuns()
     chatService = new ChatService(
       createChatProviderResolver({
         createChatProvider,
         getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
-      })
+      }),
+      {
+        getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration(),
+        runtime: sessionRuntimeService
+      }
     )
     mainWindowService.initialize()
     trayService.initialize()
@@ -98,7 +109,8 @@ if (gotTheLock) {
       chat: chatService,
       mainWindow: mainWindowService,
       preference: preferenceService,
-      provider: providerService
+      provider: providerService,
+      session: sessionRuntimeService
     })
 
     app.on('activate', () => {
@@ -115,6 +127,7 @@ if (gotTheLock) {
 
 app.on('before-quit', () => {
   chatService?.dispose()
+  sessionDatabase.close()
   trayService.beginQuit()
   trayService.dispose()
 })

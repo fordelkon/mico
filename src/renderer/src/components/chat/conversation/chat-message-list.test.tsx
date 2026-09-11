@@ -1,9 +1,11 @@
 import '@testing-library/jest-dom/vitest'
 
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
+
+import type { MicoUIMessage } from '@renderer/types/chat'
 
 import { ChatMessageList } from './chat-message-list'
 
@@ -24,6 +26,84 @@ function RetryHarness(): React.JSX.Element {
 }
 
 describe('ChatMessageList', () => {
+  it('does not revisit stable messages when the streaming message changes', () => {
+    let stablePartsReads = 0
+    const stableParts: MicoUIMessage['parts'] = [
+      { type: 'text', text: 'Earlier message', state: 'done' }
+    ]
+    const stableMessage = {
+      id: 'user-1',
+      role: 'user' as const,
+      get parts() {
+        stablePartsReads += 1
+        return stableParts
+      }
+    }
+    const { rerender } = render(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding
+        messages={[
+          stableMessage,
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'First chunk', state: 'streaming' }]
+          }
+        ]}
+      />
+    )
+    const readsBeforeNextChunk = stablePartsReads
+
+    rerender(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding
+        messages={[
+          stableMessage,
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'First chunk, then more', state: 'streaming' }]
+          }
+        ]}
+      />
+    )
+
+    expect(stablePartsReads).toBe(readsBeforeNextChunk)
+  })
+
+  it('does not revisit the transcript while the retry countdown advances', async () => {
+    vi.useFakeTimers()
+    class ObservableMessages extends Array<MicoUIMessage> {
+      latestMessageReads = 0
+
+      override at(index: number): MicoUIMessage | undefined {
+        this.latestMessageReads += 1
+        return super.at(index)
+      }
+    }
+    const messages = new ObservableMessages()
+
+    try {
+      render(
+        <ChatMessageList
+          conversationId="conversation-1"
+          isResponding={false}
+          messages={messages}
+          retry={{ attempt: 2, maxAttempts: 5, retryDelayMs: 2_000, startedAt: Date.now() }}
+        />
+      )
+      const readsBeforeCountdownTick = messages.latestMessageReads
+
+      await act(() => vi.advanceTimersByTimeAsync(250))
+
+      expect(messages.latestMessageReads).toBe(readsBeforeCountdownTick)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps the pending thinking state until an assistant response has content', () => {
     const userMessage = {
       id: 'user-1',

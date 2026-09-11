@@ -6,8 +6,8 @@ import type {
   ChatProviderMessage,
   DiscoveredModel
 } from '@mico/ai-providers'
-import { ProviderDatabase } from '../data/provider-database'
-import { providerLibraryState, providerModels, providers } from '../data/provider-schema'
+import { ProviderDatabase } from '../../data/provider-database'
+import { providerLibraryState, providerModels, providers } from '../../data/provider-schema'
 import { CustomProviderSchema, ProviderHeadersSchema } from '@shared/data/schemas/provider'
 import type {
   CustomProvider,

@@ -3,6 +3,7 @@ import katex from 'katex'
 const TOKEN_PREFIX = '\uE000MICO_MATH:'
 const TOKEN_SUFFIX = '\uE001'
 const MATH_LINK_HREF = '#mico-math'
+const MATH_RENDER_CACHE_MAX_ENTRIES = 128
 const MATH_ENVIRONMENT = /^\\begin\{([A-Za-z*]+)\}/
 const DISPLAY_ENVIRONMENTS = new Set([
   'align',
@@ -14,6 +15,7 @@ const DISPLAY_ENVIRONMENTS = new Set([
   'multline',
   'multline*'
 ])
+const mathRenderCache = new Map<string, string>()
 
 type MarkdownMathParserCache = {
   source: string
@@ -131,13 +133,28 @@ function decodeMarkdownMath(token: string): MarkdownMath | null {
 }
 
 function renderMarkdownMath(formula: string, display: boolean): string {
-  return katex.renderToString(formula, {
+  const cacheKey = `${display ? 'block' : 'inline'}:${formula}`
+  const cached = mathRenderCache.get(cacheKey)
+  if (cached !== undefined) {
+    mathRenderCache.delete(cacheKey)
+    mathRenderCache.set(cacheKey, cached)
+    return cached
+  }
+
+  const rendered = katex.renderToString(formula, {
     displayMode: display,
     output: 'htmlAndMathml',
     strict: 'warn',
     throwOnError: false,
     trust: false
   })
+  mathRenderCache.set(cacheKey, rendered)
+  if (mathRenderCache.size > MATH_RENDER_CACHE_MAX_ENTRIES) {
+    const oldestCacheKey = mathRenderCache.keys().next().value
+    if (oldestCacheKey !== undefined) mathRenderCache.delete(oldestCacheKey)
+  }
+
+  return rendered
 }
 
 function prepareMarkdownMath(source: string, cache: MarkdownMathParserCache): string {

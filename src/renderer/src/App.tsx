@@ -17,10 +17,11 @@ function AppContent(): React.JSX.Element {
   const [activePage, setActivePage] = React.useState<'chat' | 'settings'>('chat')
   const [settingsPage, setSettingsPage] = React.useState<'providers' | 'appearance'>('providers')
 
-  const handleNewChat = (): void => {
+  const { startNewChat, selectConversation, activeConversation } = workspace
+  const handleNewChat = React.useCallback((): void => {
     setActivePage('chat')
-    workspace.startNewChat()
-  }
+    startNewChat()
+  }, [startNewChat])
 
   const handleOpenSettings = React.useCallback((): void => {
     if (activePage === 'settings') return
@@ -44,17 +45,18 @@ function AppContent(): React.JSX.Element {
   )
 
   // Keep every sidebar selection on the same conversation handoff path.
-  const handleSelectConversation = (
-    conversationId: string,
-    options?: { focusComposer?: boolean }
-  ): void => {
-    selectConversationWithPaperTransition({
-      activeConversationId: workspace.activeConversation?.id ?? null,
-      conversationId,
-      options,
-      selectConversation: workspace.selectConversation
-    })
-  }
+  const activeConversationId = activeConversation?.id ?? null
+  const handleSelectConversation = React.useCallback(
+    (conversationId: string, options?: { focusComposer?: boolean }): void => {
+      selectConversationWithPaperTransition({
+        activeConversationId,
+        conversationId,
+        options,
+        selectConversation
+      })
+    },
+    [activeConversationId, selectConversation]
+  )
 
   return (
     <SidebarProvider
@@ -66,6 +68,7 @@ function AppContent(): React.JSX.Element {
       <AppSidebar
         activeConversationId={workspace.activeConversation?.id ?? null}
         conversations={workspace.conversations}
+        respondingConversationIds={workspace.respondingConversationIds}
         onDeleteConversation={workspace.deleteConversation}
         onBackFromSettings={handleBackFromSettings}
         onNewChat={handleNewChat}

@@ -36,6 +36,13 @@ type HighlightSession = {
   generation: number
   highlighter: HighlighterCore
   language: string
+  lineBreaksBeforeToken: number[]
+  lineCache: {
+    dirtyTokenIndex: number | null
+    lines: ThemedToken[][]
+    revision: number
+    snapshotRevision: number
+  }
   publicationCancel: (() => void) | null
   publicationScheduled: boolean
   published: number
@@ -61,34 +68,114 @@ function splitStableCode(code: string, isStreaming: boolean): StableCode {
   }
 }
 
-function applyStreamingToken(buffer: ThemedToken[], token: ThemedToken | RecallToken): void {
+function countLineBreaks(content: string): number {
+  let count = 0
+  for (const character of content) {
+    if (character === '\n') count += 1
+  }
+  return count
+}
+
+function markTokenLinesDirty(session: HighlightSession, tokenIndex: number): void {
+  session.lineCache.dirtyTokenIndex = Math.min(
+    session.lineCache.dirtyTokenIndex ?? tokenIndex,
+    tokenIndex
+  )
+  session.lineCache.revision += 1
+}
+
+function applyStreamingToken(session: HighlightSession, token: ThemedToken | RecallToken): void {
   if ('recall' in token) {
-    buffer.splice(Math.max(0, buffer.length - token.recall), token.recall)
+    const tokenIndex = Math.max(0, session.tokens.length - token.recall)
+    if (tokenIndex === session.tokens.length) return
+
+    session.tokens.splice(tokenIndex, token.recall)
+    session.lineBreaksBeforeToken.splice(tokenIndex, token.recall)
+    markTokenLinesDirty(session, tokenIndex)
     return
   }
 
-  buffer.push(token)
+  const previousTokenIndex = session.tokens.length - 1
+  const lineBreaksBeforeToken =
+    previousTokenIndex < 0
+      ? 0
+      : session.lineBreaksBeforeToken[previousTokenIndex] +
+        countLineBreaks(session.tokens[previousTokenIndex].content)
+
+  session.lineBreaksBeforeToken.push(lineBreaksBeforeToken)
+  markTokenLinesDirty(session, session.tokens.length)
+  session.tokens.push(token)
 }
 
 function isAppendOnly(previous: string, next: string): boolean {
   return next.startsWith(previous)
 }
 
-function toTokenLines(tokens: ThemedToken[]): ThemedToken[][] {
-  const lines: ThemedToken[][] = [[]]
+function appendTokenToLines(
+  lines: ThemedToken[][],
+  token: ThemedToken,
+  content = token.content
+): void {
+  const parts = content.split('\n')
 
-  for (const token of tokens) {
-    const parts = token.content.split('\n')
+  for (const [index, part] of parts.entries()) {
+    if (part) lines.at(-1)?.push({ ...token, content: part })
+    if (index < parts.length - 1) lines.push([])
+  }
+}
 
-    for (const [index, part] of parts.entries()) {
-      if (part) lines.at(-1)?.push({ ...token, content: part })
-      if (index < parts.length - 1) lines.push([])
-    }
+function getLineBreakCountBeforeToken(session: HighlightSession, tokenIndex: number): number {
+  if (tokenIndex < session.lineBreaksBeforeToken.length) {
+    return session.lineBreaksBeforeToken[tokenIndex]
   }
 
-  if (tokens.at(-1)?.content.endsWith('\n')) lines.pop()
+  const previousTokenIndex = tokenIndex - 1
+  if (previousTokenIndex < 0) return 0
 
-  return lines
+  return (
+    session.lineBreaksBeforeToken[previousTokenIndex] +
+    countLineBreaks(session.tokens[previousTokenIndex].content)
+  )
+}
+
+function rebuildTokenLines(session: HighlightSession, dirtyTokenIndex: number): ThemedToken[][] {
+  const reusableLineCount = getLineBreakCountBeforeToken(session, dirtyTokenIndex)
+  let rebuildTokenIndex = 0
+  let rebuildContentOffset = 0
+
+  for (let tokenIndex = dirtyTokenIndex - 1; tokenIndex >= 0; tokenIndex -= 1) {
+    const lineBreakIndex = session.tokens[tokenIndex].content.lastIndexOf('\n')
+    if (lineBreakIndex === -1) continue
+
+    rebuildTokenIndex = tokenIndex
+    rebuildContentOffset = lineBreakIndex + 1
+    break
+  }
+
+  const rebuiltLines: ThemedToken[][] = [[]]
+  for (let tokenIndex = rebuildTokenIndex; tokenIndex < session.tokens.length; tokenIndex += 1) {
+    const token = session.tokens[tokenIndex]
+    appendTokenToLines(
+      rebuiltLines,
+      token,
+      tokenIndex === rebuildTokenIndex ? token.content.slice(rebuildContentOffset) : token.content
+    )
+  }
+
+  if (session.tokens.at(-1)?.content.endsWith('\n')) rebuiltLines.pop()
+
+  return [...session.lineCache.lines.slice(0, reusableLineCount), ...rebuiltLines]
+}
+
+function getTokenLines(session: HighlightSession): ThemedToken[][] {
+  if (session.lineCache.snapshotRevision === session.lineCache.revision) {
+    return session.lineCache.lines
+  }
+
+  session.lineCache.lines = rebuildTokenLines(session, session.lineCache.dirtyTokenIndex ?? 0)
+  session.lineCache.dirtyTokenIndex = null
+  session.lineCache.snapshotRevision = session.lineCache.revision
+  return session.lineCache.lines
 }
 
 async function createDefaultHighlighter(themes: {
@@ -198,7 +285,7 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
 
       return {
         isFallback: false,
-        lines: toTokenLines(session.tokens),
+        lines: getTokenLines(session),
         rawTail: tail
       }
     } catch {
@@ -234,6 +321,13 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
         generation,
         highlighter,
         language,
+        lineBreaksBeforeToken: [],
+        lineCache: {
+          dirtyTokenIndex: null,
+          lines: [[]],
+          revision: 0,
+          snapshotRevision: 0
+        },
         publicationCancel: null,
         publicationScheduled: false,
         published: 0,
@@ -260,7 +354,7 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
       while (true) {
         const { done, value } = await session.reader.read()
         if (done || session.generation !== this.generation) return
-        applyStreamingToken(session.tokens, value)
+        applyStreamingToken(session, value)
         this.schedulePublication(session)
       }
     } catch (error) {
@@ -297,7 +391,7 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
     session.published += 1
     this.onTokens?.({
       isFallback: false,
-      lines: toTokenLines(session.tokens),
+      lines: getTokenLines(session),
       rawTail: session.rawTail
     })
     this.resolvePublicationWaiters(session)

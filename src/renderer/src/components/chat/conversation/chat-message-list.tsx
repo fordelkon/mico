@@ -9,11 +9,20 @@ import {
 } from '@mico/ui'
 
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
+import { Chat, useChat } from '@ai-sdk/react'
 import { LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
 import { thinkingOrbStates, type ThinkingOrbState } from './thinking-block'
+
+// A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
+const STREAMING_UPDATE_THROTTLE_MS = 50
+const PENDING_ASSISTANT_MESSAGE = {
+  id: 'pending-assistant',
+  role: 'assistant',
+  parts: []
+} satisfies MicoUIMessage
 
 function getRandomThinkingOrbState(): ThinkingOrbState {
   return thinkingOrbStates[Math.floor(Math.random() * thinkingOrbStates.length)]
@@ -38,7 +47,47 @@ type ChatMessageListProps = {
   retry?: ChatRetryState
 }
 
+type SubscribedChatMessageListProps = Omit<ChatMessageListProps, 'messages'> & {
+  chat: Chat<MicoUIMessage>
+}
+
 type RetryProgressStyle = React.CSSProperties & { '--retry-delay': string }
+
+function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Element {
+  const [now, setNow] = React.useState(() => Date.now())
+
+  React.useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const remainingSeconds = Math.max(
+    0,
+    Math.ceil((retry.startedAt + retry.retryDelayMs - now) / 1_000)
+  )
+  const retryProgressStyle: RetryProgressStyle = {
+    '--retry-delay': `${retry.retryDelayMs}ms`
+  }
+
+  return (
+    <p
+      className="chat-retry-status flex items-center gap-2 text-sm text-text-tertiary"
+      role="status"
+    >
+      <span
+        aria-hidden="true"
+        className="chat-retry-progress"
+        data-testid="retry-progress"
+        key={retry.startedAt}
+        style={retryProgressStyle}
+      />
+      <LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />
+      {remainingSeconds > 0
+        ? `Connection interrupted. Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
+        : `Connection interrupted. Retrying · attempt ${retry.attempt} of ${retry.maxAttempts}.`}
+    </p>
+  )
+}
 
 function ChatMessageList({
   conversationId,
@@ -48,27 +97,12 @@ function ChatMessageList({
   onRetry,
   retry
 }: ChatMessageListProps): React.JSX.Element {
-  const [now, setNow] = React.useState(() => Date.now())
-
-  React.useEffect(() => {
-    if (!retry) return
-
-    const intervalId = window.setInterval(() => setNow(Date.now()), 250)
-    return () => window.clearInterval(intervalId)
-  }, [retry])
-
-  const remainingSeconds = retry
-    ? Math.max(0, Math.ceil((retry.startedAt + retry.retryDelayMs - now) / 1_000))
-    : 0
   const latestMessage = messages.at(-1)
   const hasEmptyAssistantMessage =
     isResponding && latestMessage?.role === 'assistant' && latestMessage.parts.length === 0
   const showPendingThinking =
     isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
   const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
-  const retryProgressStyle: RetryProgressStyle | undefined = retry
-    ? { '--retry-delay': `${retry.retryDelayMs}ms` }
-    : undefined
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
@@ -92,7 +126,7 @@ function ChatMessageList({
                         isStreaming={
                           isResponding &&
                           message.role === 'assistant' &&
-                          message.id === messages.at(-1)?.id
+                          message.id === latestMessage?.id
                         }
                         thinkingOrbState={thinkingOrbState}
                       />
@@ -102,7 +136,7 @@ function ChatMessageList({
                     <MessageScrollerItem messageId="pending-assistant">
                       <ChatMessage
                         isStreaming
-                        message={{ id: 'pending-assistant', role: 'assistant', parts: [] }}
+                        message={PENDING_ASSISTANT_MESSAGE}
                         thinkingOrbState={thinkingOrbState}
                       />
                     </MessageScrollerItem>
@@ -123,24 +157,7 @@ function ChatMessageList({
                 )}
               </div>
             )}
-            {retry && (
-              <p
-                className="chat-retry-status flex items-center gap-2 text-sm text-text-tertiary"
-                role="status"
-              >
-                <span
-                  aria-hidden="true"
-                  className="chat-retry-progress"
-                  data-testid="retry-progress"
-                  key={retry.startedAt}
-                  style={retryProgressStyle}
-                />
-                <LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />
-                {remainingSeconds > 0
-                  ? `Connection interrupted. Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
-                  : `Connection interrupted. Retrying · attempt ${retry.attempt} of ${retry.maxAttempts}.`}
-              </p>
-            )}
+            {retry && <ChatRetryStatus retry={retry} />}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton
@@ -152,4 +169,16 @@ function ChatMessageList({
   )
 }
 
-export { ChatMessageList }
+function SubscribedChatMessageList({
+  chat,
+  ...props
+}: SubscribedChatMessageListProps): React.JSX.Element {
+  const { messages } = useChat<MicoUIMessage>({
+    chat,
+    throttle: STREAMING_UPDATE_THROTTLE_MS
+  })
+
+  return <ChatMessageList {...props} messages={messages} />
+}
+
+export { ChatMessageList, SubscribedChatMessageList }

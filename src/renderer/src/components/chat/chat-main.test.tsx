@@ -17,7 +17,7 @@ function createWorkspace(): ChatWorkspace {
   return {
     conversations: [{ id: 'conversation-1', title: 'New chat' }],
     activeConversation: { id: 'conversation-1', title: 'New chat' },
-    activeMessages: [],
+    activeChat: null,
     response: {
       status: 'retrying',
       conversationId: 'conversation-1',
@@ -26,6 +26,7 @@ function createWorkspace(): ChatWorkspace {
       retryDelayMs: 2_000,
       startedAt: Date.now()
     },
+    respondingConversationIds: new Set(['conversation-1']),
     reasoningCapabilities: null,
     thinkingEffort: 'medium',
     setThinkingEffort: vi.fn(),

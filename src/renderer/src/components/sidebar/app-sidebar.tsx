@@ -30,6 +30,7 @@ import './app-sidebar.css'
 type AppSidebarProps = {
   conversations: Conversation[]
   activeConversationId: string | null
+  respondingConversationIds: ReadonlySet<string>
   onDeleteConversation: (conversationId: string) => void
   onBackFromSettings: () => void
   onNewChat: () => void
@@ -56,6 +57,7 @@ function nextAppearancePreference(preference: keyof typeof appearancePreferenceL
 function AppSidebar({
   conversations,
   activeConversationId,
+  respondingConversationIds,
   onDeleteConversation,
   onBackFromSettings,
   onNewChat,
@@ -129,10 +131,11 @@ function AppSidebar({
                   <ConversationRow
                     key={conversation.id}
                     conversation={conversation}
+                    isResponding={respondingConversationIds.has(conversation.id)}
                     selected={conversation.id === activeConversationId}
-                    onDelete={() => onDeleteConversation(conversation.id)}
-                    onRename={(title) => onRenameConversation(conversation.id, title)}
-                    onSelect={(options) => onSelectConversation(conversation.id, options)}
+                    onDeleteConversation={onDeleteConversation}
+                    onRenameConversation={onRenameConversation}
+                    onSelectConversation={onSelectConversation}
                   />
                 ))}
               </SidebarMenu>
@@ -247,4 +250,6 @@ function AppSidebar({
   )
 }
 
-export { AppSidebar, type AppSidebarProps }
+const AppSidebarMemo = React.memo(AppSidebar)
+
+export { AppSidebarMemo as AppSidebar, type AppSidebarProps }

@@ -19,7 +19,7 @@ type ChatMessageProps = {
   thinkingOrbState?: ThinkingOrbState
 }
 
-function ChatMessage({
+function ChatMessageComponent({
   message,
   isStreaming,
   thinkingOrbState
@@ -109,5 +109,7 @@ function ChatMessage({
     </Message>
   )
 }
+
+const ChatMessage = React.memo(ChatMessageComponent)
 
 export { ChatMessage }

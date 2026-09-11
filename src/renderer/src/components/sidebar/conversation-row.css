@@ -62,9 +62,31 @@
   transition: opacity var(--app-sidebar-motion-duration) var(--app-sidebar-motion-easing);
 }
 
+.conversation-row__status {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--app-sidebar-motion-duration) var(--app-sidebar-motion-easing);
+}
+
+.conversation-row[data-responding="true"] .conversation-row__status {
+  opacity: 1;
+}
+
+.conversation-row[data-responding="true"]:hover .conversation-row__status,
+.conversation-row[data-responding="true"]:has(.conversation-row__actions :focus)
+  .conversation-row__status {
+  opacity: 0;
+}
+
 .conversation-row:hover .conversation-row__actions,
-.conversation-row:focus-within .conversation-row__actions,
-.conversation-row:has([data-active="true"]) .conversation-row__actions {
+.conversation-row:not([data-responding="true"]):focus-within .conversation-row__actions,
+.conversation-row[data-responding="true"]:has(.conversation-row__actions :focus)
+  .conversation-row__actions,
+.conversation-row:has([data-active="true"]):not([data-responding="true"])
+  .conversation-row__actions {
   opacity: 1;
   pointer-events: auto;
 }

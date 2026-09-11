@@ -1,4 +1,4 @@
-import { Chat, useChat } from '@ai-sdk/react'
+import { Chat } from '@ai-sdk/react'
 import * as React from 'react'
 
 import {
@@ -8,11 +8,11 @@ import {
   type MicoUIMessage
 } from '@renderer/types/chat'
 import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
-
-const EMPTY_MESSAGES: MicoUIMessage[] = []
-// A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
-const STREAMING_UPDATE_THROTTLE_MS = 50
+import type {
+  ChatMessage,
+  ModelReasoningCapabilities,
+  ThinkingSelection
+} from '@shared/data/schemas/chat'
 
 class ThinkingEffortStore {
   #value: ThinkingSelection = 'default'
@@ -29,8 +29,9 @@ class ThinkingEffortStore {
 type ChatWorkspace = {
   conversations: Conversation[]
   activeConversation: Conversation | null
-  activeMessages: MicoUIMessage[]
+  activeChat: Chat<MicoUIMessage> | null
   response: ChatResponseState
+  respondingConversationIds: ReadonlySet<string>
   reasoningCapabilities: ModelReasoningCapabilities | null
   thinkingEffort: ThinkingSelection
   setThinkingEffort: (thinkingEffort: ThinkingSelection) => void
@@ -53,13 +54,37 @@ type ActiveChatSession = {
   conversationId: string
   chat: Chat<MicoUIMessage>
 }
+type PendingMessage = { content: string; session: ChatSession }
+type ActiveChatResponse = Exclude<ChatResponseState, { status: 'idle' }>
+
+function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
+  return messages.map((message) => ({
+    id: crypto.randomUUID(),
+    role: message.role,
+    parts: message.parts.flatMap((part) =>
+      part.type === 'text' ? [{ type: 'text', text: part.text, state: 'done' as const }] : []
+    )
+  }))
+}
+
+function isResponding(response: ActiveChatResponse): boolean {
+  return (
+    response.status === 'submitted' ||
+    response.status === 'streaming' ||
+    response.status === 'retrying'
+  )
+}
 
 function useChatWorkspaceState(): ChatWorkspace {
   // Keep sessions alive across selection changes so background responses can continue.
   const sessionsRef = React.useRef(new Map<string, ChatSession>())
   const [conversations, setConversations] = React.useState<Conversation[]>([])
   const [activeSession, setActiveSession] = React.useState<ActiveChatSession | null>(null)
-  const [response, setResponse] = React.useState<ChatResponseState>(IDLE_CHAT_RESPONSE)
+  const [responses, setResponses] = React.useState<Map<string, ActiveChatResponse>>(() => new Map())
+  const [respondingConversationIds, setRespondingConversationIds] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set())
+  const [pendingMessage, setPendingMessage] = React.useState<PendingMessage | null>(null)
   const [reasoningCapabilities, setReasoningCapabilities] =
     React.useState<ModelReasoningCapabilities | null>(null)
   const [thinkingEffort, setThinkingEffortState] = React.useState<ThinkingSelection>('default')
@@ -68,20 +93,10 @@ function useChatWorkspaceState(): ChatWorkspace {
     () => thinkingEffortStore.get(),
     [thinkingEffortStore]
   )
-  // Response actions can run before React commits, so they need the latest synchronous value.
-  const responseRef = React.useRef<ChatResponseState>(IDLE_CHAT_RESPONSE)
+  // Response actions can run before React commits, so they need the latest synchronous values.
+  const responseRef = React.useRef<Map<string, ActiveChatResponse>>(new Map())
+  const isCreatingSessionRef = React.useRef(false)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
-  const [idleChat] = React.useState(
-    () =>
-      new Chat<MicoUIMessage>({
-        id: 'empty-chat',
-        transport: new ElectronChatTransport(window.api.chat, {
-          conversationId: 'empty-chat',
-          getThinkingEffort
-        })
-      })
-  )
-
   const setThinkingEffort = React.useCallback(
     (next: ThinkingSelection): void => {
       thinkingEffortStore.set(next)
@@ -116,39 +131,80 @@ function useChatWorkspaceState(): ChatWorkspace {
     }
   }, [thinkingEffortStore])
 
-  const setResponseState = React.useCallback((next: ChatResponseState): void => {
-    responseRef.current = next
-    setResponse(next)
+  React.useEffect(() => {
+    let active = true
+
+    void window.api.sessions.list().then(
+      (sessions) => {
+        if (!active) return
+
+        setConversations((current) =>
+          current.length ? current : sessions.map(({ id, title }) => ({ id, title }))
+        )
+      },
+      () => {
+        if (active) setConversations([])
+      }
+    )
+
+    return () => {
+      active = false
+    }
   }, [])
 
-  const settleResponse = React.useCallback(
-    (conversationId: string): void => {
-      if (
-        responseRef.current.status !== 'idle' &&
-        responseRef.current.conversationId === conversationId
-      ) {
-        setResponseState(IDLE_CHAT_RESPONSE)
-      }
-    },
-    [setResponseState]
+  React.useEffect(
+    () =>
+      window.api.sessions.onTitleUpdated(({ conversationId, title }) => {
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === conversationId ? { ...conversation, title } : conversation
+          )
+        )
+
+        const session = sessionsRef.current.get(conversationId)
+        if (session) session.conversation = { ...session.conversation, title }
+      }),
+    []
   )
 
+  const setResponseState = React.useCallback((next: ActiveChatResponse): void => {
+    responseRef.current.set(next.conversationId, next)
+    setResponses(new Map(responseRef.current))
+    setRespondingConversationIds((current) => {
+      const currentlyResponding = current.has(next.conversationId)
+      const nextResponding = isResponding(next)
+      if (currentlyResponding === nextResponding) return current
+
+      const updated = new Set(current)
+      if (nextResponding) updated.add(next.conversationId)
+      else updated.delete(next.conversationId)
+      return updated
+    })
+  }, [])
+
+  const settleResponse = React.useCallback((conversationId: string): void => {
+    if (!responseRef.current.delete(conversationId)) return
+    setResponses(new Map(responseRef.current))
+    setRespondingConversationIds((current) => {
+      if (!current.has(conversationId)) return current
+
+      const updated = new Set(current)
+      updated.delete(conversationId)
+      return updated
+    })
+  }, [])
+
   const createSession = React.useCallback(
-    (conversation: Conversation): ChatSession => {
+    (conversation: Conversation, messages: ChatMessage[] = []): ChatSession => {
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
+        messages: toUiMessages(messages),
         transport: new ElectronChatTransport(window.api.chat, {
           conversationId: conversation.id,
           getThinkingEffort,
           onStatusChange: (status) => {
-            const currentResponse = responseRef.current
-            if (
-              currentResponse.status === 'idle' ||
-              currentResponse.status === 'error' ||
-              currentResponse.conversationId !== conversation.id
-            ) {
-              return
-            }
+            const currentResponse = responseRef.current.get(conversation.id)
+            if (!currentResponse || currentResponse.status === 'error') return
 
             if (status.type === 'retrying') {
               setResponseState({
@@ -157,7 +213,10 @@ function useChatWorkspaceState(): ChatWorkspace {
                 ...status,
                 startedAt: Date.now()
               })
-            } else if (currentResponse.status === 'retrying') {
+            } else if (
+              currentResponse.status === 'submitted' ||
+              currentResponse.status === 'retrying'
+            ) {
               setResponseState({ status: 'streaming', conversationId: conversation.id })
             }
           }
@@ -180,30 +239,11 @@ function useChatWorkspaceState(): ChatWorkspace {
     [getThinkingEffort, setResponseState, settleResponse]
   )
 
-  const subscribedChat = activeSession?.chat ?? idleChat
-  const { messages: subscribedMessages, status: subscribedStatus } = useChat<MicoUIMessage>({
-    chat: subscribedChat,
-    throttle: STREAMING_UPDATE_THROTTLE_MS
-  })
-  const activeMessages = activeSession ? subscribedMessages : EMPTY_MESSAGES
-
-  // Do not let a newly selected session inherit the status of another conversation's response.
   React.useEffect(() => {
-    const currentResponse = responseRef.current
+    if (!pendingMessage) return
 
-    if (
-      activeSession &&
-      (currentResponse.status === 'submitted' || currentResponse.status === 'streaming') &&
-      currentResponse.conversationId === activeSession.conversationId &&
-      (subscribedStatus === 'submitted' || subscribedStatus === 'streaming') &&
-      currentResponse.status !== subscribedStatus
-    ) {
-      setResponseState({
-        status: subscribedStatus,
-        conversationId: activeSession.conversationId
-      })
-    }
-  }, [activeSession, setResponseState, subscribedStatus])
+    void pendingMessage.session.chat.sendMessage({ text: pendingMessage.content })
+  }, [pendingMessage])
 
   const startNewChat = React.useCallback((): void => {
     setActiveSession(null)
@@ -213,83 +253,118 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const selectConversation = React.useCallback(
     (conversationId: string, { focusComposer = true }: { focusComposer?: boolean } = {}): void => {
-      const session = sessionsRef.current.get(conversationId)
-      if (!session) return
+      const existing = sessionsRef.current.get(conversationId)
+      if (existing) {
+        setActiveSession({ conversationId, chat: existing.chat })
+        if (focusComposer) setComposerFocusKey((key) => key + 1)
+        return
+      }
 
-      setActiveSession({ conversationId, chat: session.chat })
-      if (focusComposer) setComposerFocusKey((key) => key + 1)
+      void window.api.sessions.load(conversationId).then((persisted) => {
+        const session = createSession(
+          { id: persisted.id, title: persisted.title },
+          persisted.messages
+        )
+        setActiveSession({ conversationId: persisted.id, chat: session.chat })
+        if (focusComposer) setComposerFocusKey((key) => key + 1)
+      })
     },
-    []
+    [createSession]
   )
 
   const renameConversation = React.useCallback((conversationId: string, title: string): void => {
     const trimmedTitle = title.trim()
-    if (!trimmedTitle || !sessionsRef.current.has(conversationId)) return
+    if (!trimmedTitle) return
 
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === conversationId ? { ...conversation, title: trimmedTitle } : conversation
-      )
-    )
+    void window.api.sessions
+      .rename({ sessionId: conversationId, title: trimmedTitle })
+      .then((summary) => {
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === conversationId
+              ? { ...conversation, title: summary.title }
+              : conversation
+          )
+        )
 
-    const session = sessionsRef.current.get(conversationId)
-    if (session) session.conversation = { ...session.conversation, title: trimmedTitle }
+        const session = sessionsRef.current.get(conversationId)
+        if (session) session.conversation = { ...session.conversation, title: summary.title }
+      })
+      .catch(() => undefined)
   }, [])
 
   const deleteConversation = React.useCallback(
     (conversationId: string): void => {
       const session = sessionsRef.current.get(conversationId)
-      if (!session) return
-
-      const currentResponse = responseRef.current
-      if (currentResponse.status !== 'idle' && currentResponse.conversationId === conversationId) {
-        void session.chat.stop()
-        setResponseState(IDLE_CHAT_RESPONSE)
+      const deletePersistedSession = async (): Promise<void> => {
+        const currentResponse = responseRef.current.get(conversationId)
+        if (session && currentResponse) {
+          await session.chat.stop()
+          settleResponse(conversationId)
+        }
+        await window.api.sessions.delete(conversationId)
+        sessionsRef.current.delete(conversationId)
+        setConversations((current) =>
+          current.filter((conversation) => conversation.id !== conversationId)
+        )
+        setActiveSession((current) => (current?.conversationId === conversationId ? null : current))
       }
 
-      sessionsRef.current.delete(conversationId)
-      setConversations((current) =>
-        current.filter((conversation) => conversation.id !== conversationId)
-      )
-      setActiveSession((current) => (current?.conversationId === conversationId ? null : current))
+      void deletePersistedSession()
     },
-    [setResponseState]
+    [settleResponse]
   )
 
   const sendMessage = React.useCallback(
     (content: string): void => {
+      if (!content.trim()) return
+
+      const existingSession = activeSession
+        ? sessionsRef.current.get(activeSession.conversationId)
+        : undefined
+      const currentResponse = existingSession
+        ? responseRef.current.get(existingSession.conversation.id)
+        : undefined
+
       if (
-        !content.trim() ||
-        responseRef.current.status === 'submitted' ||
-        responseRef.current.status === 'streaming' ||
-        responseRef.current.status === 'retrying'
+        currentResponse?.status === 'submitted' ||
+        currentResponse?.status === 'streaming' ||
+        currentResponse?.status === 'retrying'
       ) {
         return
       }
 
-      let session = activeSession
-        ? sessionsRef.current.get(activeSession.conversationId)
-        : undefined
-
-      if (!session) {
-        const conversation = { id: crypto.randomUUID(), title: 'New chat' }
-        session = createSession(conversation)
-        setConversations((current) => [...current, conversation])
-        setActiveSession({ conversationId: conversation.id, chat: session.chat })
+      if (existingSession) {
+        setResponseState({ status: 'submitted', conversationId: existingSession.conversation.id })
+        void existingSession.chat.sendMessage({ text: content })
+        return
       }
 
-      setResponseState({ status: 'submitted', conversationId: session.conversation.id })
-      void session.chat.sendMessage({ text: content })
+      if (isCreatingSessionRef.current) return
+
+      isCreatingSessionRef.current = true
+      void window.api.sessions
+        .create({ title: 'New chat' })
+        .then((summary) => {
+          const conversation = { id: summary.id, title: summary.title }
+          const session = createSession(conversation)
+          setConversations((current) => [...current, conversation])
+          setActiveSession({ conversationId: conversation.id, chat: session.chat })
+          setResponseState({ status: 'submitted', conversationId: conversation.id })
+          setPendingMessage({ content, session })
+        })
+        .finally(() => {
+          isCreatingSessionRef.current = false
+        })
     },
     [activeSession, createSession, setResponseState]
   )
 
   const stopResponse = React.useCallback((): void => {
-    const currentResponse = responseRef.current
-    if (
-      currentResponse.status === 'idle' ||
-      currentResponse.conversationId !== activeSession?.conversationId
-    ) {
+    const currentResponse = activeSession
+      ? responseRef.current.get(activeSession.conversationId)
+      : undefined
+    if (!currentResponse || currentResponse.conversationId !== activeSession?.conversationId) {
       return
     }
 
@@ -320,9 +395,11 @@ function useChatWorkspaceState(): ChatWorkspace {
   }, [activeSession, settleResponse])
 
   const retryResponse = React.useCallback((): void => {
-    const currentResponse = responseRef.current
+    const currentResponse = activeSession
+      ? responseRef.current.get(activeSession.conversationId)
+      : undefined
     if (
-      currentResponse.status !== 'error' ||
+      currentResponse?.status !== 'error' ||
       currentResponse.conversationId !== activeSession?.conversationId
     ) {
       return
@@ -341,9 +418,8 @@ function useChatWorkspaceState(): ChatWorkspace {
       for (const { chat } of sessionsRef.current.values()) {
         void chat.stop()
       }
-      void idleChat.stop()
     },
-    [idleChat]
+    []
   )
 
   const activeConversation = React.useMemo(
@@ -354,13 +430,17 @@ function useChatWorkspaceState(): ChatWorkspace {
         : null,
     [activeSession, conversations]
   )
-
+  const activeChat = activeSession?.chat ?? null
+  const response = activeSession
+    ? (responses.get(activeSession.conversationId) ?? IDLE_CHAT_RESPONSE)
+    : IDLE_CHAT_RESPONSE
   return React.useMemo(
     () => ({
       conversations,
       activeConversation,
-      activeMessages,
+      activeChat,
       response,
+      respondingConversationIds,
       reasoningCapabilities,
       thinkingEffort,
       setThinkingEffort,
@@ -375,13 +455,14 @@ function useChatWorkspaceState(): ChatWorkspace {
     }),
     [
       activeConversation,
-      activeMessages,
+      activeChat,
       composerFocusKey,
       conversations,
       deleteConversation,
       renameConversation,
       response,
       reasoningCapabilities,
+      respondingConversationIds,
       retryResponse,
       selectConversation,
       sendMessage,

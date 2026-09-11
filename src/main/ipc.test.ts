@@ -49,9 +49,16 @@ function createHarness() {
     selectProvider: vi.fn(),
     testModel: vi.fn()
   }
+  const session = {
+    createSession: vi.fn(),
+    deleteSession: vi.fn(),
+    listSessions: vi.fn(),
+    loadSession: vi.fn(),
+    renameSession: vi.fn()
+  }
 
   registerIpc(
-    { mainWindow, preference, chat, provider },
+    { mainWindow, preference, chat, provider, session },
     {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
@@ -59,7 +66,7 @@ function createHarness() {
     }
   )
 
-  return { chat, handlers, mainWindow, preference, provider }
+  return { chat, handlers, mainWindow, preference, provider, session }
 }
 
 function createEvent({
@@ -123,17 +130,28 @@ describe('registerIpc chat handlers', () => {
       messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }]
     }
     let emit: ((event: ChatStreamEvent) => void) | undefined
-    chat.start.mockImplementation((_input, sink) => {
+    let emitTitleUpdated: ((update: { conversationId: string; title: string }) => void) | undefined
+    chat.start.mockImplementation((_input, sink, titleSink) => {
       emit = sink
+      emitTitleUpdated = titleSink
     })
 
     handlers.get(IpcChannel.Chat_Start)?.(event, request)
     emit?.({ type: 'finish', requestId: 'request-1' })
+    emitTitleUpdated?.({ conversationId: 'chat-1', title: 'Greet the user' })
 
-    expect(chat.start).toHaveBeenCalledWith({ ownerId: '42', request }, expect.any(Function))
+    expect(chat.start).toHaveBeenCalledWith(
+      { ownerId: '42', request },
+      expect.any(Function),
+      expect.any(Function)
+    )
     expect(sender.send).toHaveBeenCalledWith(IpcChannel.Chat_Event, {
       type: 'finish',
       requestId: 'request-1'
+    })
+    expect(sender.send).toHaveBeenCalledWith(IpcChannel.Sessions_TitleUpdated, {
+      conversationId: 'chat-1',
+      title: 'Greet the user'
     })
   })
 
@@ -193,6 +211,85 @@ describe('registerIpc chat handlers', () => {
 
     expect(sender.send).not.toHaveBeenCalled()
     expect(chat.abortAll).toHaveBeenCalledWith('42')
+  })
+})
+
+describe('registerIpc session handlers', () => {
+  it('returns session summaries only to a trusted renderer', () => {
+    const { handlers, mainWindow, session } = createHarness()
+    const trusted = createEvent({ id: 42 })
+    const untrusted = createEvent({ id: 43 })
+    const summaries = [
+      {
+        id: 'session-1',
+        title: 'Saved chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2
+      }
+    ]
+    session.listSessions.mockReturnValue(summaries)
+    mainWindow.isTrustedRendererUrl.mockReturnValueOnce(true).mockReturnValueOnce(false)
+
+    expect(handlers.get(IpcChannel.Sessions_List)?.(trusted.event)).toEqual(summaries)
+    expect(() => handlers.get(IpcChannel.Sessions_List)?.(untrusted.event)).toThrow('Untrusted')
+  })
+
+  it('validates and delegates session mutations for a trusted renderer', () => {
+    const { handlers, session } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const summary = {
+      id: 'session-1',
+      title: 'Saved chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 2,
+      lastActivityAt: 2
+    }
+    const persisted = { ...summary, messages: [] }
+    session.createSession.mockReturnValue(summary)
+    session.loadSession.mockReturnValue(persisted)
+    session.renameSession.mockReturnValue(summary)
+
+    expect(handlers.get(IpcChannel.Sessions_Create)?.(event, { title: 'Saved chat' })).toEqual(
+      summary
+    )
+    expect(handlers.get(IpcChannel.Sessions_Load)?.(event, 'session-1')).toEqual(persisted)
+    expect(handlers.get(IpcChannel.Sessions_Delete)?.(event, 'session-1')).toBeUndefined()
+    expect(
+      handlers.get(IpcChannel.Sessions_Rename)?.(event, {
+        sessionId: 'session-1',
+        title: 'Renamed chat'
+      })
+    ).toEqual(summary)
+    expect(session.createSession).toHaveBeenCalledWith({
+      title: 'Saved chat',
+      defaultProfile: null
+    })
+    expect(session.loadSession).toHaveBeenCalledWith('session-1')
+    expect(session.deleteSession).toHaveBeenCalledWith('session-1')
+    expect(session.renameSession).toHaveBeenCalledWith('session-1', 'Renamed chat')
+  })
+
+  it('rejects invalid session input before delegation', () => {
+    const { handlers, session } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    expect(() => handlers.get(IpcChannel.Sessions_Create)?.(event, { title: '' })).toThrow(
+      'Invalid session title'
+    )
+    expect(() => handlers.get(IpcChannel.Sessions_Load)?.(event, '')).toThrow('Invalid session ID')
+    expect(() => handlers.get(IpcChannel.Sessions_Delete)?.(event, '')).toThrow(
+      'Invalid session ID'
+    )
+    expect(() =>
+      handlers.get(IpcChannel.Sessions_Rename)?.(event, { sessionId: '', title: '' })
+    ).toThrow('Invalid session rename')
+    expect(session.createSession).not.toHaveBeenCalled()
+    expect(session.loadSession).not.toHaveBeenCalled()
+    expect(session.deleteSession).not.toHaveBeenCalled()
+    expect(session.renameSession).not.toHaveBeenCalled()
   })
 })
 

@@ -3,7 +3,7 @@ import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import * as React from 'react'
 
 import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
-import { ChatMessageList } from './conversation/chat-message-list'
+import { SubscribedChatMessageList } from './conversation/chat-message-list'
 import { EmptyConversation } from './empty-conversation'
 import './chat-main.css'
 
@@ -69,14 +69,16 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
             className="chat-paper__conversation flex min-h-0 flex-1"
             key={workspace.activeConversation.id}
           >
-            <ChatMessageList
-              conversationId={workspace.activeConversation.id}
-              errorMessage={errorMessage}
-              isResponding={isActiveResponse}
-              messages={workspace.activeMessages}
-              onRetry={errorMessage ? workspace.retryResponse : undefined}
-              retry={retry}
-            />
+            {workspace.activeChat && (
+              <SubscribedChatMessageList
+                chat={workspace.activeChat}
+                conversationId={workspace.activeConversation.id}
+                errorMessage={errorMessage}
+                isResponding={isActiveResponse}
+                onRetry={errorMessage ? workspace.retryResponse : undefined}
+                retry={retry}
+              />
+            )}
           </div>
           {composer}
         </>

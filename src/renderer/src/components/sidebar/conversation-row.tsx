@@ -17,7 +17,8 @@ import {
   IconMenuButton,
   Input,
   SidebarMenuButton,
-  SidebarMenuItem
+  SidebarMenuItem,
+  Spinner
 } from '@mico/ui'
 import type { Conversation } from '@renderer/types/chat'
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
@@ -25,20 +26,45 @@ import * as React from 'react'
 
 import './conversation-row.css'
 
+const SPINNER_PHASE_LOCK_DELAY_MS = 500
+const SPINNER_ANIMATION_DURATION_MS = 1000
+
 type ConversationRowProps = {
   conversation: Conversation
+  isResponding: boolean
   selected: boolean
-  onSelect: (options?: { focusComposer?: boolean }) => void
-  onRename: (title: string) => void
-  onDelete: () => void
+  onDeleteConversation: (conversationId: string) => void
+  onRenameConversation: (conversationId: string, title: string) => void
+  onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
 }
 
-function ConversationRow({
+function ConversationRowStatus(): React.JSX.Element {
+  const [animationDelay, setAnimationDelay] = React.useState<number | null>(null)
+
+  React.useEffect(() => {
+    const timeout = window.setTimeout(
+      () => setAnimationDelay(-(Date.now() % SPINNER_ANIMATION_DURATION_MS)),
+      SPINNER_PHASE_LOCK_DELAY_MS
+    )
+    return () => window.clearTimeout(timeout)
+  }, [])
+
+  return (
+    <Spinner
+      aria-label="Generating response"
+      className="conversation-row__status size-3.5 text-text-tertiary"
+      style={animationDelay === null ? undefined : { animationDelay: `${animationDelay}ms` }}
+    />
+  )
+}
+
+function ConversationRowComponent({
   conversation,
+  isResponding,
   selected,
-  onSelect,
-  onRename,
-  onDelete
+  onDeleteConversation,
+  onRenameConversation,
+  onSelectConversation
 }: ConversationRowProps): React.JSX.Element {
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
@@ -68,12 +94,12 @@ function ConversationRow({
 
   const handleDoubleClick = (): void => {
     // Keep focus on the title being edited instead of moving it to the composer.
-    onSelect({ focusComposer: false })
+    onSelectConversation(conversation.id, { focusComposer: false })
     beginRename()
   }
 
   const commitRename = (): void => {
-    if (!cancelledRef.current) onRename(draft.trim())
+    if (!cancelledRef.current) onRenameConversation(conversation.id, draft.trim())
     setEditing(false)
   }
 
@@ -83,7 +109,7 @@ function ConversationRow({
     setDeleteConfirmationOpen(false)
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       // Do not delay deletion behind an animation the user asked to suppress.
-      onDelete()
+      onDeleteConversation(conversation.id)
       return
     }
 
@@ -99,7 +125,7 @@ function ConversationRow({
       return
     }
 
-    onDelete()
+    onDeleteConversation(conversation.id)
   }
 
   return (
@@ -109,6 +135,7 @@ function ConversationRow({
           aria-busy={deleting || undefined}
           className="conversation-row mx-1.5 my-px"
           data-deleting={deleting || undefined}
+          data-responding={isResponding || undefined}
           onAnimationEnd={handleDeleteAnimationEnd}
         >
           {editing ? (
@@ -145,7 +172,7 @@ function ConversationRow({
               className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
               disabled={deleting}
               isActive={selected}
-              onClick={() => onSelect()}
+              onClick={() => onSelectConversation(conversation.id)}
               onDoubleClick={handleDoubleClick}
               tooltip={conversation.title}
             >
@@ -179,6 +206,7 @@ function ConversationRow({
               </IconMenuButton>
             </div>
           )}
+          {!editing && !deleting && isResponding && <ConversationRowStatus />}
           <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>
@@ -211,5 +239,7 @@ function ConversationRow({
     </ContextMenu>
   )
 }
+
+const ConversationRow = React.memo(ConversationRowComponent)
 
 export { ConversationRow }

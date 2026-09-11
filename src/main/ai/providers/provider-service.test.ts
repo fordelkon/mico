@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { ProviderDatabase } from '../data/provider-database'
+import { ProviderDatabase } from '../../data/provider-database'
 import { ProviderService } from './provider-service'
 
 type CreateServiceOptions = {
