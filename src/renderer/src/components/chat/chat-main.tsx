@@ -1,11 +1,16 @@
+import { Spinner } from '@mico/ui'
 import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import * as React from 'react'
 
 import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
-import { SubscribedChatMessageList } from './conversation/chat-message-list'
 import { EmptyConversation } from './empty-conversation'
 import './chat-main.css'
+
+const SubscribedChatMessageList = React.lazy(async () => {
+  const module = await import('./conversation/chat-message-list')
+  return { default: module.SubscribedChatMessageList }
+})
 
 type ChatMainProps = {
   workspace: ChatWorkspace
@@ -70,14 +75,22 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
             key={workspace.activeConversation.id}
           >
             {workspace.activeChat && (
-              <SubscribedChatMessageList
-                chat={workspace.activeChat}
-                conversationId={workspace.activeConversation.id}
-                errorMessage={errorMessage}
-                isResponding={isActiveResponse}
-                onRetry={errorMessage ? workspace.retryResponse : undefined}
-                retry={retry}
-              />
+              <React.Suspense
+                fallback={
+                  <div className="flex min-h-0 flex-1 items-center justify-center">
+                    <Spinner className="size-5 text-text-tertiary" />
+                  </div>
+                }
+              >
+                <SubscribedChatMessageList
+                  chat={workspace.activeChat}
+                  conversationId={workspace.activeConversation.id}
+                  errorMessage={errorMessage}
+                  isResponding={isActiveResponse}
+                  onRetry={errorMessage ? workspace.retryResponse : undefined}
+                  retry={retry}
+                />
+              </React.Suspense>
             )}
           </div>
           {composer}

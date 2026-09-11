@@ -103,3 +103,4 @@ function SettingsMain({
 }
 
 export { SettingsMain }
+export default SettingsMain

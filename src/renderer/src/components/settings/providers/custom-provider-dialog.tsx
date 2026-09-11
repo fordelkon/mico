@@ -75,7 +75,7 @@ const customProviderLogoIcons = customProviderLogoSources
   .map(({ id, source }) => ({
     id,
     label: formatLogoLabel(id),
-    preview: <img alt="" aria-hidden="true" className="size-5" src={source} />
+    preview: <img alt="" aria-hidden="true" className="size-5" loading="lazy" src={source} />
   }))
   .sort((left, right) => left.label.localeCompare(right.label)) satisfies CustomProviderIcon[]
 

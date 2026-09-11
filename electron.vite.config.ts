@@ -30,6 +30,9 @@ export default defineConfig({
     }
   },
   renderer: {
+    build: {
+      assetsInlineLimit: 0
+    },
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),

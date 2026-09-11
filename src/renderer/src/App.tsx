@@ -1,8 +1,7 @@
-import { Separator, SidebarInset, SidebarProvider } from '@mico/ui'
+import { Separator, SidebarInset, SidebarProvider, Spinner } from '@mico/ui'
 import * as React from 'react'
 
 import { ChatMain } from './components/chat/chat-main'
-import { SettingsMain } from './components/settings/settings-main'
 import { ProviderLibraryProvider } from './components/settings/providers/provider-library'
 import { useProviderLibrary } from './components/settings/providers/provider-library'
 import { AppSidebar } from './components/sidebar/app-sidebar'
@@ -10,6 +9,8 @@ import { WindowControls } from './components/window-controls/window-controls'
 import { useChatWorkspaceState } from './hooks/chat/use-chat-workspace-state'
 import { selectConversationWithPaperTransition } from '@renderer/utils/conversation-paper-transition'
 import { transitionSettingsPage } from '@renderer/utils/settings-paper-transition'
+
+const SettingsMain = React.lazy(() => import('./components/settings/settings-main'))
 
 function AppContent(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
@@ -89,7 +90,15 @@ function AppContent(): React.JSX.Element {
         data-page={activePage}
       >
         {activePage === 'settings' ? (
-          <SettingsMain page={settingsPage} />
+          <React.Suspense
+            fallback={
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <Spinner className="size-5 text-text-tertiary" />
+              </div>
+            }
+          >
+            <SettingsMain page={settingsPage} />
+          </React.Suspense>
         ) : (
           <ChatMain workspace={workspace} />
         )}
