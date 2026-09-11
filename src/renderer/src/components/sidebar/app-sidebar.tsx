@@ -250,4 +250,6 @@ function AppSidebar({
   )
 }
 
-export { AppSidebar, type AppSidebarProps }
+const AppSidebarMemo = React.memo(AppSidebar)
+
+export { AppSidebarMemo as AppSidebar, type AppSidebarProps }

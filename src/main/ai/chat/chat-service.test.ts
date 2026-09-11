@@ -246,6 +246,48 @@ describe('ChatService', () => {
     ])
   })
 
+  it('preserves truncation behavior after a chunk exactly fills the cap', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+    const events: ChatStreamEvent[] = []
+    let resolveFinish: () => void
+    const finished = new Promise<void>((resolve) => {
+      resolveFinish = resolve
+    })
+    const service = new ChatService(
+      () =>
+        createProvider(async () =>
+          streamFrom([
+            { type: 'text-delta', id: 'part-1', delta: 'abcdef' },
+            { type: 'text-delta', id: 'part-1', delta: 'g' }
+          ])
+        ),
+      { getSelectedChatConfiguration: () => configuration, runtime, maxAssistantTextChars: 6 }
+    )
+
+    service.start(
+      { ownerId: 'window-1', request: { ...request, conversationId: session.id } },
+      (event) => {
+        events.push(event)
+        if (event.type === 'finish') resolveFinish()
+      }
+    )
+
+    await finished
+    expect(runtime.loadSession(session.id).messages.at(-1)).toEqual({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'abcde…' }]
+    })
+    expect(events).toEqual([
+      {
+        type: 'chunk',
+        requestId: 'request-1',
+        chunk: { type: 'text-delta', id: 'part-1', delta: 'abcdef' }
+      },
+      { type: 'finish', requestId: 'request-1' }
+    ])
+  })
+
   it('completes a persisted run when the provider returns no visible text', async () => {
     const { database, runtime } = await createRuntime()
     const session = runtime.createSession({ title: 'Session', defaultProfile: null })

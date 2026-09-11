@@ -235,6 +235,27 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
+  it('keeps the responding conversation set stable when only response status changes', async () => {
+    const api = new FakeChatAPI()
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    act(() => result.current.sendMessage('Hello'))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    const respondingConversationIds = result.current.respondingConversationIds
+
+    act(() => {
+      api.emit({
+        type: 'chunk',
+        requestId: api.startedRequests[0].requestId,
+        chunk: { type: 'text-start', id: 'part-1' }
+      })
+    })
+
+    await waitFor(() => expect(result.current.response.status).toBe('streaming'))
+    expect(result.current.respondingConversationIds).toBe(respondingConversationIds)
+  })
+
   it('batches rapid streamed text updates before committing the transcript', async () => {
     vi.useFakeTimers()
     const api = new FakeChatAPI()

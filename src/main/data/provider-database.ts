@@ -43,6 +43,8 @@ class ProviderDatabase {
 
     const sqlite = this.dependencies.openDatabase(join(userDataPath, 'providers.db'))
     try {
+      sqlite.pragma('journal_mode = WAL')
+      sqlite.pragma('synchronous = NORMAL')
       sqlite.pragma('foreign_keys = ON')
       sqlite.exec(`
         CREATE TABLE IF NOT EXISTS provider_schema_migrations (

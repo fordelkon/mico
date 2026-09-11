@@ -173,7 +173,7 @@ class ChatService {
     onTitleUpdated?: (update: SessionTitleUpdate) => void
   }): Promise<void> {
     let receivedChunk = false
-    let assistantText = ''
+    const assistantTextBuilder = new CappedTextBuilder(this.maxAssistantTextChars)
 
     try {
       const provider = this.resolveProvider()
@@ -215,13 +215,8 @@ class ChatService {
             if (!run.controller.signal.aborted) {
               receivedChunk = true
               if (chunk.type === 'text-delta') {
-                const previousText = assistantText
-                assistantText = appendCappedText(
-                  assistantText,
-                  chunk.delta,
-                  this.maxAssistantTextChars
-                )
-                const visibleDelta = assistantText.slice(previousText.length)
+                // Chunks append in O(delta); the full string is only materialized when read.
+                const visibleDelta = assistantTextBuilder.append(chunk.delta)
                 if (visibleDelta) {
                   emit({
                     type: 'chunk',
@@ -239,7 +234,7 @@ class ChatService {
             if (run.runId) {
               this.runtime?.finalizeRun(run.runId, {
                 role: 'assistant',
-                parts: [{ type: 'text', text: assistantText }]
+                parts: [{ type: 'text', text: assistantTextBuilder.toString() }]
               })
             }
             emit({ type: 'finish', requestId: request.requestId })
@@ -345,16 +340,70 @@ class ChatService {
   }
 }
 
-function appendCappedText(current: string, delta: string, maxLength: number): string {
-  if (current.endsWith(TRUNCATION_MARKER)) return current
-  if (current.length + delta.length <= maxLength) return current + delta
+/**
+ * Accumulates streamed text up to `maxLength` characters without re-joining the
+ * whole string on every delta. Once truncated, further deltas are dropped and
+ * `append` returns an empty visible delta.
+ */
+class CappedTextBuilder {
+  #chunks: string[] = []
+  #length = 0
+  #sealed = false
+  readonly #maxLength: number
 
-  const contentLength = Math.max(0, maxLength - TRUNCATION_MARKER.length)
-  const visibleText =
-    current.length >= contentLength
-      ? current.slice(0, contentLength)
-      : current + delta.slice(0, contentLength - current.length)
-  return `${visibleText}${TRUNCATION_MARKER}`
+  constructor(maxLength: number) {
+    this.#maxLength = maxLength
+  }
+
+  append(delta: string): string {
+    if (this.#sealed) return ''
+
+    if (this.#length + delta.length <= this.#maxLength) {
+      this.#chunks.push(delta)
+      this.#length += delta.length
+      if (delta.endsWith(TRUNCATION_MARKER)) this.#sealed = true
+      return delta
+    }
+
+    const contentLength = Math.max(0, this.#maxLength - TRUNCATION_MARKER.length)
+    if (this.#length >= contentLength) {
+      const previousLength = this.#length
+      this.#truncate(contentLength)
+      this.#chunks.push(TRUNCATION_MARKER)
+      this.#length += TRUNCATION_MARKER.length
+      this.#sealed = true
+      return previousLength < this.#length
+        ? TRUNCATION_MARKER.slice(previousLength - contentLength)
+        : ''
+    }
+
+    const remaining = contentLength - this.#length
+    const visibleText = delta.slice(0, remaining)
+    this.#chunks.push(visibleText, TRUNCATION_MARKER)
+    this.#length += visibleText.length + TRUNCATION_MARKER.length
+    this.#sealed = true
+    return visibleText + TRUNCATION_MARKER
+  }
+
+  toString(): string {
+    return this.#chunks.join('')
+  }
+
+  #truncate(length: number): void {
+    while (this.#length > length) {
+      const chunk = this.#chunks.at(-1)
+      if (chunk === undefined) break
+
+      const excessLength = this.#length - length
+      if (chunk.length <= excessLength) {
+        this.#chunks.pop()
+        this.#length -= chunk.length
+      } else {
+        this.#chunks[this.#chunks.length - 1] = chunk.slice(0, chunk.length - excessLength)
+        this.#length = length
+      }
+    }
+  }
 }
 
 function getLatestUserMessage(
