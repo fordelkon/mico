@@ -9,11 +9,15 @@ import {
 } from '@mico/ui'
 
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
+import { Chat, useChat } from '@ai-sdk/react'
 import { LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
 import { thinkingOrbStates, type ThinkingOrbState } from './thinking-block'
+
+// A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
+const STREAMING_UPDATE_THROTTLE_MS = 50
 
 function getRandomThinkingOrbState(): ThinkingOrbState {
   return thinkingOrbStates[Math.floor(Math.random() * thinkingOrbStates.length)]
@@ -36,6 +40,10 @@ type ChatMessageListProps = {
   isResponding: boolean
   onRetry?: () => void
   retry?: ChatRetryState
+}
+
+type SubscribedChatMessageListProps = Omit<ChatMessageListProps, 'messages'> & {
+  chat: Chat<MicoUIMessage>
 }
 
 type RetryProgressStyle = React.CSSProperties & { '--retry-delay': string }
@@ -152,4 +160,16 @@ function ChatMessageList({
   )
 }
 
-export { ChatMessageList }
+function SubscribedChatMessageList({
+  chat,
+  ...props
+}: SubscribedChatMessageListProps): React.JSX.Element {
+  const { messages } = useChat<MicoUIMessage>({
+    chat,
+    throttle: STREAMING_UPDATE_THROTTLE_MS
+  })
+
+  return <ChatMessageList {...props} messages={messages} />
+}
+
+export { ChatMessageList, SubscribedChatMessageList }

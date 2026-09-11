@@ -17,7 +17,7 @@ function createWorkspace(): ChatWorkspace {
   return {
     conversations: [{ id: 'conversation-1', title: 'New chat' }],
     activeConversation: { id: 'conversation-1', title: 'New chat' },
-    activeMessages: [],
+    activeChat: null,
     response: {
       status: 'retrying',
       conversationId: 'conversation-1',

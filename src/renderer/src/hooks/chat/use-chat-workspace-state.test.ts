@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { useChat } from '@ai-sdk/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatStreamEvent, ModelReasoningCapabilities } from '@shared/data/schemas/chat'
@@ -91,6 +92,64 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('keeps streamed transcript updates out of workspace renders', async () => {
+    vi.useFakeTimers()
+    const api = new FakeChatAPI()
+    exposeApi(api)
+    let workspaceRenderCount = 0
+    const { result } = renderHook(() => {
+      workspaceRenderCount += 1
+      return useChatWorkspaceState()
+    })
+
+    act(() => result.current.sendMessage('Hello'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const initialRequestId = api.startedRequests[0]?.requestId
+    if (!initialRequestId) throw new Error('Sending a message must start a request.')
+    const activeChat = result.current.activeChat
+    if (!activeChat) throw new Error('Sending a message must create an active chat.')
+    act(() => api.emit({ type: 'finish', requestId: initialRequestId }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const { result: transcript } = renderHook(() => useChat({ chat: activeChat, throttle: 50 }))
+    act(() => result.current.sendMessage('Hello again'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const requestId = api.startedRequests[1]?.requestId
+    if (!requestId) throw new Error('Sending another message must start a request.')
+
+    act(() => {
+      api.emit({ type: 'chunk', requestId, chunk: { type: 'text-start', id: 'part-1' } })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    const rendersBeforeTextDelta = workspaceRenderCount
+
+    act(() => {
+      api.emit({
+        type: 'chunk',
+        requestId,
+        chunk: { type: 'text-delta', id: 'part-1', delta: 'Streamed answer' }
+      })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+
+    expect(transcript.current.messages.at(-1)?.parts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'Streamed answer' })])
+    )
+    expect(workspaceRenderCount).toBe(rendersBeforeTextDelta)
+  })
+
   it('resets a selection that is absent from loaded capabilities', async () => {
     const api = new FakeChatAPI()
     let resolveCapabilities: (capabilities: ModelReasoningCapabilities | null) => void
@@ -181,8 +240,23 @@ describe('useChatWorkspaceState', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    const requestId = api.startedRequests[0]?.requestId
-    if (!requestId) throw new Error('Sending a message must start a request.')
+    const initialRequestId = api.startedRequests[0]?.requestId
+    if (!initialRequestId) throw new Error('Sending a message must start a request.')
+    const activeChat = result.current.activeChat
+    if (!activeChat) throw new Error('Sending a message must create an active chat.')
+    act(() => api.emit({ type: 'finish', requestId: initialRequestId }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const { result: transcript } = renderHook(() => useChat({ chat: activeChat, throttle: 50 }))
+    act(() => result.current.sendMessage('Hello again'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const requestId = api.startedRequests[1]?.requestId
+    if (!requestId) throw new Error('Sending another message must start a request.')
 
     act(() => {
       api.emit({
@@ -206,14 +280,14 @@ describe('useChatWorkspaceState', () => {
       await vi.advanceTimersByTimeAsync(0)
       await vi.advanceTimersByTimeAsync(49)
     })
-    expect(result.current.activeMessages.at(-1)?.parts).not.toEqual(
+    expect(transcript.current.messages.at(-1)?.parts).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'rapid updates' })])
     )
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1)
     })
-    expect(result.current.activeMessages.at(-1)?.parts).toEqual(
+    expect(transcript.current.messages.at(-1)?.parts).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'rapid updates' })])
     )
   })
@@ -270,7 +344,7 @@ describe('useChatWorkspaceState', () => {
 
     await waitFor(() =>
       expect(
-        result.current.activeMessages.map(({ parts, role }) => ({
+        result.current.activeChat?.messages.map(({ parts, role }) => ({
           role,
           text: parts.find((part) => part.type === 'text')?.text
         }))

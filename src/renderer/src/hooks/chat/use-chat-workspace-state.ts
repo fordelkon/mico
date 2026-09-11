@@ -1,4 +1,4 @@
-import { Chat, useChat } from '@ai-sdk/react'
+import { Chat } from '@ai-sdk/react'
 import * as React from 'react'
 
 import {
@@ -13,10 +13,6 @@ import type {
   ModelReasoningCapabilities,
   ThinkingSelection
 } from '@shared/data/schemas/chat'
-
-const EMPTY_MESSAGES: MicoUIMessage[] = []
-// A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
-const STREAMING_UPDATE_THROTTLE_MS = 50
 
 class ThinkingEffortStore {
   #value: ThinkingSelection = 'default'
@@ -33,7 +29,7 @@ class ThinkingEffortStore {
 type ChatWorkspace = {
   conversations: Conversation[]
   activeConversation: Conversation | null
-  activeMessages: MicoUIMessage[]
+  activeChat: Chat<MicoUIMessage> | null
   response: ChatResponseState
   respondingConversationIds: string[]
   reasoningCapabilities: ModelReasoningCapabilities | null
@@ -90,17 +86,6 @@ function useChatWorkspaceState(): ChatWorkspace {
   const responseRef = React.useRef<Map<string, ActiveChatResponse>>(new Map())
   const isCreatingSessionRef = React.useRef(false)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
-  const [idleChat] = React.useState(
-    () =>
-      new Chat<MicoUIMessage>({
-        id: 'empty-chat',
-        transport: new ElectronChatTransport(window.api.chat, {
-          conversationId: 'empty-chat',
-          getThinkingEffort
-        })
-      })
-  )
-
   const setThinkingEffort = React.useCallback(
     (next: ThinkingSelection): void => {
       thinkingEffortStore.set(next)
@@ -200,7 +185,10 @@ function useChatWorkspaceState(): ChatWorkspace {
                 ...status,
                 startedAt: Date.now()
               })
-            } else if (currentResponse.status === 'retrying') {
+            } else if (
+              currentResponse.status === 'submitted' ||
+              currentResponse.status === 'retrying'
+            ) {
               setResponseState({ status: 'streaming', conversationId: conversation.id })
             }
           }
@@ -223,37 +211,11 @@ function useChatWorkspaceState(): ChatWorkspace {
     [getThinkingEffort, setResponseState, settleResponse]
   )
 
-  const subscribedChat = activeSession?.chat ?? idleChat
-  const { messages: subscribedMessages, status: subscribedStatus } = useChat<MicoUIMessage>({
-    chat: subscribedChat,
-    throttle: STREAMING_UPDATE_THROTTLE_MS
-  })
-  const activeMessages = activeSession ? subscribedMessages : EMPTY_MESSAGES
-
   React.useEffect(() => {
     if (!pendingMessage) return
 
     void pendingMessage.session.chat.sendMessage({ text: pendingMessage.content })
   }, [pendingMessage])
-
-  // Do not let a newly selected session inherit the status of another conversation's response.
-  React.useEffect(() => {
-    const currentResponse = activeSession
-      ? responseRef.current.get(activeSession.conversationId)
-      : undefined
-
-    if (
-      activeSession &&
-      (currentResponse?.status === 'submitted' || currentResponse?.status === 'streaming') &&
-      (subscribedStatus === 'submitted' || subscribedStatus === 'streaming') &&
-      currentResponse.status !== subscribedStatus
-    ) {
-      setResponseState({
-        status: subscribedStatus,
-        conversationId: activeSession.conversationId
-      })
-    }
-  }, [activeSession, setResponseState, subscribedStatus])
 
   const startNewChat = React.useCallback((): void => {
     setActiveSession(null)
@@ -428,9 +390,8 @@ function useChatWorkspaceState(): ChatWorkspace {
       for (const { chat } of sessionsRef.current.values()) {
         void chat.stop()
       }
-      void idleChat.stop()
     },
-    [idleChat]
+    []
   )
 
   const activeConversation = React.useMemo(
@@ -441,6 +402,7 @@ function useChatWorkspaceState(): ChatWorkspace {
         : null,
     [activeSession, conversations]
   )
+  const activeChat = activeSession?.chat ?? null
   const response = activeSession
     ? (responses.get(activeSession.conversationId) ?? IDLE_CHAT_RESPONSE)
     : IDLE_CHAT_RESPONSE
@@ -458,7 +420,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     () => ({
       conversations,
       activeConversation,
-      activeMessages,
+      activeChat,
       response,
       respondingConversationIds,
       reasoningCapabilities,
@@ -475,7 +437,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     }),
     [
       activeConversation,
-      activeMessages,
+      activeChat,
       composerFocusKey,
       conversations,
       deleteConversation,
