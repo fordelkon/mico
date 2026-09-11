@@ -17,9 +17,9 @@ describe('ConversationRow', () => {
         <ConversationRow
           conversation={{ id: 'conversation-1', title: 'Design notes' }}
           isResponding={false}
-          onDelete={vi.fn()}
-          onRename={vi.fn()}
-          onSelect={vi.fn()}
+          onDeleteConversation={vi.fn()}
+          onRenameConversation={vi.fn()}
+          onSelectConversation={vi.fn()}
           selected={false}
         />
       </SidebarProvider>
@@ -46,9 +46,9 @@ describe('ConversationRow', () => {
         <ConversationRow
           conversation={{ id: 'conversation-1', title: 'Design notes' }}
           isResponding
-          onDelete={vi.fn()}
-          onRename={vi.fn()}
-          onSelect={vi.fn()}
+          onDeleteConversation={vi.fn()}
+          onRenameConversation={vi.fn()}
+          onSelectConversation={vi.fn()}
           selected={true}
         />
       </SidebarProvider>
@@ -71,9 +71,9 @@ describe('ConversationRow', () => {
           <ConversationRow
             conversation={{ id: 'conversation-1', title: 'Design notes' }}
             isResponding
-            onDelete={vi.fn()}
-            onRename={vi.fn()}
-            onSelect={vi.fn()}
+            onDeleteConversation={vi.fn()}
+            onRenameConversation={vi.fn()}
+            onSelectConversation={vi.fn()}
             selected={false}
           />
         </SidebarProvider>

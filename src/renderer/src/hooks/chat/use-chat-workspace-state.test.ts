@@ -215,18 +215,24 @@ describe('useChatWorkspaceState', () => {
     const { result } = renderHook(() => useChatWorkspaceState())
 
     act(() => result.current.sendMessage('First message'))
-    await waitFor(() => expect(result.current.respondingConversationIds).toEqual(['session-one']))
+    await waitFor(() =>
+      expect(result.current.respondingConversationIds).toEqual(new Set(['session-one']))
+    )
 
     act(() => result.current.startNewChat())
     act(() => result.current.sendMessage('Second message'))
 
     await waitFor(() =>
-      expect(result.current.respondingConversationIds).toEqual(['session-one', 'session-two'])
+      expect(result.current.respondingConversationIds).toEqual(
+        new Set(['session-one', 'session-two'])
+      )
     )
 
     api.emit({ type: 'finish', requestId: api.startedRequests[0].requestId })
 
-    await waitFor(() => expect(result.current.respondingConversationIds).toEqual(['session-two']))
+    await waitFor(() =>
+      expect(result.current.respondingConversationIds).toEqual(new Set(['session-two']))
+    )
   })
 
   it('batches rapid streamed text updates before committing the transcript', async () => {

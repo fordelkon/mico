@@ -33,9 +33,9 @@ type ConversationRowProps = {
   conversation: Conversation
   isResponding: boolean
   selected: boolean
-  onSelect: (options?: { focusComposer?: boolean }) => void
-  onRename: (title: string) => void
-  onDelete: () => void
+  onDeleteConversation: (conversationId: string) => void
+  onRenameConversation: (conversationId: string, title: string) => void
+  onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
 }
 
 function ConversationRowStatus(): React.JSX.Element {
@@ -58,13 +58,13 @@ function ConversationRowStatus(): React.JSX.Element {
   )
 }
 
-function ConversationRow({
+function ConversationRowComponent({
   conversation,
   isResponding,
   selected,
-  onSelect,
-  onRename,
-  onDelete
+  onDeleteConversation,
+  onRenameConversation,
+  onSelectConversation
 }: ConversationRowProps): React.JSX.Element {
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
@@ -94,12 +94,12 @@ function ConversationRow({
 
   const handleDoubleClick = (): void => {
     // Keep focus on the title being edited instead of moving it to the composer.
-    onSelect({ focusComposer: false })
+    onSelectConversation(conversation.id, { focusComposer: false })
     beginRename()
   }
 
   const commitRename = (): void => {
-    if (!cancelledRef.current) onRename(draft.trim())
+    if (!cancelledRef.current) onRenameConversation(conversation.id, draft.trim())
     setEditing(false)
   }
 
@@ -109,7 +109,7 @@ function ConversationRow({
     setDeleteConfirmationOpen(false)
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       // Do not delay deletion behind an animation the user asked to suppress.
-      onDelete()
+      onDeleteConversation(conversation.id)
       return
     }
 
@@ -125,7 +125,7 @@ function ConversationRow({
       return
     }
 
-    onDelete()
+    onDeleteConversation(conversation.id)
   }
 
   return (
@@ -172,7 +172,7 @@ function ConversationRow({
               className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
               disabled={deleting}
               isActive={selected}
-              onClick={() => onSelect()}
+              onClick={() => onSelectConversation(conversation.id)}
               onDoubleClick={handleDoubleClick}
               tooltip={conversation.title}
             >
@@ -239,5 +239,7 @@ function ConversationRow({
     </ContextMenu>
   )
 }
+
+const ConversationRow = React.memo(ConversationRowComponent)
 
 export { ConversationRow }

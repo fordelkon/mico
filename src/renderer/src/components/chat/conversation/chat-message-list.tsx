@@ -18,6 +18,11 @@ import { thinkingOrbStates, type ThinkingOrbState } from './thinking-block'
 
 // A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
 const STREAMING_UPDATE_THROTTLE_MS = 50
+const PENDING_ASSISTANT_MESSAGE = {
+  id: 'pending-assistant',
+  role: 'assistant',
+  parts: []
+} satisfies MicoUIMessage
 
 function getRandomThinkingOrbState(): ThinkingOrbState {
   return thinkingOrbStates[Math.floor(Math.random() * thinkingOrbStates.length)]
@@ -131,7 +136,7 @@ function ChatMessageList({
                     <MessageScrollerItem messageId="pending-assistant">
                       <ChatMessage
                         isStreaming
-                        message={{ id: 'pending-assistant', role: 'assistant', parts: [] }}
+                        message={PENDING_ASSISTANT_MESSAGE}
                         thinkingOrbState={thinkingOrbState}
                       />
                     </MessageScrollerItem>

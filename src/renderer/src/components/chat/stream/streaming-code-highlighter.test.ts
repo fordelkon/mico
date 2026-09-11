@@ -1,7 +1,10 @@
 import { createHighlighter, type HighlighterCore, type ThemedToken } from 'shiki'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createStreamingCodeHighlighter } from './streaming-code-highlighter'
+import {
+  createStreamingCodeHighlighter,
+  type StreamingCodeHighlight
+} from './streaming-code-highlighter'
 
 function getCode(lines: ThemedToken[][]): string {
   return lines.map((line) => line.map((token) => token.content).join('')).join('\n')
@@ -69,6 +72,48 @@ describe('createStreamingCodeHighlighter', () => {
     await vi.runAllTimersAsync()
 
     expect(publications).toHaveLength(publishedCompletedLines)
+    await session.dispose()
+  })
+
+  it('reuses completed line references across streamed updates', async () => {
+    const publications: StreamingCodeHighlight[] = []
+    const session = createStreamingCodeHighlighter({
+      createHighlighter: createTestHighlighter,
+      onTokens: (highlight) => publications.push(highlight)
+    })
+
+    await session.update({
+      code: 'const first = 1\nconst pending',
+      isStreaming: true,
+      language: 'typescript'
+    })
+    const firstLine = publications.at(-1)?.lines[0]
+
+    await session.update({
+      code: 'const first = 1\nconst second = 2\nconst pending',
+      isStreaming: true,
+      language: 'typescript'
+    })
+
+    expect(firstLine).toBeDefined()
+    expect(publications.at(-1)?.lines[0]).toBe(firstLine)
+    await session.dispose()
+  })
+
+  it('shares the published token lines with the update result', async () => {
+    const publications: StreamingCodeHighlight[] = []
+    const session = createStreamingCodeHighlighter({
+      createHighlighter: createTestHighlighter,
+      onTokens: (highlight) => publications.push(highlight)
+    })
+
+    const result = await session.update({
+      code: 'const answer = 42\n',
+      isStreaming: true,
+      language: 'typescript'
+    })
+
+    expect(result.lines).toBe(publications.at(-1)?.lines)
     await session.dispose()
   })
 

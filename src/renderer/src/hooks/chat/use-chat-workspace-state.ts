@@ -31,7 +31,7 @@ type ChatWorkspace = {
   activeConversation: Conversation | null
   activeChat: Chat<MicoUIMessage> | null
   response: ChatResponseState
-  respondingConversationIds: string[]
+  respondingConversationIds: ReadonlySet<string>
   reasoningCapabilities: ModelReasoningCapabilities | null
   thinkingEffort: ThinkingSelection
   setThinkingEffort: (thinkingEffort: ThinkingSelection) => void
@@ -408,11 +408,14 @@ function useChatWorkspaceState(): ChatWorkspace {
     : IDLE_CHAT_RESPONSE
   const respondingConversationIds = React.useMemo(
     () =>
-      [...responses.values()]
-        .filter(
-          ({ status }) => status === 'submitted' || status === 'streaming' || status === 'retrying'
-        )
-        .map(({ conversationId }) => conversationId),
+      new Set(
+        [...responses.values()]
+          .filter(
+            ({ status }) =>
+              status === 'submitted' || status === 'streaming' || status === 'retrying'
+          )
+          .map(({ conversationId }) => conversationId)
+      ),
     [responses]
   )
 

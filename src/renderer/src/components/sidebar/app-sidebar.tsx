@@ -30,7 +30,7 @@ import './app-sidebar.css'
 type AppSidebarProps = {
   conversations: Conversation[]
   activeConversationId: string | null
-  respondingConversationIds: string[]
+  respondingConversationIds: ReadonlySet<string>
   onDeleteConversation: (conversationId: string) => void
   onBackFromSettings: () => void
   onNewChat: () => void
@@ -131,11 +131,11 @@ function AppSidebar({
                   <ConversationRow
                     key={conversation.id}
                     conversation={conversation}
-                    isResponding={respondingConversationIds.includes(conversation.id)}
+                    isResponding={respondingConversationIds.has(conversation.id)}
                     selected={conversation.id === activeConversationId}
-                    onDelete={() => onDeleteConversation(conversation.id)}
-                    onRename={(title) => onRenameConversation(conversation.id, title)}
-                    onSelect={(options) => onSelectConversation(conversation.id, options)}
+                    onDeleteConversation={onDeleteConversation}
+                    onRenameConversation={onRenameConversation}
+                    onSelectConversation={onSelectConversation}
                   />
                 ))}
               </SidebarMenu>
