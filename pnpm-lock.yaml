@@ -8,30 +8,15 @@ importers:
 
   .:
     dependencies:
-      '@ai-sdk/react':
-        specifier: ^4.0.80
-        version: 4.0.80(react@19.2.8)(zod@4.4.3)
       '@electron-toolkit/preload':
         specifier: ^3.0.2
         version: 3.0.2(electron@39.8.10(supports-color@7.2.0))
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@39.8.10(supports-color@7.2.0))
-      '@lobehub/icons-static-svg':
-        specifier: ^1.94.0
-        version: 1.94.0
       '@mico/ai-providers':
         specifier: workspace:*
         version: link:packages/ai-providers
-      '@mico/ui':
-        specifier: workspace:*
-        version: link:packages/ui
-      '@shikijs/stream':
-        specifier: 4.4.3
-        version: 4.4.3(react@19.2.8)
-      '@streamdown/cjk':
-        specifier: 1.0.3
-        version: 1.0.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@7.2.0))(react@19.2.8)(supports-color@7.2.0)(unified@11.0.5)
       ai:
         specifier: ^7.0.77
         version: 7.0.77(zod@4.4.3)
@@ -44,25 +29,13 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)
-      katex:
-        specifier: 0.16.22
-        version: 0.16.22
-      lucide-react:
-        specifier: ^1.33.0
-        version: 1.33.0(react@19.2.8)
-      shiki:
-        specifier: 4.4.3
-        version: 4.4.3
-      streamdown:
-        specifier: 2.5.0
-        version: 2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@7.2.0)
-      thinking-orbs:
-        specifier: ^0.3.1
-        version: 0.3.1(react@19.2.8)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@ai-sdk/react':
+        specifier: ^4.0.80
+        version: 4.0.80(react@19.2.8)(zod@4.4.3)
       '@biomejs/biome':
         specifier: ^2.5.9
         version: 2.5.9
@@ -75,9 +48,21 @@ importers:
       '@electron/rebuild':
         specifier: ^4.2.0
         version: 4.2.0(supports-color@7.2.0)
+      '@lobehub/icons-static-svg':
+        specifier: ^1.94.0
+        version: 1.94.0
+      '@mico/ui':
+        specifier: workspace:*
+        version: link:packages/ui
       '@oxlint/plugins':
         specifier: 1.79.0
         version: 1.79.0
+      '@shikijs/stream':
+        specifier: 4.4.3
+        version: 4.4.3(react@19.2.8)
+      '@streamdown/cjk':
+        specifier: 1.0.3
+        version: 1.0.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@7.2.0))(react@19.2.8)(supports-color@7.2.0)(unified@11.0.5)
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13))
@@ -132,6 +117,12 @@ importers:
       jsdom:
         specifier: 29.1.1
         version: 29.1.1(@noble/hashes@2.3.0)
+      katex:
+        specifier: 0.16.22
+        version: 0.16.22
+      lucide-react:
+        specifier: ^1.33.0
+        version: 1.33.0(react@19.2.8)
       oxlint:
         specifier: ^1.79.0
         version: 1.79.0(oxlint-tsgolint@7.0.2001)
@@ -144,9 +135,18 @@ importers:
       react-dom:
         specifier: ^19.2.1
         version: 19.2.8(react@19.2.8)
+      shiki:
+        specifier: 4.4.3
+        version: 4.4.3
+      streamdown:
+        specifier: 2.5.0
+        version: 2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@7.2.0)
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
+      thinking-orbs:
+        specifier: ^0.3.1
+        version: 0.3.1(react@19.2.8)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
