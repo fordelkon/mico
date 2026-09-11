@@ -130,17 +130,28 @@ describe('registerIpc chat handlers', () => {
       messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }]
     }
     let emit: ((event: ChatStreamEvent) => void) | undefined
-    chat.start.mockImplementation((_input, sink) => {
+    let emitTitleUpdated: ((update: { conversationId: string; title: string }) => void) | undefined
+    chat.start.mockImplementation((_input, sink, titleSink) => {
       emit = sink
+      emitTitleUpdated = titleSink
     })
 
     handlers.get(IpcChannel.Chat_Start)?.(event, request)
     emit?.({ type: 'finish', requestId: 'request-1' })
+    emitTitleUpdated?.({ conversationId: 'chat-1', title: 'Greet the user' })
 
-    expect(chat.start).toHaveBeenCalledWith({ ownerId: '42', request }, expect.any(Function))
+    expect(chat.start).toHaveBeenCalledWith(
+      { ownerId: '42', request },
+      expect.any(Function),
+      expect.any(Function)
+    )
     expect(sender.send).toHaveBeenCalledWith(IpcChannel.Chat_Event, {
       type: 'finish',
       requestId: 'request-1'
+    })
+    expect(sender.send).toHaveBeenCalledWith(IpcChannel.Sessions_TitleUpdated, {
+      conversationId: 'chat-1',
+      title: 'Greet the user'
     })
   })
 

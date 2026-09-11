@@ -57,6 +57,18 @@ async function createService(): Promise<{
 }
 
 describe('SessionRuntimeService', () => {
+  it('keeps a manual title when an automatic title arrives later', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'New chat', defaultProfile: profile })
+
+    service.renameSession(session.id, 'Manual title')
+
+    expect(
+      service.renameSessionIfCurrentTitle(session.id, 'New chat', 'Generated title')
+    ).toBeNull()
+    expect(service.loadSession(session.id).title).toBe('Manual title')
+  })
+
   it('records completed visible history and the new message in the next context manifest', async () => {
     const { database, service } = await createService()
     const session = service.createSession({ title: 'Session', defaultProfile: profile })

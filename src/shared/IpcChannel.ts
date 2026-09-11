@@ -33,6 +33,8 @@ export enum IpcChannel {
   Sessions_Load = 'sessions:load',
   /** Changes a session title. */
   Sessions_Rename = 'sessions:rename',
+  /** Notifies the renderer that a background title generation completed. */
+  Sessions_TitleUpdated = 'sessions:title-updated',
 
   /** Adds a model entry to the provider library. */
   Providers_AddModel = 'providers:add-model',

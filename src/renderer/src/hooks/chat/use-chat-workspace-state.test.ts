@@ -9,6 +9,7 @@ import { useChatWorkspaceState } from './use-chat-workspace-state'
 class FakeChatAPI implements ChatAPI {
   readonly startedRequests: Parameters<ChatAPI['start']>[0][] = []
   readonly listeners = new Set<Parameters<ChatAPI['onEvent']>[0]>()
+  readonly titleListeners = new Set<(update: { conversationId: string; title: string }) => void>()
   readonly createSession = vi.fn(async (_input: { title: string }) => ({
     id: 'session-new',
     title: 'New chat',
@@ -43,7 +44,11 @@ class FakeChatAPI implements ChatAPI {
       createdAt: 1,
       updatedAt: 3,
       lastActivityAt: 2
-    })
+    }),
+    onTitleUpdated: (listener: (update: { conversationId: string; title: string }) => void) => {
+      this.titleListeners.add(listener)
+      return () => this.titleListeners.delete(listener)
+    }
   }
 
   async abort(): Promise<void> {}
@@ -63,6 +68,10 @@ class FakeChatAPI implements ChatAPI {
 
   emit(event: ChatStreamEvent): void {
     for (const listener of this.listeners) listener(event)
+  }
+
+  emitTitleUpdated(update: { conversationId: string; title: string }): void {
+    for (const listener of this.titleListeners) listener(update)
   }
 }
 
@@ -268,6 +277,66 @@ describe('useChatWorkspaceState', () => {
       ).toEqual([
         { role: 'user', text: 'Saved prompt' },
         { role: 'assistant', text: 'Saved answer' }
+      ])
+    )
+  })
+
+  it('persists a manual conversation rename before updating the sidebar title', async () => {
+    const api = new FakeChatAPI()
+    const rename = vi.fn(async ({ sessionId, title }: { sessionId: string; title: string }) => ({
+      id: sessionId,
+      title,
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 3,
+      lastActivityAt: 2
+    }))
+    api.sessions.rename = rename
+    api.sessions.list = async () => [
+      {
+        id: 'session-1',
+        title: 'Saved chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2
+      }
+    ]
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() => expect(result.current.conversations).toHaveLength(1))
+    act(() => result.current.renameConversation('session-1', 'Renamed chat'))
+
+    await waitFor(() =>
+      expect(rename).toHaveBeenCalledWith({ sessionId: 'session-1', title: 'Renamed chat' })
+    )
+    await waitFor(() =>
+      expect(result.current.conversations).toEqual([{ id: 'session-1', title: 'Renamed chat' }])
+    )
+  })
+
+  it('updates the sidebar when the main process generates a conversation title', async () => {
+    const api = new FakeChatAPI()
+    api.sessions.list = async () => [
+      {
+        id: 'session-1',
+        title: 'New chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2
+      }
+    ]
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() => expect(result.current.conversations).toHaveLength(1))
+    act(() => api.emitTitleUpdated({ conversationId: 'session-1', title: 'Plan release notes' }))
+
+    await waitFor(() =>
+      expect(result.current.conversations).toEqual([
+        { id: 'session-1', title: 'Plan release notes' }
       ])
     )
   })

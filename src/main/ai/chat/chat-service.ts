@@ -16,6 +16,8 @@ type ChatRun = {
   runId?: string
 }
 
+type SessionTitleUpdate = { conversationId: string; title: string }
+
 type ChatServiceOptions = {
   getSelectedChatConfiguration?: () => ChatProviderConfiguration | null
   maxAssistantTextChars?: number
@@ -28,6 +30,7 @@ type ChatServiceOptions = {
     | 'finalizeRun'
     | 'getContextMessages'
     | 'markRequestStarted'
+    | 'renameSessionIfCurrentTitle'
     | 'startTurn'
   >
 }
@@ -36,6 +39,39 @@ const DEFAULT_MAX_ATTEMPTS = 5
 const DEFAULT_RETRY_DELAY_MS = 1_000
 // The same ceiling must bound persisted text and renderer deltas so either process cannot grow alone.
 const DEFAULT_MAX_ASSISTANT_TEXT_CHARS = 256 * 1024
+const DEFAULT_SESSION_TITLE = 'New chat'
+const MAX_SESSION_TITLE_CHARS = 50
+const SESSION_TITLE_INSTRUCTIONS = `You are a conversation title generator.
+
+Your ONLY task is to generate a concise, descriptive title for the conversation.
+Output ONLY the title. Do not answer the user's request and do not include explanations.
+
+<goal>
+Generate a title that helps the user quickly recognize this conversation in a session list, distinguish it from similar conversations, and find it again through search.
+</goal>
+
+<output_rules>
+- Output exactly one title on one line only.
+- Do not use quotation marks, Markdown, a label such as "Title:", or trailing punctuation unless it is part of a technical identifier.
+- Keep the title concise: prefer 3–8 English words or roughly 8–20 Chinese characters, with a hard limit of 50 characters whenever possible.
+</output_rules>
+
+<language>
+- Use the same primary language as the user's request.
+- Preserve technical terms in their conventional form. Do not unnecessarily translate library names, APIs, filenames, commands, model names, or product names.
+</language>
+
+<title_content>
+Capture the user's actual goal rather than merely repeating the beginning of their message. Prefer the primary subject plus its operation, problem, or goal. Preserve details that make the conversation distinguishable and easy to find again, including important product names, technical concepts, files, components, libraries, error codes, model names, and relevant versions.
+</title_content>
+
+<constraints>
+- Infer the task at one level above the literal wording; remove conversational filler.
+- Prefer precise action concepts such as 修复, 排查, 优化, 实现, 配置, 重构, 迁移, 集成, 部署, 调试, 分析, 比较, 设计, 研究, 安装, 升级, or 解释 when appropriate.
+- If a file is mentioned, title the task involving it rather than the filename alone.
+- Never invent technical details or combine unrelated topics. For multiple topics, use the dominant current task.
+- Always generate a meaningful title, even for a short conversational input.
+</constraints>`
 const TRUNCATION_MARKER = '…'
 
 function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
@@ -56,6 +92,7 @@ function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
 
 class ChatService {
   private readonly runs = new Map<string, ChatRun>()
+  private readonly titleGenerationSessions = new Set<string>()
   private readonly maxAttempts: number
   private readonly maxAssistantTextChars: number
   private readonly retryDelayMs: number
@@ -89,14 +126,15 @@ class ChatService {
 
   start(
     { ownerId, request }: { ownerId: string; request: ChatStartRequest },
-    emit: (event: ChatStreamEvent) => void
+    emit: (event: ChatStreamEvent) => void,
+    onTitleUpdated?: (update: SessionTitleUpdate) => void
   ): void {
     this.abort({ ownerId, requestId: request.requestId })
 
     const key = this.getRunKey(ownerId, request.requestId)
     const run = { controller: new AbortController(), ownerId }
     this.runs.set(key, run)
-    void this.consume({ key, request, run, emit })
+    void this.consume({ key, request, run, emit, onTitleUpdated })
   }
 
   abort({ ownerId, requestId }: { ownerId: string; requestId: string }): void {
@@ -125,12 +163,14 @@ class ChatService {
     key,
     request,
     run,
-    emit
+    emit,
+    onTitleUpdated
   }: {
     key: string
     request: ChatStartRequest
     run: ChatRun
     emit: (event: ChatStreamEvent) => void
+    onTitleUpdated?: (update: SessionTitleUpdate) => void
   }): Promise<void> {
     let receivedChunk = false
     let assistantText = ''
@@ -150,6 +190,15 @@ class ChatService {
         })
         run.runId = started.runId
         this.runtime.markRequestStarted(started.runId)
+        if (started.contextBuild.sourceManifest.events.length === 1) {
+          this.startTitleGeneration(
+            provider,
+            request.conversationId,
+            getMessageText(getLatestUserMessage(request.messages)),
+            run.controller.signal,
+            onTitleUpdated
+          )
+        }
       }
 
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
@@ -243,6 +292,57 @@ class ChatService {
   private getRunKey(ownerId: string, requestId: string): string {
     return `${ownerId.length}:${ownerId}${requestId}`
   }
+
+  private startTitleGeneration(
+    provider: ChatProvider,
+    sessionId: string,
+    sourceText: string,
+    signal: AbortSignal,
+    onTitleUpdated?: (update: SessionTitleUpdate) => void
+  ): void {
+    if (!sourceText || !this.runtime || this.titleGenerationSessions.has(sessionId)) return
+
+    this.titleGenerationSessions.add(sessionId)
+    void this.generateTitle(provider, sessionId, sourceText, signal, onTitleUpdated).finally(() => {
+      this.titleGenerationSessions.delete(sessionId)
+    })
+  }
+
+  private async generateTitle(
+    provider: ChatProvider,
+    sessionId: string,
+    sourceText: string,
+    signal: AbortSignal,
+    onTitleUpdated?: (update: SessionTitleUpdate) => void
+  ): Promise<void> {
+    try {
+      const stream = await provider.stream({
+        conversationKey: `title:${sessionId}`,
+        messages: [
+          { role: 'system', parts: [{ type: 'text', text: SESSION_TITLE_INSTRUCTIONS }] },
+          { role: 'user', parts: [{ type: 'text', text: sourceText }] }
+        ],
+        thinkingEffort: 'none',
+        signal
+      })
+      let generated = ''
+      for await (const chunk of stream) {
+        if (signal.aborted) return
+        if (chunk.type === 'text-delta') generated += chunk.delta
+      }
+      const title = normalizeGeneratedTitle(generated)
+      if (title && !signal.aborted) {
+        const renamed = this.runtime?.renameSessionIfCurrentTitle(
+          sessionId,
+          DEFAULT_SESSION_TITLE,
+          title
+        )
+        if (renamed) onTitleUpdated?.({ conversationId: sessionId, title: renamed.title })
+      }
+    } catch {
+      // Title generation is best-effort and must never affect the user-visible chat response.
+    }
+  }
 }
 
 function appendCappedText(current: string, delta: string, maxLength: number): string {
@@ -263,6 +363,28 @@ function getLatestUserMessage(
   const message = [...messages].reverse().find(({ role }) => role === 'user')
   if (!message) throw new Error('Chat request must include a user message.')
   return message
+}
+
+function getMessageText(message: ChatStartRequest['messages'][number]): string {
+  return message.parts
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n')
+    .trim()
+}
+
+function normalizeGeneratedTitle(value: string): string | null {
+  const title = value
+    .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+    ?.replace(/^(?:title|标题)\s*[:：]\s*/i, '')
+    .trim()
+    .replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, '')
+    .replace(/[.!?。！？]+$/g, '')
+    .trim()
+  return title ? Array.from(title).slice(0, MAX_SESSION_TITLE_CHARS).join('') : null
 }
 
 function toExecutionProfile(

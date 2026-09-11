@@ -166,19 +166,31 @@ function registerIpc(
       })
     }
 
-    chat.start({ ownerId, request: result.data }, (chatEvent) => {
-      // A renderer crash can dispose its frame before the owning WebContents emits 'destroyed'.
-      if (!senderFrame || event.sender.isDestroyed() || senderFrame.isDestroyed()) {
-        chat.abortAll(ownerId)
-        return
-      }
+    chat.start(
+      { ownerId, request: result.data },
+      (chatEvent) => {
+        // A renderer crash can dispose its frame before the owning WebContents emits 'destroyed'.
+        if (!senderFrame || event.sender.isDestroyed() || senderFrame.isDestroyed()) {
+          chat.abortAll(ownerId)
+          return
+        }
 
-      try {
-        event.sender.send(IpcChannel.Chat_Event, chatEvent)
-      } catch {
-        chat.abortAll(ownerId)
+        try {
+          event.sender.send(IpcChannel.Chat_Event, chatEvent)
+        } catch {
+          chat.abortAll(ownerId)
+        }
+      },
+      (titleUpdate) => {
+        if (!senderFrame || event.sender.isDestroyed() || senderFrame.isDestroyed()) return
+
+        try {
+          event.sender.send(IpcChannel.Sessions_TitleUpdated, titleUpdate)
+        } catch {
+          // A title update is auxiliary metadata; a failed delivery must not stop the chat.
+        }
       }
-    })
+    )
   })
   dependencies.ipcMain.handle(IpcChannel.Chat_GetCapabilities, (event) => {
     getCallingWindow(event)

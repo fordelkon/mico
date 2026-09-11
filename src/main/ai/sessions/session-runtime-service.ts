@@ -134,6 +134,18 @@ class SessionRuntimeService {
     return toSessionSummary(this.findSession(sessionId))
   }
 
+  renameSessionIfCurrentTitle(
+    sessionId: string,
+    currentTitle: string,
+    title: string
+  ): SessionSummary | null {
+    const now = this.dependencies.now()
+    const result = this.dependencies.database.connection
+      .prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND title = ?')
+      .run(title, now, sessionId, currentTitle)
+    return result.changes ? toSessionSummary(this.findSession(sessionId)) : null
+  }
+
   deleteSession(sessionId: string): void {
     this.dependencies.database.transaction(() => {
       const active = this.dependencies.database.connection

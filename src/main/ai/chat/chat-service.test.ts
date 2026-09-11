@@ -136,6 +136,68 @@ describe('ChatService', () => {
     ])
   })
 
+  it('persists a generated title after the first user message', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
+    let titleInstructions = ''
+    const provider = createProvider(async ({ messages }) => {
+      if (messages[0]?.role === 'system') {
+        titleInstructions = messages[0].parts[0]?.type === 'text' ? messages[0].parts[0].text : ''
+        return streamFrom([{ type: 'text-delta', id: 'title-part', delta: 'Greet the user' }])
+      }
+      return streamFrom([textChunk])
+    })
+    const service = new ChatService(() => provider, {
+      getSelectedChatConfiguration: () => configuration,
+      runtime
+    })
+
+    service.start(
+      { ownerId: 'window-1', request: { ...request, conversationId: session.id } },
+      () => undefined
+    )
+
+    await waitFor(() => {
+      expect(runtime.loadSession(session.id).title).toBe('Greet the user')
+    })
+    expect(titleInstructions).toContain("Capture the user's actual goal")
+    expect(titleInstructions).toContain('Preserve technical terms')
+    expect(titleInstructions).toContain('Output exactly one title')
+  })
+
+  it('keeps the first 50 characters of a generated title', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
+    const provider = createProvider(async ({ messages }) =>
+      streamFrom(
+        messages[0]?.role === 'system'
+          ? [
+              {
+                type: 'text-delta',
+                id: 'title-part',
+                delta: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab'
+              }
+            ]
+          : [textChunk]
+      )
+    )
+    const service = new ChatService(() => provider, {
+      getSelectedChatConfiguration: () => configuration,
+      runtime
+    })
+
+    service.start(
+      { ownerId: 'window-1', request: { ...request, conversationId: session.id } },
+      () => undefined
+    )
+
+    await waitFor(() => {
+      expect(runtime.loadSession(session.id).title).toBe(
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      )
+    })
+  })
+
   it('caps assistant response text before emitting and persisting it', async () => {
     const { runtime } = await createRuntime()
     const session = runtime.createSession({ title: 'Session', defaultProfile: null })

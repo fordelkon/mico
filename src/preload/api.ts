@@ -121,7 +121,16 @@ const sessions: SessionsAPI = {
   delete: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Delete, sessionId),
   list: () => ipcRenderer.invoke(IpcChannel.Sessions_List),
   load: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Load, sessionId),
-  rename: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Rename, input)
+  rename: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Rename, input),
+  onTitleUpdated: (listener) => {
+    const wrappedListener = (
+      _event: IpcRendererEvent,
+      update: Parameters<typeof listener>[0]
+    ): void => listener(update)
+
+    ipcRenderer.on(IpcChannel.Sessions_TitleUpdated, wrappedListener)
+    return () => ipcRenderer.removeListener(IpcChannel.Sessions_TitleUpdated, wrappedListener)
+  }
 }
 
 const api = { appearance, chat, providers, sessions, windowControls }

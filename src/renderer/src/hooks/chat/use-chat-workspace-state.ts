@@ -156,6 +156,21 @@ function useChatWorkspaceState(): ChatWorkspace {
     }
   }, [])
 
+  React.useEffect(
+    () =>
+      window.api.sessions.onTitleUpdated(({ conversationId, title }) => {
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === conversationId ? { ...conversation, title } : conversation
+          )
+        )
+
+        const session = sessionsRef.current.get(conversationId)
+        if (session) session.conversation = { ...session.conversation, title }
+      }),
+    []
+  )
+
   const setResponseState = React.useCallback((next: ActiveChatResponse): void => {
     responseRef.current.set(next.conversationId, next)
     setResponses(new Map(responseRef.current))
@@ -269,16 +284,23 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const renameConversation = React.useCallback((conversationId: string, title: string): void => {
     const trimmedTitle = title.trim()
-    if (!trimmedTitle || !sessionsRef.current.has(conversationId)) return
+    if (!trimmedTitle) return
 
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === conversationId ? { ...conversation, title: trimmedTitle } : conversation
-      )
-    )
+    void window.api.sessions
+      .rename({ sessionId: conversationId, title: trimmedTitle })
+      .then((summary) => {
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === conversationId
+              ? { ...conversation, title: summary.title }
+              : conversation
+          )
+        )
 
-    const session = sessionsRef.current.get(conversationId)
-    if (session) session.conversation = { ...session.conversation, title: trimmedTitle }
+        const session = sessionsRef.current.get(conversationId)
+        if (session) session.conversation = { ...session.conversation, title: summary.title }
+      })
+      .catch(() => undefined)
   }, [])
 
   const deleteConversation = React.useCallback(
