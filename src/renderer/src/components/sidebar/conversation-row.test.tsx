@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -59,5 +59,34 @@ describe('ConversationRow', () => {
     await user.click(screen.getByRole('button', { name: 'More actions' }))
 
     expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeVisible()
+  })
+
+  it('locks a streaming indicator to the shared animation phase after its introduction', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+
+    try {
+      render(
+        <SidebarProvider>
+          <ConversationRow
+            conversation={{ id: 'conversation-1', title: 'Design notes' }}
+            isResponding
+            onDelete={vi.fn()}
+            onRename={vi.fn()}
+            onSelect={vi.fn()}
+            selected={false}
+          />
+        </SidebarProvider>
+      )
+
+      const spinner = screen.getByRole('status', { name: 'Generating response' })
+      expect(spinner).not.toHaveStyle({ animationDelay: '-500ms' })
+
+      await act(() => vi.advanceTimersByTime(500))
+
+      expect(spinner).toHaveStyle({ animationDelay: '-500ms' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -26,6 +26,9 @@ import * as React from 'react'
 
 import './conversation-row.css'
 
+const SPINNER_PHASE_LOCK_DELAY_MS = 500
+const SPINNER_ANIMATION_DURATION_MS = 1000
+
 type ConversationRowProps = {
   conversation: Conversation
   isResponding: boolean
@@ -33,6 +36,26 @@ type ConversationRowProps = {
   onSelect: (options?: { focusComposer?: boolean }) => void
   onRename: (title: string) => void
   onDelete: () => void
+}
+
+function ConversationRowStatus(): React.JSX.Element {
+  const [animationDelay, setAnimationDelay] = React.useState<number | null>(null)
+
+  React.useEffect(() => {
+    const timeout = window.setTimeout(
+      () => setAnimationDelay(-(Date.now() % SPINNER_ANIMATION_DURATION_MS)),
+      SPINNER_PHASE_LOCK_DELAY_MS
+    )
+    return () => window.clearTimeout(timeout)
+  }, [])
+
+  return (
+    <Spinner
+      aria-label="Generating response"
+      className="conversation-row__status size-3.5 text-text-tertiary"
+      style={animationDelay === null ? undefined : { animationDelay: `${animationDelay}ms` }}
+    />
+  )
 }
 
 function ConversationRow({
@@ -183,12 +206,7 @@ function ConversationRow({
               </IconMenuButton>
             </div>
           )}
-          {!editing && !deleting && isResponding && (
-            <Spinner
-              aria-label="Generating response"
-              className="conversation-row__status size-3.5 text-text-tertiary"
-            />
-          )}
+          {!editing && !deleting && isResponding && <ConversationRowStatus />}
           <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>
