@@ -4,6 +4,7 @@ import * as React from 'react'
 
 import { splitStableCode } from '../stream/streaming-code-highlighter'
 import { useStreamingCodeHighlight } from '../stream/use-streaming-code-highlight'
+import { ChatCodeLine } from './chat-code-line'
 
 type ChatCodeBlockProps = {
   code: string
@@ -29,18 +30,9 @@ function hasCompatibleHighlight(
   )
 }
 
-function completeTokensForLine<Token extends { content: string }>(
-  line: string,
-  tokens: readonly Token[] | undefined,
-  canRenderTokens: boolean
-): readonly Token[] | null {
-  if (!canRenderTokens || !tokens?.length) return null
-  return tokens.map((token) => token.content).join('') === line ? tokens : null
-}
-
 function ChatCodeBlock({ code, isStreaming, language }: ChatCodeBlockProps): React.JSX.Element {
   const [copied, setCopied] = React.useState(false)
-  const lines = code.split('\n')
+  const lines = React.useMemo(() => code.split('\n'), [code])
   const { isFallback, source, tokenLines } = useStreamingCodeHighlight({
     code,
     isStreaming,
@@ -48,11 +40,8 @@ function ChatCodeBlock({ code, isStreaming, language }: ChatCodeBlockProps): Rea
   })
   const canRenderTokens = hasCompatibleHighlight({ isFallback, source }, code, language)
   const visibleRawTail = canRenderTokens ? splitStableCode(code, isStreaming).tail : ''
-  const stableLineCount =
-    visibleRawTail && code.endsWith(visibleRawTail)
-      ? code.slice(0, -visibleRawTail.length).replace(/\n$/, '').split('\n').length
-      : 0
-  const rawTailLines = visibleRawTail.split('\n')
+  const rawTailLines = React.useMemo(() => visibleRawTail.split('\n'), [visibleRawTail])
+  const stableLineCount = visibleRawTail ? lines.length - rawTailLines.length : 0
 
   React.useEffect(() => {
     if (!copied) return
@@ -82,27 +71,20 @@ function ChatCodeBlock({ code, isStreaming, language }: ChatCodeBlockProps): Rea
       </div>
       <pre className="chat-code-block__body overflow-x-auto py-3">
         {lines.map((line, index) => {
-          const tokens = completeTokensForLine(line, tokenLines?.[index], canRenderTokens)
           const rawLine =
             canRenderTokens && visibleRawTail && index >= stableLineCount
               ? rawTailLines[index - stableLineCount]
               : line
 
           return (
-            <div className="grid grid-cols-[2.5rem_minmax(0,1fr)]" key={index}>
-              <span className="chat-code-block__gutter select-none pr-3 text-right">
-                {index + 1}
-              </span>
-              <code className="min-w-0 px-3 whitespace-pre">
-                {tokens
-                  ? tokens.map((token, tokenIndex) => (
-                      <span data-code-token key={tokenIndex} style={token.htmlStyle}>
-                        {token.content}
-                      </span>
-                    ))
-                  : rawLine || ' '}
-              </code>
-            </div>
+            <ChatCodeLine
+              canRenderTokens={canRenderTokens}
+              key={index}
+              line={line}
+              lineNumber={index + 1}
+              rawLine={rawLine}
+              tokens={tokenLines?.[index]}
+            />
           )
         })}
       </pre>
