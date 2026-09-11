@@ -48,6 +48,42 @@ type SubscribedChatMessageListProps = Omit<ChatMessageListProps, 'messages'> & {
 
 type RetryProgressStyle = React.CSSProperties & { '--retry-delay': string }
 
+function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Element {
+  const [now, setNow] = React.useState(() => Date.now())
+
+  React.useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const remainingSeconds = Math.max(
+    0,
+    Math.ceil((retry.startedAt + retry.retryDelayMs - now) / 1_000)
+  )
+  const retryProgressStyle: RetryProgressStyle = {
+    '--retry-delay': `${retry.retryDelayMs}ms`
+  }
+
+  return (
+    <p
+      className="chat-retry-status flex items-center gap-2 text-sm text-text-tertiary"
+      role="status"
+    >
+      <span
+        aria-hidden="true"
+        className="chat-retry-progress"
+        data-testid="retry-progress"
+        key={retry.startedAt}
+        style={retryProgressStyle}
+      />
+      <LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />
+      {remainingSeconds > 0
+        ? `Connection interrupted. Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
+        : `Connection interrupted. Retrying · attempt ${retry.attempt} of ${retry.maxAttempts}.`}
+    </p>
+  )
+}
+
 function ChatMessageList({
   conversationId,
   errorMessage,
@@ -56,27 +92,12 @@ function ChatMessageList({
   onRetry,
   retry
 }: ChatMessageListProps): React.JSX.Element {
-  const [now, setNow] = React.useState(() => Date.now())
-
-  React.useEffect(() => {
-    if (!retry) return
-
-    const intervalId = window.setInterval(() => setNow(Date.now()), 250)
-    return () => window.clearInterval(intervalId)
-  }, [retry])
-
-  const remainingSeconds = retry
-    ? Math.max(0, Math.ceil((retry.startedAt + retry.retryDelayMs - now) / 1_000))
-    : 0
   const latestMessage = messages.at(-1)
   const hasEmptyAssistantMessage =
     isResponding && latestMessage?.role === 'assistant' && latestMessage.parts.length === 0
   const showPendingThinking =
     isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
   const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
-  const retryProgressStyle: RetryProgressStyle | undefined = retry
-    ? { '--retry-delay': `${retry.retryDelayMs}ms` }
-    : undefined
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
@@ -100,7 +121,7 @@ function ChatMessageList({
                         isStreaming={
                           isResponding &&
                           message.role === 'assistant' &&
-                          message.id === messages.at(-1)?.id
+                          message.id === latestMessage?.id
                         }
                         thinkingOrbState={thinkingOrbState}
                       />
@@ -131,24 +152,7 @@ function ChatMessageList({
                 )}
               </div>
             )}
-            {retry && (
-              <p
-                className="chat-retry-status flex items-center gap-2 text-sm text-text-tertiary"
-                role="status"
-              >
-                <span
-                  aria-hidden="true"
-                  className="chat-retry-progress"
-                  data-testid="retry-progress"
-                  key={retry.startedAt}
-                  style={retryProgressStyle}
-                />
-                <LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />
-                {remainingSeconds > 0
-                  ? `Connection interrupted. Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
-                  : `Connection interrupted. Retrying · attempt ${retry.attempt} of ${retry.maxAttempts}.`}
-              </p>
-            )}
+            {retry && <ChatRetryStatus retry={retry} />}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton
