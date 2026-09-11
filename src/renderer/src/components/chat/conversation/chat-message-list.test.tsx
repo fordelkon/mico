@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import * as React from 'react'
 
+import type { MicoUIMessage } from '@renderer/types/chat'
+
 import { ChatMessageList } from './chat-message-list'
 
 function RetryHarness(): React.JSX.Element {
@@ -24,6 +26,53 @@ function RetryHarness(): React.JSX.Element {
 }
 
 describe('ChatMessageList', () => {
+  it('does not revisit stable messages when the streaming message changes', () => {
+    let stablePartsReads = 0
+    const stableParts: MicoUIMessage['parts'] = [
+      { type: 'text', text: 'Earlier message', state: 'done' }
+    ]
+    const stableMessage = {
+      id: 'user-1',
+      role: 'user' as const,
+      get parts() {
+        stablePartsReads += 1
+        return stableParts
+      }
+    }
+    const { rerender } = render(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding
+        messages={[
+          stableMessage,
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'First chunk', state: 'streaming' }]
+          }
+        ]}
+      />
+    )
+    const readsBeforeNextChunk = stablePartsReads
+
+    rerender(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding
+        messages={[
+          stableMessage,
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'First chunk, then more', state: 'streaming' }]
+          }
+        ]}
+      />
+    )
+
+    expect(stablePartsReads).toBe(readsBeforeNextChunk)
+  })
+
   it('keeps the pending thinking state until an assistant response has content', () => {
     const userMessage = {
       id: 'user-1',
