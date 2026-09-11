@@ -18,6 +18,7 @@ type ChatRun = {
 
 type ChatServiceOptions = {
   getSelectedChatConfiguration?: () => ChatProviderConfiguration | null
+  maxAssistantTextChars?: number
   maxAttempts?: number
   retryDelayMs?: number
   runtime?: Pick<
@@ -33,6 +34,9 @@ type ChatServiceOptions = {
 
 const DEFAULT_MAX_ATTEMPTS = 5
 const DEFAULT_RETRY_DELAY_MS = 1_000
+// The same ceiling must bound persisted text and renderer deltas so either process cannot grow alone.
+const DEFAULT_MAX_ASSISTANT_TEXT_CHARS = 256 * 1024
+const TRUNCATION_MARKER = '…'
 
 function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted || delayMs === 0) return Promise.resolve()
@@ -53,6 +57,7 @@ function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
 class ChatService {
   private readonly runs = new Map<string, ChatRun>()
   private readonly maxAttempts: number
+  private readonly maxAssistantTextChars: number
   private readonly retryDelayMs: number
 
   private readonly resolveProvider: ChatProviderResolver
@@ -61,6 +66,7 @@ class ChatService {
     resolveProvider: ChatProviderResolver,
     {
       maxAttempts = DEFAULT_MAX_ATTEMPTS,
+      maxAssistantTextChars = DEFAULT_MAX_ASSISTANT_TEXT_CHARS,
       retryDelayMs = DEFAULT_RETRY_DELAY_MS,
       runtime,
       getSelectedChatConfiguration
@@ -68,6 +74,7 @@ class ChatService {
   ) {
     this.resolveProvider = resolveProvider
     this.maxAttempts = maxAttempts
+    this.maxAssistantTextChars = maxAssistantTextChars
     this.retryDelayMs = retryDelayMs
     this.runtime = runtime
     this.getSelectedChatConfiguration = getSelectedChatConfiguration
@@ -158,8 +165,24 @@ class ChatService {
           for await (const chunk of stream) {
             if (!run.controller.signal.aborted) {
               receivedChunk = true
-              if (chunk.type === 'text-delta') assistantText += chunk.delta
-              emit({ type: 'chunk', requestId: request.requestId, chunk })
+              if (chunk.type === 'text-delta') {
+                const previousText = assistantText
+                assistantText = appendCappedText(
+                  assistantText,
+                  chunk.delta,
+                  this.maxAssistantTextChars
+                )
+                const visibleDelta = assistantText.slice(previousText.length)
+                if (visibleDelta) {
+                  emit({
+                    type: 'chunk',
+                    requestId: request.requestId,
+                    chunk: { ...chunk, delta: visibleDelta }
+                  })
+                }
+              } else {
+                emit({ type: 'chunk', requestId: request.requestId, chunk })
+              }
             }
           }
 
@@ -220,6 +243,18 @@ class ChatService {
   private getRunKey(ownerId: string, requestId: string): string {
     return `${ownerId.length}:${ownerId}${requestId}`
   }
+}
+
+function appendCappedText(current: string, delta: string, maxLength: number): string {
+  if (current.endsWith(TRUNCATION_MARKER)) return current
+  if (current.length + delta.length <= maxLength) return current + delta
+
+  const contentLength = Math.max(0, maxLength - TRUNCATION_MARKER.length)
+  const visibleText =
+    current.length >= contentLength
+      ? current.slice(0, contentLength)
+      : current + delta.slice(0, contentLength - current.length)
+  return `${visibleText}${TRUNCATION_MARKER}`
 }
 
 function getLatestUserMessage(

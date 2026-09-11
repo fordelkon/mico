@@ -123,27 +123,131 @@ describe('ElectronChatTransport', () => {
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
 
-    const chunkRead = reader.read()
     api.emit({
       type: 'chunk',
       requestId,
       chunk: { type: 'text-delta', id: 'part-1', delta: 'Hi' }
     })
+    api.emit({ type: 'finish', requestId })
 
-    await expect(chunkRead).resolves.toEqual({
+    await expect(reader.read()).resolves.toEqual({
       done: false,
       value: { type: 'text-delta', id: 'part-1', delta: 'Hi' }
     })
-
-    const finishRead = reader.read()
-    api.emit({ type: 'finish', requestId })
-    await expect(finishRead).resolves.toEqual({ done: true, value: undefined })
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
     expect(api.startedRequests).toEqual([
       { conversationId: 'conversation-1', requestId, messages: [], thinkingEffort: 'default' }
     ])
     expect(api.unsubscribeCount).toBe(1)
 
     uuid.mockRestore()
+  })
+
+  it('flushes consecutive text deltas while the stream remains open', async () => {
+    vi.useFakeTimers()
+    const api = new FakeChatAPI()
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => 'default'
+    })
+    const stream = await transport.sendMessages(sendOptions)
+    const reader = stream.getReader()
+
+    api.emit({
+      type: 'chunk',
+      requestId,
+      chunk: { type: 'text-delta', id: 'part-1', delta: 'Hel' }
+    })
+    api.emit({
+      type: 'chunk',
+      requestId,
+      chunk: { type: 'text-delta', id: 'part-1', delta: 'lo' }
+    })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    await expect(reader.read()).resolves.toEqual({
+      done: false,
+      value: { type: 'text-delta', id: 'part-1', delta: 'Hello' }
+    })
+
+    api.emit({ type: 'finish', requestId })
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
+    expect(api.unsubscribeCount).toBe(1)
+
+    uuid.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it('flushes a full text batch before buffering more streamed content', async () => {
+    vi.useFakeTimers()
+    const api = new FakeChatAPI()
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => 'default'
+    })
+    const stream = await transport.sendMessages(sendOptions)
+    const reader = stream.getReader()
+    const batch = 'x'.repeat(4 * 1024)
+
+    api.emit({
+      type: 'chunk',
+      requestId,
+      chunk: { type: 'text-delta', id: 'part-1', delta: batch }
+    })
+    api.emit({
+      type: 'chunk',
+      requestId,
+      chunk: { type: 'text-delta', id: 'part-1', delta: 'y' }
+    })
+
+    await expect(reader.read()).resolves.toEqual({
+      done: false,
+      value: { type: 'text-delta', id: 'part-1', delta: batch }
+    })
+
+    api.emit({ type: 'finish', requestId })
+    await expect(reader.read()).resolves.toEqual({
+      done: false,
+      value: { type: 'text-delta', id: 'part-1', delta: 'y' }
+    })
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
+
+    uuid.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it('drops a pending text batch when its request is aborted', async () => {
+    vi.useFakeTimers()
+    const api = new FakeChatAPI()
+    const abortController = new AbortController()
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+    const transport = new ElectronChatTransport(api, {
+      conversationId: 'conversation-1',
+      getThinkingEffort: () => 'default'
+    })
+    const stream = await transport.sendMessages({
+      ...sendOptions,
+      abortSignal: abortController.signal
+    })
+    const reader = stream.getReader()
+
+    api.emit({
+      type: 'chunk',
+      requestId,
+      chunk: { type: 'text-delta', id: 'part-1', delta: 'Held back' }
+    })
+    abortController.abort()
+    await vi.advanceTimersByTimeAsync(16)
+
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
+    expect(api.abortedRequestIds).toEqual([requestId])
+    expect(api.unsubscribeCount).toBe(1)
+
+    uuid.mockRestore()
+    vi.useRealTimers()
   })
 
   it('ignores events for a different request ID', async () => {

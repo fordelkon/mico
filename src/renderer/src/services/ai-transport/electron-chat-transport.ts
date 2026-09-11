@@ -33,6 +33,9 @@ type ElectronChatTransportOptions = {
   onStatusChange?: (status: ChatTransportStatus) => void
 }
 
+const TEXT_DELTA_BATCH_DELAY_MS = 16
+const TEXT_DELTA_BATCH_MAX_CHARS = 4 * 1024
+
 class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   readonly #api: ChatAPI
   readonly #conversationId: string
@@ -64,12 +67,60 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
       cancel: () => stop?.(),
       start: (controller) => {
         let active = true
+        let pendingTextDelta: Extract<UIMessageChunk, { type: 'text-delta' }> | undefined
+        let flushTimer: ReturnType<typeof setTimeout> | undefined
+        const clearPendingTextDelta = (): void => {
+          // A cancelled stream has no consumer, so retaining its batch only prolongs its lifetime.
+          if (flushTimer) clearTimeout(flushTimer)
+          flushTimer = undefined
+          pendingTextDelta = undefined
+        }
+        const flushPendingTextDelta = (): void => {
+          if (flushTimer) clearTimeout(flushTimer)
+          flushTimer = undefined
+          if (!active || !pendingTextDelta) return
+
+          controller.enqueue(pendingTextDelta)
+          pendingTextDelta = undefined
+        }
+        const enqueueTextDelta = (chunk: Extract<UIMessageChunk, { type: 'text-delta' }>): void => {
+          let remainingDelta = chunk.delta
+          while (remainingDelta) {
+            if (pendingTextDelta && pendingTextDelta.id !== chunk.id) flushPendingTextDelta()
+
+            const pendingLength = pendingTextDelta?.delta.length ?? 0
+            const deltaLength = Math.min(
+              TEXT_DELTA_BATCH_MAX_CHARS - pendingLength,
+              remainingDelta.length
+            )
+            const delta = remainingDelta.slice(0, deltaLength)
+            remainingDelta = remainingDelta.slice(deltaLength)
+
+            pendingTextDelta = pendingTextDelta
+              ? { ...pendingTextDelta, delta: pendingTextDelta.delta + delta }
+              : { ...chunk, delta }
+
+            if (pendingTextDelta.delta.length === TEXT_DELTA_BATCH_MAX_CHARS)
+              flushPendingTextDelta()
+            else if (!flushTimer)
+              flushTimer = setTimeout(flushPendingTextDelta, TEXT_DELTA_BATCH_DELAY_MS)
+          }
+        }
+        const enqueueChunk = (chunk: UIMessageChunk): void => {
+          if (chunk.type !== 'text-delta') {
+            flushPendingTextDelta()
+            controller.enqueue(chunk)
+            return
+          }
+
+          enqueueTextDelta(chunk)
+        }
         const unsubscribe = this.#api.onEvent((event) => {
           if (!active || event.requestId !== requestId) return
 
           if (event.type === 'chunk') {
             this.#onStatusChange?.({ type: 'streaming' })
-            controller.enqueue(event.chunk)
+            enqueueChunk(event.chunk)
             return
           }
 
@@ -83,6 +134,8 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
             return
           }
 
+          // Terminal events must not discard the last batched text delta.
+          flushPendingTextDelta()
           stop?.()
           if (event.type === 'error') controller.error(new Error(event.message))
           else controller.close()
@@ -90,6 +143,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
         const abort = (): void => {
           if (!active) return
 
+          clearPendingTextDelta()
           stop?.()
           void this.#api.abort(requestId)
           controller.close()
@@ -99,6 +153,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
           if (!active) return
 
           active = false
+          clearPendingTextDelta()
           options.abortSignal?.removeEventListener('abort', abort)
           unsubscribe()
         }
