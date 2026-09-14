@@ -131,11 +131,8 @@ function ProvidersSidebar({
                 <Button
                   aria-current={isActive ? 'page' : undefined}
                   aria-label={provider.label}
-                  className={
-                    isActive
-                      ? 'relative h-10 w-full justify-start bg-sidebar-accent px-2 text-sidebar-accent-foreground shadow-sm after:absolute after:-left-1 after:h-5 after:w-0.5 after:rounded-full after:bg-primary'
-                      : 'h-10 w-full justify-start px-2'
-                  }
+                  className="relative h-10 w-full justify-start px-2 hover:bg-sidebar-row-hover hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-row-active data-[active=true]:text-sidebar-accent-foreground data-[active=true]:shadow-[var(--sidebar-row-active-shadow)] data-[active=true]:hover:bg-sidebar-row-active data-[active=true]:after:absolute data-[active=true]:after:-left-1 data-[active=true]:after:h-5 data-[active=true]:after:w-0.5 data-[active=true]:after:rounded-full data-[active=true]:after:bg-primary"
+                  data-active={isActive}
                   key={provider.id}
                   onClick={() => onSelect(provider.id)}
                   ref={itemRef?.(provider.id)}
