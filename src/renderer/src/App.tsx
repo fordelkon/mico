@@ -2,8 +2,10 @@ import { Separator, SidebarInset, SidebarProvider, Spinner } from '@mico/ui'
 import * as React from 'react'
 
 import { ChatMain } from './components/chat/chat-main'
-import { ProviderLibraryProvider } from './components/settings/providers/provider-library'
-import { useProviderLibrary } from './components/settings/providers/provider-library'
+import {
+  ProviderLibraryProvider,
+  useProviderLibraryActions
+} from './components/settings/providers/provider-library'
 import { AppSidebar } from './components/sidebar/app-sidebar'
 import { WindowControls } from './components/window-controls/window-controls'
 import { useChatWorkspaceState } from './hooks/chat/use-chat-workspace-state'
@@ -14,7 +16,7 @@ const SettingsMain = React.lazy(() => import('./components/settings/settings-mai
 
 function AppContent(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
-  const { flushLibrary } = useProviderLibrary()
+  const { commitProviderDrafts } = useProviderLibraryActions()
   const [activePage, setActivePage] = React.useState<'chat' | 'settings'>('chat')
   const [settingsPage, setSettingsPage] = React.useState<'providers' | 'appearance'>('providers')
 
@@ -32,9 +34,9 @@ function AppContent(): React.JSX.Element {
 
   const handleBackFromSettings = React.useCallback(async (): Promise<void> => {
     // The outgoing settings view remains visible until its draft reaches the snapshot boundary.
-    await flushLibrary()
+    await commitProviderDrafts()
     transitionSettingsPage(() => setActivePage('chat'))
-  }, [flushLibrary])
+  }, [commitProviderDrafts])
 
   const handleSelectSettingsPage = React.useCallback(
     (page: 'providers' | 'appearance'): void => {

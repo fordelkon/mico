@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 
-import { ChatRequestIdSchema, ChatStartRequestSchema } from '@shared/data/schemas/chat'
+import { TurnRequestIdSchema, TurnStartRequestSchema } from '@shared/ipc/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
 import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
 import { SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
@@ -20,7 +20,7 @@ import {
   SyncModelsRequestSchema,
   TestModelRequestSchema
 } from '@shared/ipc/schemas/providers'
-import type { ChatService } from './ai/chat/chat-service'
+import type { TurnExecutor } from './ai/chat/turn-executor'
 import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
 import type { ProviderService } from './ai/providers/provider-service'
@@ -33,7 +33,10 @@ type IpcDependencies = {
 }
 
 interface IpcServices {
-  chat: Pick<ChatService, 'abort' | 'abortAll' | 'getModelCapabilities' | 'start'>
+  turnExecutor: Pick<
+    TurnExecutor,
+    'abortAllTurns' | 'abortTurn' | 'getModelCapabilities' | 'startTurn'
+  >
   mainWindow: Pick<
     MainWindowService,
     | 'close'
@@ -73,12 +76,12 @@ interface IpcServices {
   >
   session: Pick<
     SessionRuntimeService,
-    'createSession' | 'listSessions' | 'loadSession' | 'renameSession' | 'deleteSession'
+    'createSession' | 'deleteSession' | 'listSessions' | 'loadSession' | 'renameSession'
   >
 }
 
 function registerIpc(
-  { chat, mainWindow, preference, provider, session }: IpcServices,
+  { turnExecutor, mainWindow, preference, provider, session }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
     ipcMain
@@ -151,10 +154,10 @@ function registerIpc(
     return preference.setThemePreferences(result.data)
   })
 
-  dependencies.ipcMain.handle(IpcChannel.Chat_Start, (event, input) => {
+  dependencies.ipcMain.handle(IpcChannel.Chat_StartTurn, (event, input) => {
     getCallingWindow(event)
-    const result = ChatStartRequestSchema.safeParse(input)
-    if (!result.success) throw new Error('Invalid chat request')
+    const result = TurnStartRequestSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid turn request')
 
     const ownerId = String(event.sender.id)
     const senderFrame = event.senderFrame
@@ -162,23 +165,23 @@ function registerIpc(
       destroyedSenderIds.add(event.sender.id)
       event.sender.once('destroyed', () => {
         destroyedSenderIds.delete(event.sender.id)
-        chat.abortAll(ownerId)
+        turnExecutor.abortAllTurns(ownerId)
       })
     }
 
-    chat.start(
+    turnExecutor.startTurn(
       { ownerId, request: result.data },
-      (chatEvent) => {
+      (turnEvent) => {
         // A renderer crash can dispose its frame before the owning WebContents emits 'destroyed'.
         if (!senderFrame || event.sender.isDestroyed() || senderFrame.isDestroyed()) {
-          chat.abortAll(ownerId)
+          turnExecutor.abortAllTurns(ownerId)
           return
         }
 
         try {
-          event.sender.send(IpcChannel.Chat_Event, chatEvent)
+          event.sender.send(IpcChannel.Chat_TurnEvent, turnEvent)
         } catch {
-          chat.abortAll(ownerId)
+          turnExecutor.abortAllTurns(ownerId)
         }
       },
       (titleUpdate) => {
@@ -194,14 +197,14 @@ function registerIpc(
   })
   dependencies.ipcMain.handle(IpcChannel.Chat_GetCapabilities, (event) => {
     getCallingWindow(event)
-    return chat.getModelCapabilities()
+    return turnExecutor.getModelCapabilities()
   })
-  dependencies.ipcMain.handle(IpcChannel.Chat_Abort, (event, input) => {
+  dependencies.ipcMain.handle(IpcChannel.Chat_AbortTurn, (event, input) => {
     getCallingWindow(event)
-    const result = ChatRequestIdSchema.safeParse(input)
-    if (!result.success) throw new Error('Invalid chat request')
+    const result = TurnRequestIdSchema.safeParse(input)
+    if (!result.success) throw new Error('Invalid turn request')
 
-    chat.abort({ ownerId: String(event.sender.id), requestId: result.data })
+    turnExecutor.abortTurn({ ownerId: String(event.sender.id), requestId: result.data })
   })
 
   dependencies.ipcMain.handle(IpcChannel.Sessions_List, (event) => {

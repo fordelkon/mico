@@ -2,15 +2,15 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { useChat } from '@ai-sdk/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { ChatStreamEvent, ModelReasoningCapabilities } from '@shared/data/schemas/chat'
-import type { ChatAPI } from '@shared/ipc/schemas/chat'
+import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
+import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import { useChatWorkspaceState } from './use-chat-workspace-state'
 
 class FakeChatAPI implements ChatAPI {
-  readonly startedRequests: Parameters<ChatAPI['start']>[0][] = []
-  readonly listeners = new Set<Parameters<ChatAPI['onEvent']>[0]>()
-  readonly titleListeners = new Set<(update: { conversationId: string; title: string }) => void>()
+  readonly startedRequests: Parameters<ChatAPI['startTurn']>[0][] = []
+  readonly listeners = new Set<Parameters<ChatAPI['onTurnEvent']>[0]>()
+  readonly titleListeners = new Set<(update: { sessionId: string; title: string }) => void>()
   readonly createSession = vi.fn(async (_input: { title: string }) => ({
     id: 'session-new',
     title: 'New chat',
@@ -34,7 +34,8 @@ class FakeChatAPI implements ChatAPI {
         { role: 'user' as const, parts: [{ type: 'text' as const, text: 'Saved prompt' }] },
         {
           role: 'assistant' as const,
-          parts: [{ type: 'text' as const, text: 'Saved answer' }]
+          parts: [{ type: 'text' as const, text: 'Saved answer' }],
+          metadata: { completionState: 'stopped' as const }
         }
       ]
     }),
@@ -46,32 +47,32 @@ class FakeChatAPI implements ChatAPI {
       updatedAt: 3,
       lastActivityAt: 2
     }),
-    onTitleUpdated: (listener: (update: { conversationId: string; title: string }) => void) => {
+    onTitleUpdated: (listener: (update: { sessionId: string; title: string }) => void) => {
       this.titleListeners.add(listener)
       return () => this.titleListeners.delete(listener)
     }
   }
 
-  async abort(): Promise<void> {}
+  async abortTurn(): Promise<void> {}
 
   async getCapabilities(): Promise<ModelReasoningCapabilities | null> {
     return null
   }
 
-  onEvent(listener: Parameters<ChatAPI['onEvent']>[0]): () => void {
+  onTurnEvent(listener: Parameters<ChatAPI['onTurnEvent']>[0]): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  async start(request: Parameters<ChatAPI['start']>[0]): Promise<void> {
+  async startTurn(request: Parameters<ChatAPI['startTurn']>[0]): Promise<void> {
     this.startedRequests.push(request)
   }
 
-  emit(event: ChatStreamEvent): void {
+  emit(event: TurnStreamEvent): void {
     for (const listener of this.listeners) listener(event)
   }
 
-  emitTitleUpdated(update: { conversationId: string; title: string }): void {
+  emitTitleUpdated(update: { sessionId: string; title: string }): void {
     for (const listener of this.titleListeners) listener(update)
   }
 }
@@ -197,7 +198,7 @@ describe('useChatWorkspaceState', () => {
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     expect(api.createSession).toHaveBeenCalledOnce()
     expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat' })
-    expect(api.startedRequests[0]?.conversationId).toBe('session-new')
+    expect(api.startedRequests[0]?.sessionId).toBe('session-new')
   })
 
   it('tracks concurrent responses independently when starting a new chat', async () => {
@@ -371,13 +372,14 @@ describe('useChatWorkspaceState', () => {
 
     await waitFor(() =>
       expect(
-        result.current.activeChat?.messages.map(({ parts, role }) => ({
+        result.current.activeChat?.messages.map(({ metadata, parts, role }) => ({
+          completionState: metadata?.completionState,
           role,
           text: parts.find((part) => part.type === 'text')?.text
         }))
       ).toEqual([
-        { role: 'user', text: 'Saved prompt' },
-        { role: 'assistant', text: 'Saved answer' }
+        { completionState: undefined, role: 'user', text: 'Saved prompt' },
+        { completionState: 'stopped', role: 'assistant', text: 'Saved answer' }
       ])
     )
   })
@@ -433,7 +435,7 @@ describe('useChatWorkspaceState', () => {
     const { result } = renderHook(() => useChatWorkspaceState())
 
     await waitFor(() => expect(result.current.conversations).toHaveLength(1))
-    act(() => api.emitTitleUpdated({ conversationId: 'session-1', title: 'Plan release notes' }))
+    act(() => api.emitTitleUpdated({ sessionId: 'session-1', title: 'Plan release notes' }))
 
     await waitFor(() =>
       expect(result.current.conversations).toEqual([

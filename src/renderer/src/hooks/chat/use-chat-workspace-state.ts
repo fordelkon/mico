@@ -61,6 +61,7 @@ function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
   return messages.map((message) => ({
     id: crypto.randomUUID(),
     role: message.role,
+    metadata: message.metadata,
     parts: message.parts.flatMap((part) =>
       part.type === 'text' ? [{ type: 'text', text: part.text, state: 'done' as const }] : []
     )
@@ -154,14 +155,14 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   React.useEffect(
     () =>
-      window.api.sessions.onTitleUpdated(({ conversationId, title }) => {
+      window.api.sessions.onTitleUpdated(({ sessionId, title }) => {
         setConversations((current) =>
           current.map((conversation) =>
-            conversation.id === conversationId ? { ...conversation, title } : conversation
+            conversation.id === sessionId ? { ...conversation, title } : conversation
           )
         )
 
-        const session = sessionsRef.current.get(conversationId)
+        const session = sessionsRef.current.get(sessionId)
         if (session) session.conversation = { ...session.conversation, title }
       }),
     []
@@ -200,7 +201,7 @@ function useChatWorkspaceState(): ChatWorkspace {
         id: conversation.id,
         messages: toUiMessages(messages),
         transport: new ElectronChatTransport(window.api.chat, {
-          conversationId: conversation.id,
+          sessionId: conversation.id,
           getThinkingEffort,
           onStatusChange: (status) => {
             const currentResponse = responseRef.current.get(conversation.id)

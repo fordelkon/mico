@@ -62,11 +62,9 @@ function toPersistedLibrary(library: ProviderLibrary): PersistedProviderLibrary 
     selectedProviderId: library.selectedProviderId
   }
 }
-type ProviderLibraryContextValue = {
+type ProviderLibraryActions = {
   addCustomProvider: (provider: AddCustomProviderRequest) => Promise<CustomProvider>
-  flushLibrary: () => Promise<void>
-  isLoaded: boolean
-  library: ProviderLibrary
+  commitProviderDrafts: () => Promise<void>
   removeCustomProvider: (providerId: ProviderId) => Promise<void>
   selectModel: (modelId: string) => Promise<void>
   selectProvider: (providerId: ProviderId | null) => Promise<void>
@@ -79,6 +77,10 @@ type ProviderLibraryContextValue = {
     options?: { immediate?: boolean }
   ) => void
   updateCustomProvider: (provider: UpdateCustomProviderRequest) => Promise<void>
+}
+type ProviderLibraryState = {
+  isLoaded: boolean
+  library: ProviderLibrary
 }
 
 const configurationSaveDelay = 150
@@ -139,11 +141,9 @@ function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderLibrary {
 const unavailable = async (): Promise<never> => {
   throw new Error('Provider library is unavailable.')
 }
-const ProviderLibraryContext = React.createContext<ProviderLibraryContextValue>({
+const ProviderLibraryActionsContext = React.createContext<ProviderLibraryActions>({
   addCustomProvider: unavailable,
-  flushLibrary: async () => undefined,
-  isLoaded: false,
-  library: initialLibrary,
+  commitProviderDrafts: async () => undefined,
   removeCustomProvider: unavailable,
   selectModel: async () => undefined,
   selectProvider: async () => undefined,
@@ -152,6 +152,10 @@ const ProviderLibraryContext = React.createContext<ProviderLibraryContextValue>(
   flushConfiguration: () => undefined,
   updateConfiguration: () => undefined,
   updateCustomProvider: unavailable
+})
+const ProviderLibraryStateContext = React.createContext<ProviderLibraryState>({
+  isLoaded: false,
+  library: initialLibrary
 })
 function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.JSX.Element {
   const [library, setLibrary] = React.useState(initialLibrary)
@@ -242,7 +246,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     await Promise.all(pendingConfigurationSaves.current.values())
   }, [flushConfiguration])
 
-  const flushLibrary = React.useCallback(async (): Promise<void> => {
+  const commitProviderDrafts = React.useCallback(async (): Promise<void> => {
     if (librarySaveTimer.current) clearTimeout(librarySaveTimer.current)
     await waitForConfigurationSaves()
     await librarySaveQueue.current
@@ -255,9 +259,9 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   React.useEffect(
     () =>
       window.api.windowControls.onProviderDraftFlush(async () => {
-        await flushLibrary()
+        await commitProviderDrafts()
       }),
-    [flushLibrary]
+    [commitProviderDrafts]
   )
 
   React.useEffect(
@@ -265,9 +269,9 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       for (const timer of configurationSaveTimers.current.values()) clearTimeout(timer)
       if (librarySaveTimer.current) clearTimeout(librarySaveTimer.current)
       // Strict Mode also runs cleanup during hydration; an unloaded or clean draft must never replace persisted data.
-      void flushLibrary()
+      void commitProviderDrafts()
     },
-    [flushLibrary]
+    [commitProviderDrafts]
   )
   React.useEffect(() => {
     let isActive = true
@@ -335,11 +339,11 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   )
   const syncModels = React.useCallback(
     async (providerId: ProviderId, models: DiscoveredModel[]) => {
-      await flushLibrary()
+      await commitProviderDrafts()
       await window.api.providers.syncModels({ provider: providerId, models })
       await refresh()
     },
-    [flushLibrary, refresh]
+    [commitProviderDrafts, refresh]
   )
   const updateCustomProvider = React.useCallback(
     async (provider: UpdateCustomProviderRequest) => {
@@ -395,13 +399,11 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     },
     [scheduleLibrarySave, waitForConfigurationSaves]
   )
-  const value = React.useMemo(
+  const actions = React.useMemo(
     () => ({
       addCustomProvider,
-      flushLibrary,
+      commitProviderDrafts,
       flushConfiguration,
-      isLoaded,
-      library,
       removeCustomProvider,
       selectModel,
       selectProvider,
@@ -412,10 +414,8 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     }),
     [
       addCustomProvider,
-      flushLibrary,
+      commitProviderDrafts,
       flushConfiguration,
-      isLoaded,
-      library,
       removeCustomProvider,
       selectModel,
       selectProvider,
@@ -425,14 +425,23 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       updateCustomProvider
     ]
   )
-  return <ProviderLibraryContext value={value}>{children}</ProviderLibraryContext>
+  const state = React.useMemo(() => ({ isLoaded, library }), [isLoaded, library])
+  return (
+    <ProviderLibraryActionsContext value={actions}>
+      <ProviderLibraryStateContext value={state}>{children}</ProviderLibraryStateContext>
+    </ProviderLibraryActionsContext>
+  )
 }
-function useProviderLibrary(): ProviderLibraryContextValue {
-  return React.useContext(ProviderLibraryContext)
+function useProviderLibraryActions(): ProviderLibraryActions {
+  return React.useContext(ProviderLibraryActionsContext)
+}
+function useProviderLibraryState(): ProviderLibraryState {
+  return React.useContext(ProviderLibraryStateContext)
 }
 export {
   ProviderLibraryProvider,
-  useProviderLibrary,
+  useProviderLibraryActions,
+  useProviderLibraryState,
   type ProviderConfiguration,
   type ProviderLibrary,
   type ProviderModel

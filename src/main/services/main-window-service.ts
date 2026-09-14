@@ -3,7 +3,7 @@ import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { is } from '@electron-toolkit/utils'
 
-import icon from '../../../build/icon.png?asset'
+import icon from '../../../build/icons/512x512.png?asset'
 import windowsIcon from '../../../build/icons/icon.ico?asset'
 import { IpcChannel } from '@shared/IpcChannel'
 import { registerWindowClosingHandlers } from './window-lifecycle'

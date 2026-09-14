@@ -18,28 +18,17 @@ const assistantMessage: ChatMessage = {
   parts: [{ type: 'text', text: 'first answer' }]
 }
 
-type EventDigestRow = { id: string; payload_digest: string }
-
-function getEventDigest(
-  database: SessionDatabase,
-  runId: string,
-  kind: 'assistant_output_finalized' | 'user_message_recorded'
-): EventDigestRow {
-  // SAFETY: each caller creates the named event for its run before reading it.
-  const event = database.connection
-    .prepare('SELECT id, payload_digest FROM runtime_events WHERE run_id = ? AND kind = ?')
-    .get(runId, kind) as EventDigestRow | undefined
-  if (!event) throw new Error(`Expected ${kind} event for ${runId}.`)
-  return event
-}
-
-async function createService(): Promise<{
+async function createService(verbose?: (message: string) => void): Promise<{
   database: SessionDatabase
   service: SessionRuntimeService
 }> {
   const database = new SessionDatabase({
     getUserDataPath: () => 'unused-for-memory-database',
-    openDatabase: () => new Database(':memory:')
+    openDatabase: () =>
+      new Database(':memory:', {
+        // SAFETY: better-sqlite3 documents verbose messages as executed SQL strings.
+        verbose: verbose as Database.Options['verbose']
+      })
   })
   await database.initialize()
   const service = new SessionRuntimeService({
@@ -69,7 +58,7 @@ describe('SessionRuntimeService', () => {
     expect(service.loadSession(session.id).title).toBe('Manual title')
   })
 
-  it('records completed visible history and the new message in the next context manifest', async () => {
+  it('appends every durable event in one monotonic session order', async () => {
     const { database, service } = await createService()
     const session = service.createSession({ title: 'Session', defaultProfile: profile })
     const firstRun = service.startTurn({
@@ -78,24 +67,27 @@ describe('SessionRuntimeService', () => {
       userMessage,
       profile
     })
-    service.finalizeRun(firstRun.runId, assistantMessage)
+    service.finishRun(firstRun.runId, { status: 'completed', assistant: assistantMessage })
 
-    const secondRun = service.startTurn({
+    service.startTurn({
       sessionId: session.id,
       requestId: 'request-2',
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
       profile
     })
 
-    const sourceEvents = [
-      getEventDigest(database, firstRun.runId, 'user_message_recorded'),
-      getEventDigest(database, firstRun.runId, 'assistant_output_finalized'),
-      getEventDigest(database, secondRun.runId, 'user_message_recorded')
-    ]
-
-    expect(secondRun.contextBuild.sourceManifest.events).toEqual(
-      sourceEvents.map(({ id, payload_digest }) => ({ eventId: id, digest: payload_digest }))
-    )
+    expect(
+      database.connection
+        .prepare('SELECT session_sequence, kind FROM runtime_events ORDER BY session_sequence')
+        .all()
+    ).toEqual([
+      { session_sequence: 1, kind: 'run_started' },
+      { session_sequence: 2, kind: 'user_message_recorded' },
+      { session_sequence: 3, kind: 'assistant_output_finalized' },
+      { session_sequence: 4, kind: 'run_completed' },
+      { session_sequence: 5, kind: 'run_started' },
+      { session_sequence: 6, kind: 'user_message_recorded' }
+    ])
   })
 
   it('rebuilds provider context from completed visible history and the current prompt', async () => {
@@ -107,7 +99,7 @@ describe('SessionRuntimeService', () => {
       userMessage,
       profile
     })
-    service.finalizeRun(firstRun.runId, assistantMessage)
+    service.finishRun(firstRun.runId, { status: 'completed', assistant: assistantMessage })
     const secondRun = service.startTurn({
       sessionId: session.id,
       requestId: 'request-2',
@@ -120,6 +112,77 @@ describe('SessionRuntimeService', () => {
       assistantMessage,
       { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] }
     ])
+  })
+
+  it('records the request identity and execution profile in the run start event', async () => {
+    const { database, service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+
+    const run = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+
+    // SAFETY: this test starts the run immediately before selecting its run_started event.
+    const row = database.connection
+      .prepare("SELECT payload_json FROM runtime_events WHERE run_id = ? AND kind = 'run_started'")
+      .get(run.runId) as { payload_json: string }
+
+    expect(JSON.parse(row.payload_json)).toEqual({ attempt: 1, profile, requestId: 'request-1' })
+  })
+
+  it('loads the provider context with one database query', async () => {
+    const queries: string[] = []
+    const { service } = await createService((query) => queries.push(query))
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const firstRun = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    service.finishRun(firstRun.runId, { status: 'completed', assistant: assistantMessage })
+    const secondRun = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
+      profile
+    })
+    queries.length = 0
+
+    const messages = service.getContextMessages(secondRun.runId)
+
+    expect(messages).toEqual([
+      userMessage,
+      assistantMessage,
+      { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] }
+    ])
+    expect(queries).toHaveLength(1)
+  })
+
+  it('rejects context payloads whose digest no longer matches the event', async () => {
+    const { database, service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const run = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    database.connection
+      .prepare(
+        "UPDATE runtime_events SET payload_json = ? WHERE run_id = ? AND kind = 'user_message_recorded'"
+      )
+      .run(
+        JSON.stringify({
+          message: { role: 'user', parts: [{ type: 'text', text: 'changed prompt' }] }
+        }),
+        run.runId
+      )
+
+    expect(() => service.getContextMessages(run.runId)).toThrow(/digest/i)
   })
 
   it('rejects a second active run in one session while allowing another session to start', async () => {
@@ -136,14 +199,13 @@ describe('SessionRuntimeService', () => {
         profile
       })
     ).toThrow(/active run/i)
-    const secondRun = service.startTurn({
+    service.startTurn({
       sessionId: secondSession.id,
       requestId: 'request-3',
       userMessage,
       profile
     })
 
-    expect(secondRun.contextBuild.sourceManifest.events).toHaveLength(1)
     expect(service.loadSession(secondSession.id).messages).toEqual([userMessage])
   })
 
@@ -167,6 +229,83 @@ describe('SessionRuntimeService', () => {
     expect(service.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: userMessage.parts }
     ])
+  })
+
+  it('rejects a repeated request ID when the turn input changed', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+
+    expect(() =>
+      service.startTurn({
+        sessionId: session.id,
+        requestId: 'request-1',
+        userMessage: { role: 'user', parts: [{ type: 'text', text: 'different prompt' }] },
+        profile
+      })
+    ).toThrow(/different turn input/i)
+    expect(() =>
+      service.startTurn({
+        sessionId: session.id,
+        requestId: 'request-1',
+        userMessage,
+        profile: { ...profile, modelId: 'different-model' }
+      })
+    ).toThrow(/different turn input/i)
+  })
+
+  it('replays a request with the context boundary captured when its run started', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const first = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    service.finishRun(first.runId, { status: 'completed', assistant: assistantMessage })
+    const second = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
+      profile
+    })
+    service.finishRun(second.runId, { status: 'completed', assistant: assistantMessage })
+
+    expect(service.getContextMessages(first.runId)).toEqual([userMessage])
+    expect(
+      service.startTurn({
+        sessionId: session.id,
+        requestId: 'request-1',
+        userMessage,
+        profile
+      })
+    ).toEqual(first)
+  })
+
+  it('uses the request ID index for idempotent run lookup', async () => {
+    const { database, service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+
+    // SAFETY: EXPLAIN QUERY PLAN always returns rows with a textual detail column.
+    const plan = database.connection
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT runs.* FROM runtime_events JOIN runs ON runs.id = runtime_events.run_id WHERE runtime_events.session_id = ? AND runtime_events.kind = 'run_started' AND json_extract(runtime_events.payload_json, '$.requestId') = ?"
+      )
+      .all(session.id, 'request-1') as Array<{ detail: string }>
+
+    expect(plan.map(({ detail }) => detail).join('\n')).toContain('runtime_events_run_request_id')
   })
 
   it('records the model request start once when the caller retries notification', async () => {
@@ -198,16 +337,22 @@ describe('SessionRuntimeService', () => {
       userMessage,
       profile
     })
-    service.finalizeRun(completed.runId, assistantMessage)
-    service.finalizeRun(completed.runId, assistantMessage)
+    service.finishRun(completed.runId, { status: 'completed', assistant: assistantMessage })
+    service.finishRun(completed.runId, { status: 'completed', assistant: assistantMessage })
     const failed = service.startTurn({
       sessionId: session.id,
       requestId: 'request-2',
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
       profile
     })
-    service.failRun(failed.runId, { code: 'offline', message: 'Offline' })
-    service.failRun(failed.runId, { code: 'offline', message: 'Offline' })
+    service.finishRun(failed.runId, {
+      status: 'failed',
+      failure: { code: 'offline', message: 'Offline' }
+    })
+    service.finishRun(failed.runId, {
+      status: 'failed',
+      failure: { code: 'offline', message: 'Offline' }
+    })
 
     expect(service.loadSession(session.id).messages).toEqual([
       userMessage,
@@ -238,12 +383,15 @@ describe('SessionRuntimeService', () => {
       userMessage,
       profile
     })
-    service.finalizeRun(run.runId, {
-      role: 'assistant',
-      parts: [
-        { type: 'reasoning', text: 'private chain of thought' },
-        { type: 'text', text: 'first answer' }
-      ]
+    service.finishRun(run.runId, {
+      status: 'completed',
+      assistant: {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'private chain of thought' },
+          { type: 'text', text: 'first answer' }
+        ]
+      }
     })
 
     expect(service.loadSession(session.id).messages).toEqual([userMessage, assistantMessage])
@@ -258,7 +406,7 @@ describe('SessionRuntimeService', () => {
       userMessage,
       profile
     })
-    service.finalizeRun(run.runId, assistantMessage)
+    service.finishRun(run.runId, { status: 'completed', assistant: assistantMessage })
 
     service.deleteSession(session.id)
 
@@ -266,7 +414,7 @@ describe('SessionRuntimeService', () => {
     expect(() => service.loadSession(session.id)).toThrow('Session does not exist.')
     expect(database.connection.prepare('SELECT * FROM runs').all()).toEqual([])
     expect(database.connection.prepare('SELECT * FROM runtime_events').all()).toEqual([])
-    expect(database.connection.prepare('SELECT * FROM context_builds').all()).toEqual([])
+    expect(database.connection.prepare('SELECT * FROM turns').all()).toEqual([])
   })
 
   it('refuses to delete a session with an active run', async () => {
@@ -301,6 +449,32 @@ describe('SessionRuntimeService', () => {
     ).toHaveLength(1)
   })
 
+  it('keeps an aborted prompt in the next context when no assistant text was produced', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const cancelled = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    service.finishRun(cancelled.runId, { status: 'cancelled' })
+
+    const nextMessage: ChatMessage = {
+      role: 'user',
+      parts: [{ type: 'text', text: 'second prompt' }]
+    }
+    const next = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage: nextMessage,
+      profile
+    })
+
+    expect(service.loadSession(session.id).messages).toEqual([userMessage, nextMessage])
+    expect(service.getContextMessages(next.runId)).toEqual([userMessage, nextMessage])
+  })
+
   it('retries a failed run as the next attempt of its original turn without another user event', async () => {
     const { database, service } = await createService()
     const session = service.createSession({ title: 'Session', defaultProfile: profile })
@@ -310,9 +484,16 @@ describe('SessionRuntimeService', () => {
       userMessage,
       profile
     })
-    service.failRun(failed.runId, { code: 'offline', message: 'Offline' })
+    service.finishRun(failed.runId, {
+      status: 'failed',
+      failure: { code: 'offline', message: 'Offline' }
+    })
 
-    const retried = service.retryRun({ failedRunId: failed.runId, requestId: 'request-2' })
+    const retried = service.retryTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage
+    })
 
     expect(
       database.connection.prepare('SELECT attempt, turn_id FROM runs ORDER BY attempt').all()
@@ -326,5 +507,137 @@ describe('SessionRuntimeService', () => {
         .all()
     ).toHaveLength(1)
     expect(retried.turnId).toBe(failed.turnId)
+    expect(service.getContextMessages(retried.runId)).toEqual([userMessage])
+  })
+
+  it('makes retry request IDs idempotent and rejects changed retry input', async () => {
+    const { database, service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const failed = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    service.finishRun(failed.runId, {
+      status: 'failed',
+      failure: { code: 'offline', message: 'Offline' }
+    })
+    const retried = service.retryTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage
+    })
+
+    expect(
+      service.retryTurn({
+        sessionId: session.id,
+        requestId: 'request-2',
+        userMessage
+      })
+    ).toEqual(retried)
+    expect(() =>
+      service.retryTurn({
+        sessionId: session.id,
+        requestId: 'request-2',
+        userMessage: { role: 'user', parts: [{ type: 'text', text: 'different prompt' }] }
+      })
+    ).toThrow(/different user message/i)
+    expect(database.connection.prepare('SELECT id FROM runs').all()).toHaveLength(2)
+  })
+
+  it('retries a failed user turn without duplicating its persisted message', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const failed = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    service.finishRun(failed.runId, {
+      status: 'failed',
+      failure: { code: 'offline', message: 'Offline' }
+    })
+
+    const retried = service.retryTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage
+    })
+    service.finishRun(retried.runId, { status: 'completed', assistant: assistantMessage })
+
+    expect(service.loadSession(session.id).messages).toEqual([userMessage, assistantMessage])
+  })
+
+  it('keeps later completed turns in context when an earlier failed turn is retried', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const secondUserMessage: ChatMessage = {
+      role: 'user',
+      parts: [{ type: 'text', text: 'second prompt' }]
+    }
+    const thirdUserMessage: ChatMessage = {
+      role: 'user',
+      parts: [{ type: 'text', text: 'third prompt' }]
+    }
+    const thirdAssistantMessage: ChatMessage = {
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'third answer' }]
+    }
+    const retriedAssistantMessage: ChatMessage = {
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'retried second answer' }]
+    }
+
+    const first = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    service.finishRun(first.runId, { status: 'completed', assistant: assistantMessage })
+    const failed = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage: secondUserMessage,
+      profile
+    })
+    service.finishRun(failed.runId, {
+      status: 'failed',
+      failure: { code: 'offline', message: 'Offline' }
+    })
+    const third = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-3',
+      userMessage: thirdUserMessage,
+      profile
+    })
+    service.finishRun(third.runId, { status: 'completed', assistant: thirdAssistantMessage })
+
+    const retried = service.retryTurn({
+      sessionId: session.id,
+      requestId: 'request-4',
+      userMessage: secondUserMessage
+    })
+    service.finishRun(retried.runId, {
+      status: 'completed',
+      assistant: retriedAssistantMessage
+    })
+    const fourth = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-5',
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'fourth prompt' }] },
+      profile
+    })
+    expect(service.getContextMessages(fourth.runId)).toEqual([
+      userMessage,
+      assistantMessage,
+      thirdUserMessage,
+      thirdAssistantMessage,
+      secondUserMessage,
+      retriedAssistantMessage,
+      { role: 'user', parts: [{ type: 'text', text: 'fourth prompt' }] }
+    ])
   })
 })

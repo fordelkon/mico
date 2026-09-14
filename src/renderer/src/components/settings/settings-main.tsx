@@ -10,7 +10,7 @@ import {
   ProvidersSidebar,
   type ProviderId
 } from './providers/providers-sidebar'
-import { useProviderLibrary } from './providers/provider-library'
+import { useProviderLibraryActions, useProviderLibraryState } from './providers/provider-library'
 import { ProvidersSection } from './providers/providers-section'
 import { AppearanceSettings } from './appearances/appearance-settings'
 
@@ -19,7 +19,8 @@ function SettingsContent(): React.JSX.Element {
   const [activeProviderId, setActiveProviderId] = React.useState<ProviderId>(initialProviderId)
   const hasSelectedDefaultProvider = React.useRef(false)
   const providerReorderAnimation = useListReorderAnimation()
-  const { isLoaded, library, selectProvider } = useProviderLibrary()
+  const { selectProvider } = useProviderLibraryActions()
+  const { isLoaded, library } = useProviderLibraryState()
   const getFirstProviderId = React.useCallback(
     (customProviderIds: ProviderId[]) =>
       sortByEnabledOrder(

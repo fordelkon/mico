@@ -1,6 +1,6 @@
 import * as z from 'zod'
 
-import type { ProviderMetadata, UIMessageChunk } from 'ai'
+import type { ProviderMetadata } from 'ai'
 
 import { defineSchema } from '../define'
 
@@ -10,25 +10,14 @@ type ChatReasoningPart = {
   text: string
   providerMetadata?: ProviderMetadata
 }
+type ChatMessageMetadata = { completionState?: 'complete' | 'stopped' }
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant'
   parts: Array<ChatTextPart | ChatReasoningPart>
+  metadata?: ChatMessageMetadata
   providerMetadata?: ProviderMetadata
 }
-type ChatStreamEvent =
-  | { type: 'chunk'; requestId: string; chunk: UIMessageChunk }
-  | { type: 'error'; requestId: string; message: string }
-  | {
-      type: 'retry'
-      requestId: string
-      attempt: number
-      maxAttempts: number
-      retryDelayMs: number
-    }
-  | { type: 'finish'; requestId: string }
-
-const ChatRequestIdSchema = defineSchema(z.string().trim().min(1))
-const ChatConversationIdSchema = defineSchema(z.string().trim().min(1))
+type ChatUserMessage = Omit<ChatMessage, 'role'> & { role: 'user' }
 const ThinkingSelectionSchema = defineSchema(
   z.enum(['default', 'none', 'auto', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 )
@@ -52,73 +41,32 @@ const ChatReasoningPartSchema: z.ZodType<ChatReasoningPart> = defineSchema(
     providerMetadata: z.custom<ProviderMetadata>().optional()
   })
 )
-const ChatMessageSchema: z.ZodType<ChatMessage> = defineSchema(
-  z.object({
-    role: ChatMessageRoleSchema,
-    parts: z.array(z.union([ChatTextPartSchema, ChatReasoningPartSchema])).min(1),
-    providerMetadata: z.custom<ProviderMetadata>().optional()
-  })
+const ChatMessageObjectSchema = z.object({
+  role: ChatMessageRoleSchema,
+  parts: z.array(z.union([ChatTextPartSchema, ChatReasoningPartSchema])).min(1),
+  metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional(),
+  providerMetadata: z.custom<ProviderMetadata>().optional()
+})
+const ChatMessageSchema: z.ZodType<ChatMessage> = defineSchema(ChatMessageObjectSchema)
+const ChatUserMessageSchema: z.ZodType<ChatUserMessage> = defineSchema(
+  ChatMessageObjectSchema.extend({ role: z.literal('user') })
 )
-const ChatStartRequestSchema = defineSchema(
-  z.object({
-    requestId: ChatRequestIdSchema,
-    conversationId: ChatConversationIdSchema,
-    messages: z.array(ChatMessageSchema),
-    thinkingEffort: ThinkingSelectionSchema.optional()
-  })
-)
-const ChatStreamEventSchema: z.ZodType<ChatStreamEvent> = defineSchema(
-  z.discriminatedUnion('type', [
-    z.object({
-      type: z.literal('chunk'),
-      requestId: ChatRequestIdSchema,
-      chunk: z.custom<UIMessageChunk>()
-    }),
-    z.object({
-      type: z.literal('error'),
-      requestId: ChatRequestIdSchema,
-      message: z.string().min(1)
-    }),
-    z.object({
-      type: z.literal('retry'),
-      requestId: ChatRequestIdSchema,
-      attempt: z.number().int().min(2),
-      maxAttempts: z.number().int().min(2),
-      retryDelayMs: z.number().int().min(0)
-    }),
-    z.object({ type: z.literal('finish'), requestId: ChatRequestIdSchema })
-  ])
-)
-
 const chatDataSchemas = {
   chatMessage: ChatMessageSchema,
-  chatConversationId: ChatConversationIdSchema,
-  modelReasoningCapabilities: ModelReasoningCapabilitiesSchema,
-  chatStartRequest: ChatStartRequestSchema,
-  chatStreamEvent: ChatStreamEventSchema
+  modelReasoningCapabilities: ModelReasoningCapabilitiesSchema
 }
 
-type ChatStartRequest = z.infer<typeof ChatStartRequestSchema>
 type ModelReasoningCapabilities = z.infer<typeof ModelReasoningCapabilitiesSchema>
 type ThinkingSelection = z.infer<typeof ThinkingSelectionSchema>
 
 export {
   ChatMessageRoleSchema,
   ChatMessageSchema,
-  ChatConversationIdSchema,
-  ChatRequestIdSchema,
-  ChatStartRequestSchema,
-  ChatStreamEventSchema,
   ChatTextPartSchema,
   ChatReasoningPartSchema,
+  ChatUserMessageSchema,
   ModelReasoningCapabilitiesSchema,
   ThinkingSelectionSchema,
   chatDataSchemas
 }
-export type {
-  ChatMessage,
-  ChatStartRequest,
-  ChatStreamEvent,
-  ModelReasoningCapabilities,
-  ThinkingSelection
-}
+export type { ChatMessage, ChatUserMessage, ModelReasoningCapabilities, ThinkingSelection }

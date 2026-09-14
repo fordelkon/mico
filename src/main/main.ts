@@ -1,9 +1,9 @@
 import { app, ipcMain, type BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 
-import icon from '../../build/icon.png?asset'
+import icon from '../../build/icons/512x512.png?asset'
 import { createChatProviderResolver } from './ai/chat/chat-provider-resolver'
-import { ChatService } from './ai/chat/chat-service'
+import { TurnExecutor } from './ai/chat/turn-executor'
 import { createChatProvider } from '@mico/ai-providers'
 import { IpcChannel } from '@shared/IpcChannel'
 import { registerIpc } from './ipc'
@@ -39,7 +39,7 @@ function flushProviderDraft(window: BrowserWindow): Promise<void> {
 }
 
 let trayService: TrayService
-let chatService: ChatService | undefined
+let turnExecutor: TurnExecutor | undefined
 let sessionRuntimeService: SessionRuntimeService | undefined
 const mainWindowService = new MainWindowService(
   () => trayService.shouldKeepWindowOpen(),
@@ -93,7 +93,7 @@ if (gotTheLock) {
     await sessionDatabase.initialize()
     sessionRuntimeService = new SessionRuntimeService({ database: sessionDatabase })
     sessionRuntimeService.recoverInterruptedRuns()
-    chatService = new ChatService(
+    turnExecutor = new TurnExecutor(
       createChatProviderResolver({
         createChatProvider,
         getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
@@ -106,7 +106,7 @@ if (gotTheLock) {
     mainWindowService.initialize()
     trayService.initialize()
     registerIpc({
-      chat: chatService,
+      turnExecutor,
       mainWindow: mainWindowService,
       preference: preferenceService,
       provider: providerService,
@@ -126,7 +126,7 @@ if (gotTheLock) {
 }
 
 app.on('before-quit', () => {
-  chatService?.dispose()
+  turnExecutor?.dispose()
   sessionDatabase.close()
   trayService.beginQuit()
   trayService.dispose()

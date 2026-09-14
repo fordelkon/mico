@@ -1,11 +1,11 @@
 type SessionMigration = {
-  id: '0001_initial_runtime'
+  id: '0001_runtime_log'
   sql: string
 }
 
 const sessionMigrations: readonly SessionMigration[] = [
   {
-    id: '0001_initial_runtime',
+    id: '0001_runtime_log',
     sql: `
       CREATE TABLE sessions (
         id TEXT PRIMARY KEY NOT NULL,
@@ -32,8 +32,6 @@ const sessionMigrations: readonly SessionMigration[] = [
         turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
         attempt INTEGER NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'failed', 'cancelled', 'interrupted')),
-        execution_profile_snapshot_json TEXT NOT NULL,
-        profile_digest TEXT NOT NULL,
         started_at INTEGER NOT NULL,
         finished_at INTEGER,
         failure_json TEXT,
@@ -45,11 +43,12 @@ const sessionMigrations: readonly SessionMigration[] = [
 
       CREATE TABLE runtime_events (
         id TEXT PRIMARY KEY NOT NULL,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-        sequence INTEGER NOT NULL,
+        session_sequence INTEGER NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN (
+          'run_started',
           'user_message_recorded',
-          'context_built',
           'model_request_started',
           'assistant_output_finalized',
           'run_failed',
@@ -59,25 +58,14 @@ const sessionMigrations: readonly SessionMigration[] = [
         payload_json TEXT NOT NULL,
         payload_digest TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        UNIQUE(run_id, sequence)
+        UNIQUE(session_id, session_sequence)
       );
 
-      CREATE INDEX runtime_events_run_id ON runtime_events(run_id, sequence);
-
-      CREATE TABLE context_builds (
-        id TEXT PRIMARY KEY NOT NULL,
-        run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-        ordinal INTEGER NOT NULL,
-        source_manifest_json TEXT NOT NULL,
-        context_digest TEXT NOT NULL,
-        token_budget INTEGER,
-        estimated_tokens INTEGER NOT NULL,
-        compiler_version TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        UNIQUE(run_id, ordinal)
-      );
-
-      CREATE INDEX context_builds_run_id ON context_builds(run_id, ordinal);
+      CREATE INDEX runtime_events_run_id ON runtime_events(run_id);
+      CREATE INDEX runtime_events_session_id ON runtime_events(session_id, session_sequence);
+      CREATE UNIQUE INDEX runtime_events_run_request_id
+      ON runtime_events(session_id, json_extract(payload_json, '$.requestId'))
+      WHERE kind = 'run_started';
     `
   }
 ]

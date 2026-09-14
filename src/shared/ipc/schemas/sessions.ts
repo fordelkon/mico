@@ -17,9 +17,7 @@ interface SessionsAPI {
     sessionId: string
     title: string
   }) => Promise<z.infer<typeof SessionSummarySchema>>
-  onTitleUpdated: (
-    listener: (update: { conversationId: string; title: string }) => void
-  ) => () => void
+  onTitleUpdated: (listener: (update: { sessionId: string; title: string }) => void) => () => void
 }
 
 const createSessionRequestSchema = defineRoute({

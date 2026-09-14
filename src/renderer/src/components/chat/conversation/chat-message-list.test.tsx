@@ -2,12 +2,16 @@ import '@testing-library/jest-dom/vitest'
 
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
 
 import type { MicoUIMessage } from '@renderer/types/chat'
 
 import { ChatMessageList } from './chat-message-list'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 function RetryHarness(): React.JSX.Element {
   const [wasRetried, setWasRetried] = React.useState(false)
@@ -85,23 +89,19 @@ describe('ChatMessageList', () => {
     }
     const messages = new ObservableMessages()
 
-    try {
-      render(
-        <ChatMessageList
-          conversationId="conversation-1"
-          isResponding={false}
-          messages={messages}
-          retry={{ attempt: 2, maxAttempts: 5, retryDelayMs: 2_000, startedAt: Date.now() }}
-        />
-      )
-      const readsBeforeCountdownTick = messages.latestMessageReads
+    render(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding={false}
+        messages={messages}
+        retry={{ attempt: 2, maxAttempts: 5, retryDelayMs: 2_000, startedAt: Date.now() }}
+      />
+    )
+    const readsBeforeCountdownTick = messages.latestMessageReads
 
-      await act(() => vi.advanceTimersByTimeAsync(250))
+    await act(() => vi.advanceTimersByTimeAsync(250))
 
-      expect(messages.latestMessageReads).toBe(readsBeforeCountdownTick)
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(messages.latestMessageReads).toBe(readsBeforeCountdownTick)
   })
 
   it('keeps the pending thinking state until an assistant response has content', () => {

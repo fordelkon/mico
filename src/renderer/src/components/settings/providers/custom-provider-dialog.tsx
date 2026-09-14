@@ -25,7 +25,7 @@ import { CustomProviderSchema } from '@shared/data/schemas/provider'
 import { BoxesIcon, ChevronDownIcon, CloudIcon, ServerIcon, TerminalIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { useProviderLibrary } from './provider-library'
+import { useProviderLibraryActions } from './provider-library'
 
 type CustomProviderIcon = {
   id: string
@@ -90,7 +90,7 @@ function CustomProviderDialog({
   onOpenChange: (open: boolean) => void
   open: boolean
 }): React.JSX.Element {
-  const { addCustomProvider } = useProviderLibrary()
+  const { addCustomProvider } = useProviderLibraryActions()
   const [customProviderIcon, setCustomProviderIcon] = React.useState('default')
   const [customProviderName, setCustomProviderName] = React.useState('')
   const [customProviderBaseUrl, setCustomProviderBaseUrl] = React.useState('')

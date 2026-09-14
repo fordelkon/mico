@@ -1,4 +1,4 @@
-import { APICallError } from 'ai'
+import { APICallError } from '@ai-sdk/provider'
 
 type ChatErrorDescription = {
   message: string

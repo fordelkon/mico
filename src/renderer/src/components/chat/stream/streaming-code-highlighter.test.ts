@@ -215,4 +215,25 @@ describe('createStreamingCodeHighlighter', () => {
       await session.dispose()
     }
   })
+
+  it('loads a registered non-default theme without WebAssembly', async () => {
+    vi.spyOn(WebAssembly, 'instantiate').mockRejectedValue(
+      new WebAssembly.CompileError('WebAssembly is blocked by CSP')
+    )
+    const session = createStreamingCodeHighlighter({
+      themes: { dark: 'dracula', light: 'github-light' }
+    })
+
+    try {
+      await expect(
+        session.update({
+          code: 'const answer = 42',
+          isStreaming: false,
+          language: 'javascript'
+        })
+      ).resolves.toMatchObject({ isFallback: false })
+    } finally {
+      await session.dispose()
+    }
+  })
 })

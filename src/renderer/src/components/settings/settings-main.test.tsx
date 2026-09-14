@@ -7,7 +7,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProviderLibrary as PersistedProviderLibrary } from '@shared/data/schemas/provider'
 
 import { SettingsMain } from './settings-main'
-import { ProviderLibraryProvider } from './providers/provider-library'
+import {
+  ProviderLibraryProvider,
+  useProviderLibraryActions,
+  useProviderLibraryState
+} from './providers/provider-library'
 
 function renderSettings(): void {
   render(
@@ -15,6 +19,17 @@ function renderSettings(): void {
       <SettingsMain />
     </ProviderLibraryProvider>
   )
+}
+
+function ActionOnlyConsumer({ onRender }: { onRender: () => void }): React.JSX.Element {
+  onRender()
+  const { selectProvider } = useProviderLibraryActions()
+  return <button onClick={() => void selectProvider('ollama')}>Select provider</button>
+}
+
+function SelectedProviderConsumer(): React.JSX.Element {
+  const { library } = useProviderLibraryState()
+  return <output>{library.selectedProviderId ?? 'none'}</output>
 }
 
 async function waitForOllama(): Promise<void> {
@@ -204,6 +219,25 @@ describe('SettingsMain', () => {
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
   })
 
+  it('keeps action-only consumers isolated from provider state updates', async () => {
+    const user = userEvent.setup()
+    const onRender = vi.fn()
+    render(
+      <ProviderLibraryProvider>
+        <ActionOnlyConsumer onRender={onRender} />
+        <SelectedProviderConsumer />
+      </ProviderLibraryProvider>
+    )
+
+    await waitFor(() => expect(providerApi.getLibrary).toHaveBeenCalled())
+    expect(onRender).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Select provider' }))
+
+    expect(screen.getByText('ollama')).toBeVisible()
+    expect(onRender).toHaveBeenCalledTimes(1)
+  })
+
   it('selects the first provider in sidebar order after loading the library', async () => {
     providerApi.getLibrary.mockResolvedValueOnce({
       configurations: [
@@ -252,9 +286,6 @@ describe('SettingsMain', () => {
     renderSettings()
 
     expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
-    })
   })
 
   it('restores the last visited provider after returning to settings', async () => {

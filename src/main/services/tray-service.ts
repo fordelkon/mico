@@ -1,6 +1,6 @@
 import { app, Menu, nativeImage, Tray } from 'electron'
 
-import icon from '../../../build/icon.png?asset'
+import icon from '../../../build/icons/512x512.png?asset'
 import trayTemplateIcon from '../../../build/tray-template.png?asset'
 import windowsIcon from '../../../build/icons/icon.ico?asset'
 

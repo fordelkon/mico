@@ -6,7 +6,7 @@ import type { ProviderConfiguration } from '@shared/data/schemas/provider'
 import { useListReorderAnimation } from '@renderer/hooks/use-list-reorder-animation'
 import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
 
-import { useProviderLibrary } from './provider-library'
+import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
 import type { ProviderId } from './providers-sidebar'
 
 type ProviderStatus = { kind: 'error' | 'success'; message: string } | null
@@ -26,7 +26,8 @@ function ProviderModelsSection({
   providerId: ProviderId
   providerLabel: string
 }): React.JSX.Element {
-  const { library, syncModels, toggleModel } = useProviderLibrary()
+  const { syncModels, toggleModel } = useProviderLibraryActions()
+  const { library } = useProviderLibraryState()
   const [hasFetchedModels, setHasFetchedModels] = React.useState(false)
   const [isFetchingModels, setIsFetchingModels] = React.useState(false)
   const [modelsSearch, setModelsSearch] = React.useState('')

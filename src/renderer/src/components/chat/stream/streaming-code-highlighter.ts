@@ -1,6 +1,29 @@
 import { CodeToTokenTransformStream, type RecallToken } from '@shikijs/stream'
-import { createHighlighter, type HighlighterCore, type ThemedToken } from 'shiki'
+import { createHighlighterCore, type HighlighterCore, type ThemedToken } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
+import { bundledLanguages } from 'shiki/langs'
+
+const themeLoaders = {
+  'catppuccin-latte': () => import('@shikijs/themes/catppuccin-latte'),
+  'catppuccin-mocha': () => import('@shikijs/themes/catppuccin-mocha'),
+  dracula: () => import('@shikijs/themes/dracula'),
+  'github-dark': () => import('@shikijs/themes/github-dark'),
+  'github-light': () => import('@shikijs/themes/github-light'),
+  'gruvbox-dark-medium': () => import('@shikijs/themes/gruvbox-dark-medium'),
+  'gruvbox-light-medium': () => import('@shikijs/themes/gruvbox-light-medium'),
+  'material-theme-lighter': () => import('@shikijs/themes/material-theme-lighter'),
+  'material-theme-palenight': () => import('@shikijs/themes/material-theme-palenight'),
+  monokai: () => import('@shikijs/themes/monokai'),
+  nord: () => import('@shikijs/themes/nord'),
+  'one-dark-pro': () => import('@shikijs/themes/one-dark-pro'),
+  'rose-pine-dawn': () => import('@shikijs/themes/rose-pine-dawn'),
+  'rose-pine-moon': () => import('@shikijs/themes/rose-pine-moon'),
+  'solarized-dark': () => import('@shikijs/themes/solarized-dark'),
+  'solarized-light': () => import('@shikijs/themes/solarized-light'),
+  'tokyo-night': () => import('@shikijs/themes/tokyo-night'),
+  'vitesse-dark': () => import('@shikijs/themes/vitesse-dark'),
+  'vitesse-light': () => import('@shikijs/themes/vitesse-light')
+}
 
 type StreamingCodeHighlightInput = {
   code: string
@@ -182,11 +205,17 @@ async function createDefaultHighlighter(themes: {
   dark: string
   light: string
 }): Promise<HighlighterCore> {
-  return createHighlighter({
+  // SAFETY: theme IDs come from the validated app registry; unknown persisted values are rejected below.
+  const lightTheme = themeLoaders[themes.light as keyof typeof themeLoaders]
+  // SAFETY: theme IDs come from the validated app registry; unknown persisted values are rejected below.
+  const darkTheme = themeLoaders[themes.dark as keyof typeof themeLoaders]
+  if (!lightTheme || !darkTheme) throw new Error('Unsupported syntax highlighting theme.')
+
+  return createHighlighterCore({
     // The renderer CSP disallows WASM compilation, so use the browser-safe regex engine.
     engine: createJavaScriptRegexEngine(),
     langs: [],
-    themes: [themes.light, themes.dark]
+    themes: [lightTheme(), darkTheme()]
   })
 }
 
@@ -298,8 +327,10 @@ class StreamingCodeHighlighterSession implements StreamingCodeHighlighter {
     const highlighter = await this.createHighlighter()
 
     try {
-      // SAFETY: Shiki validates the runtime fence language and rejects unsupported values.
-      await highlighter.loadLanguage(language as Parameters<HighlighterCore['loadLanguage']>[0])
+      // SAFETY: the runtime fence value is used only for a lookup; unsupported values are rejected below.
+      const languageLoader = bundledLanguages[language as keyof typeof bundledLanguages]
+      if (!languageLoader) throw new Error('Unsupported syntax highlighting language.')
+      await highlighter.loadLanguage(languageLoader)
 
       if (this.disposed || generation !== this.generation) {
         throw new Error('Streaming highlighter session was invalidated')

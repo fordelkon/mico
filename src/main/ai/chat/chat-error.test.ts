@@ -1,4 +1,4 @@
-import { APICallError } from 'ai'
+import { APICallError } from '@ai-sdk/provider'
 import { describe, expect, it } from 'vitest'
 
 import { describeChatError } from './chat-error'

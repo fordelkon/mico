@@ -14,14 +14,14 @@ export enum IpcChannel {
   /** Notifies the renderer that the complete resolved theme state changed. */
   Appearance_ThemeChanged = 'appearance:theme-changed',
 
-  /** Cancels a chat request owned by the invoking renderer. */
-  Chat_Abort = 'chat:abort',
-  /** Streams a chat lifecycle event to its owning renderer. */
-  Chat_Event = 'chat:event',
+  /** Cancels a turn owned by the invoking renderer. */
+  Chat_AbortTurn = 'chat:abort-turn',
+  /** Streams a turn lifecycle event to its owning renderer. */
+  Chat_TurnEvent = 'chat:turn-event',
   /** Returns the reasoning capabilities of the selected chat model. */
   Chat_GetCapabilities = 'chat:get-capabilities',
-  /** Starts a chat request owned by the invoking renderer. */
-  Chat_Start = 'chat:start',
+  /** Starts a turn owned by the invoking renderer. */
+  Chat_StartTurn = 'chat:start-turn',
 
   /** Creates a persisted session before its first message. */
   Sessions_Create = 'sessions:create',

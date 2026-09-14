@@ -22,7 +22,7 @@ import type {
 import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
 
-import { useProviderLibrary } from './provider-library'
+import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
 import { ProviderModelsSection } from './provider-models-section'
 import { ProviderTestMenu, type ProviderTestState } from './provider-test-menu'
 import type { ProviderId } from './providers-sidebar'
@@ -69,13 +69,9 @@ function ProvidersSection({
   onProviderReorder: () => void
   providerId: ProviderId
 }): React.JSX.Element {
-  const {
-    flushConfiguration,
-    library,
-    removeCustomProvider,
-    updateConfiguration,
-    updateCustomProvider
-  } = useProviderLibrary()
+  const { flushConfiguration, removeCustomProvider, updateConfiguration, updateCustomProvider } =
+    useProviderLibraryActions()
+  const { library } = useProviderLibraryState()
   const [isApiKeyVisible, setIsApiKeyVisible] = React.useState(false)
   const [hasFetchedModels, setHasFetchedModels] = React.useState(false)
   const [isTestingModel, setIsTestingModel] = React.useState(false)

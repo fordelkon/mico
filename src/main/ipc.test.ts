@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { IpcChannel } from '@shared/IpcChannel'
-import type { ChatStreamEvent, ModelReasoningCapabilities } from '@shared/data/schemas/chat'
+import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
+import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { registerIpc } from './ipc'
 
@@ -9,11 +10,11 @@ type Handler = Parameters<IpcMain['handle']>[1]
 
 function createHarness() {
   const handlers = new Map<string, Handler>()
-  const chat = {
-    abort: vi.fn(),
-    abortAll: vi.fn(),
+  const turnExecutor = {
+    abortTurn: vi.fn(),
+    abortAllTurns: vi.fn(),
     getModelCapabilities: vi.fn(),
-    start: vi.fn()
+    startTurn: vi.fn()
   }
   const mainWindow = {
     close: vi.fn(),
@@ -58,7 +59,7 @@ function createHarness() {
   }
 
   registerIpc(
-    { mainWindow, preference, chat, provider, session },
+    { mainWindow, preference, turnExecutor, provider, session },
     {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
@@ -66,7 +67,7 @@ function createHarness() {
     }
   )
 
-  return { chat, handlers, mainWindow, preference, provider, session }
+  return { turnExecutor, handlers, mainWindow, preference, provider, session }
 }
 
 function createEvent({
@@ -104,12 +105,12 @@ function createEvent({
 
 describe('registerIpc chat handlers', () => {
   it('returns capabilities only to a trusted renderer', async () => {
-    const { chat, handlers, mainWindow } = createHarness()
+    const { turnExecutor, handlers, mainWindow } = createHarness()
     const capabilities: ModelReasoningCapabilities = {
       selectableEfforts: ['medium', 'high'],
       defaultEffort: 'medium'
     }
-    chat.getModelCapabilities.mockResolvedValue(capabilities)
+    turnExecutor.getModelCapabilities.mockResolvedValue(capabilities)
     const trusted = createEvent({ id: 42 })
     const untrusted = createEvent({ id: 43, trusted: false })
     mainWindow.isTrustedRendererUrl.mockReturnValueOnce(true).mockReturnValueOnce(false)
@@ -117,100 +118,153 @@ describe('registerIpc chat handlers', () => {
     await expect(handlers.get(IpcChannel.Chat_GetCapabilities)?.(trusted.event)).resolves.toEqual(
       capabilities
     )
-    expect(chat.getModelCapabilities).toHaveBeenCalledOnce()
+    expect(turnExecutor.getModelCapabilities).toHaveBeenCalledOnce()
     expect(() => handlers.get(IpcChannel.Chat_GetCapabilities)?.(untrusted.event)).toThrow()
   })
 
-  it('starts a trusted request under its sender ID and sends events only to that sender', () => {
-    const { chat, handlers } = createHarness()
+  it('starts a trusted turn under its sender ID and sends events only to that sender', () => {
+    const { turnExecutor, handlers } = createHarness()
     const { event, sender } = createEvent({ id: 42 })
     const request = {
-      conversationId: 'chat-1',
+      sessionId: 'session-1',
       requestId: 'request-1',
-      messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }]
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
     }
-    let emit: ((event: ChatStreamEvent) => void) | undefined
-    let emitTitleUpdated: ((update: { conversationId: string; title: string }) => void) | undefined
-    chat.start.mockImplementation((_input, sink, titleSink) => {
+    let emit: ((event: TurnStreamEvent) => void) | undefined
+    let emitTitleUpdated: ((update: { sessionId: string; title: string }) => void) | undefined
+    turnExecutor.startTurn.mockImplementation((_input, sink, titleSink) => {
       emit = sink
       emitTitleUpdated = titleSink
     })
 
-    handlers.get(IpcChannel.Chat_Start)?.(event, request)
+    handlers.get(IpcChannel.Chat_StartTurn)?.(event, request)
     emit?.({ type: 'finish', requestId: 'request-1' })
-    emitTitleUpdated?.({ conversationId: 'chat-1', title: 'Greet the user' })
+    emitTitleUpdated?.({ sessionId: 'session-1', title: 'Greet the user' })
 
-    expect(chat.start).toHaveBeenCalledWith(
+    expect(turnExecutor.startTurn).toHaveBeenCalledWith(
       { ownerId: '42', request },
       expect.any(Function),
       expect.any(Function)
     )
-    expect(sender.send).toHaveBeenCalledWith(IpcChannel.Chat_Event, {
+    expect(sender.send).toHaveBeenCalledWith(IpcChannel.Chat_TurnEvent, {
       type: 'finish',
       requestId: 'request-1'
     })
     expect(sender.send).toHaveBeenCalledWith(IpcChannel.Sessions_TitleUpdated, {
-      conversationId: 'chat-1',
+      sessionId: 'session-1',
       title: 'Greet the user'
     })
   })
 
+  it('rejects a trusted turn request without a user message', () => {
+    const { turnExecutor, handlers } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    expect(() =>
+      handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
+        sessionId: 'session-1',
+        requestId: 'request-1',
+        userMessage: { role: 'assistant', parts: [{ type: 'text', text: 'Not a prompt' }] }
+      })
+    ).toThrow('Invalid turn request')
+    expect(turnExecutor.startTurn).not.toHaveBeenCalled()
+  })
+
+  it('rejects the legacy conversation ID field in a turn request', () => {
+    const { turnExecutor, handlers } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    expect(() =>
+      handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
+        conversationId: 'conversation-1',
+        requestId: 'request-1',
+        userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
+      })
+    ).toThrow('Invalid turn request')
+    expect(turnExecutor.startTurn).not.toHaveBeenCalled()
+  })
+
+  it('aborts a validated turn under the invoking sender ID', () => {
+    const { turnExecutor, handlers } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    handlers.get(IpcChannel.Chat_AbortTurn)?.(event, 'request-1')
+
+    expect(turnExecutor.abortTurn).toHaveBeenCalledWith({
+      ownerId: '42',
+      requestId: 'request-1'
+    })
+  })
+
+  it.each([undefined, '', { requestId: 'request-1' }])(
+    'rejects an invalid turn abort request',
+    (input) => {
+      const { turnExecutor, handlers } = createHarness()
+      const { event } = createEvent({ id: 42 })
+
+      expect(() => handlers.get(IpcChannel.Chat_AbortTurn)?.(event, input)).toThrow(
+        'Invalid turn request'
+      )
+      expect(turnExecutor.abortTurn).not.toHaveBeenCalled()
+    }
+  )
+
   it.each([
     { isMainFrame: false, trusted: true },
     { isMainFrame: true, trusted: false }
-  ])('rejects untrusted senders before starting chat', ({ isMainFrame, trusted }) => {
-    const { chat, handlers, mainWindow } = createHarness()
+  ])('rejects untrusted senders before starting a turn', ({ isMainFrame, trusted }) => {
+    const { turnExecutor, handlers, mainWindow } = createHarness()
     mainWindow.isTrustedRendererUrl.mockReturnValue(trusted)
     const { event } = createEvent({ id: 42, isMainFrame, trusted })
 
     expect(() =>
-      handlers.get(IpcChannel.Chat_Start)?.(event, {
-        conversationId: 'chat-1',
+      handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
+        sessionId: 'session-1',
         requestId: 'request-1',
-        messages: []
+        userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
       })
     ).toThrow()
-    expect(chat.start).not.toHaveBeenCalled()
+    expect(turnExecutor.startTurn).not.toHaveBeenCalled()
   })
 
   it('aborts all runs only when the invoking sender is destroyed', () => {
-    const { chat, handlers } = createHarness()
+    const { turnExecutor, handlers } = createHarness()
     const first = createEvent({ id: 42 })
     const second = createEvent({ id: 43 })
 
-    handlers.get(IpcChannel.Chat_Start)?.(first.event, {
-      conversationId: 'chat-1',
+    handlers.get(IpcChannel.Chat_StartTurn)?.(first.event, {
+      sessionId: 'session-1',
       requestId: 'request-1',
-      messages: []
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
     })
-    handlers.get(IpcChannel.Chat_Start)?.(second.event, {
-      conversationId: 'chat-1',
+    handlers.get(IpcChannel.Chat_StartTurn)?.(second.event, {
+      sessionId: 'session-1',
       requestId: 'request-1',
-      messages: []
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
     })
     first.destroyedListeners.forEach((listener) => listener())
 
-    expect(chat.abortAll).toHaveBeenCalledWith('42')
-    expect(chat.abortAll).not.toHaveBeenCalledWith('43')
+    expect(turnExecutor.abortAllTurns).toHaveBeenCalledWith('42')
+    expect(turnExecutor.abortAllTurns).not.toHaveBeenCalledWith('43')
   })
 
   it('stops the owner run instead of sending to a disposed renderer frame', () => {
-    const { chat, handlers } = createHarness()
+    const { turnExecutor, handlers } = createHarness()
     const { event, sender } = createEvent({ id: 42, frameDestroyed: true })
-    let emit: ((event: ChatStreamEvent) => void) | undefined
-    chat.start.mockImplementation((_input, sink) => {
+    let emit: ((event: TurnStreamEvent) => void) | undefined
+    turnExecutor.startTurn.mockImplementation((_input, sink) => {
       emit = sink
     })
 
-    handlers.get(IpcChannel.Chat_Start)?.(event, {
-      conversationId: 'chat-1',
+    handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
+      sessionId: 'session-1',
       requestId: 'request-1',
-      messages: []
+      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
     })
     emit?.({ type: 'finish', requestId: 'request-1' })
 
     expect(sender.send).not.toHaveBeenCalled()
-    expect(chat.abortAll).toHaveBeenCalledWith('42')
+    expect(turnExecutor.abortAllTurns).toHaveBeenCalledWith('42')
   })
 })
 

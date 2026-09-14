@@ -1,36 +1,39 @@
 import { createHash } from 'node:crypto'
 
 import type { ChatProvider, ChatProviderConfiguration } from '@mico/ai-providers'
-import type { ChatStartRequest, ChatStreamEvent } from '@shared/data/schemas/chat'
+import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
 
 import { describeChatError } from './chat-error'
 import type { ChatProviderResolver } from './chat-provider-resolver'
-import {
-  SessionRuntimeService,
-  type ExecutionProfileSnapshot
+import type {
+  ExecutionProfileSnapshot,
+  SessionRuntimeService
 } from '../sessions/session-runtime-service'
 
-type ChatRun = {
+type ActiveTurn = {
+  assistantTextBuilder: CappedTextBuilder
   controller: AbortController
+  emit: (event: TurnStreamEvent) => void
   ownerId: string
+  requestId: string
   runId?: string
+  terminal: boolean
 }
 
-type SessionTitleUpdate = { conversationId: string; title: string }
+type SessionTitleUpdate = { sessionId: string; title: string }
 
-type ChatServiceOptions = {
+type TurnExecutorOptions = {
   getSelectedChatConfiguration?: () => ChatProviderConfiguration | null
   maxAssistantTextChars?: number
   maxAttempts?: number
   retryDelayMs?: number
   runtime?: Pick<
     SessionRuntimeService,
-    | 'cancelRun'
-    | 'failRun'
-    | 'finalizeRun'
+    | 'finishRun'
     | 'getContextMessages'
     | 'markRequestStarted'
     | 'renameSessionIfCurrentTitle'
+    | 'retryTurn'
     | 'startTurn'
   >
 }
@@ -90,8 +93,8 @@ function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-class ChatService {
-  private readonly runs = new Map<string, ChatRun>()
+class TurnExecutor {
+  private readonly activeTurns = new Map<string, ActiveTurn>()
   private readonly titleGenerationSessions = new Set<string>()
   private readonly maxAttempts: number
   private readonly maxAssistantTextChars: number
@@ -107,7 +110,7 @@ class ChatService {
       retryDelayMs = DEFAULT_RETRY_DELAY_MS,
       runtime,
       getSelectedChatConfiguration
-    }: ChatServiceOptions = {}
+    }: TurnExecutorOptions = {}
   ) {
     this.resolveProvider = resolveProvider
     this.maxAttempts = maxAttempts
@@ -117,64 +120,66 @@ class ChatService {
     this.getSelectedChatConfiguration = getSelectedChatConfiguration
   }
 
-  private readonly runtime: ChatServiceOptions['runtime']
-  private readonly getSelectedChatConfiguration: ChatServiceOptions['getSelectedChatConfiguration']
+  private readonly runtime: TurnExecutorOptions['runtime']
+  private readonly getSelectedChatConfiguration: TurnExecutorOptions['getSelectedChatConfiguration']
 
   getModelCapabilities(): ReturnType<ChatProvider['getModelCapabilities']> {
     return this.resolveProvider()?.getModelCapabilities() ?? Promise.resolve(null)
   }
 
-  start(
-    { ownerId, request }: { ownerId: string; request: ChatStartRequest },
-    emit: (event: ChatStreamEvent) => void,
+  startTurn(
+    { ownerId, request }: { ownerId: string; request: TurnStartRequest },
+    emit: (event: TurnStreamEvent) => void,
     onTitleUpdated?: (update: SessionTitleUpdate) => void
   ): void {
-    this.abort({ ownerId, requestId: request.requestId })
+    this.abortTurn({ ownerId, requestId: request.requestId })
 
-    const key = this.getRunKey(ownerId, request.requestId)
-    const run = { controller: new AbortController(), ownerId }
-    this.runs.set(key, run)
-    void this.consume({ key, request, run, emit, onTitleUpdated })
+    const key = this.getTurnKey(ownerId, request.requestId)
+    const turn = {
+      assistantTextBuilder: new CappedTextBuilder(this.maxAssistantTextChars),
+      controller: new AbortController(),
+      emit,
+      ownerId,
+      requestId: request.requestId,
+      terminal: false
+    }
+    this.activeTurns.set(key, turn)
+    void this.execute({ key, request, turn, emit, onTitleUpdated })
   }
 
-  abort({ ownerId, requestId }: { ownerId: string; requestId: string }): void {
-    const run = this.runs.get(this.getRunKey(ownerId, requestId))
-    run?.controller.abort()
-    if (run?.runId) this.runtime?.cancelRun(run.runId)
+  abortTurn({ ownerId, requestId }: { ownerId: string; requestId: string }): void {
+    const turn = this.activeTurns.get(this.getTurnKey(ownerId, requestId))
+    if (turn) this.cancelTurn(turn)
   }
 
-  abortAll(ownerId: string): void {
-    for (const run of this.runs.values()) {
-      if (run.ownerId === ownerId) {
-        run.controller.abort()
-        if (run.runId) this.runtime?.cancelRun(run.runId)
+  abortAllTurns(ownerId: string): void {
+    for (const turn of this.activeTurns.values()) {
+      if (turn.ownerId === ownerId) {
+        this.cancelTurn(turn)
       }
     }
   }
 
   dispose(): void {
-    for (const run of this.runs.values()) {
-      run.controller.abort()
-      if (run.runId) this.runtime?.cancelRun(run.runId)
+    for (const turn of this.activeTurns.values()) {
+      this.cancelTurn(turn)
     }
   }
 
-  private async consume({
+  private async execute({
     key,
     request,
-    run,
+    turn,
     emit,
     onTitleUpdated
   }: {
     key: string
-    request: ChatStartRequest
-    run: ChatRun
-    emit: (event: ChatStreamEvent) => void
+    request: TurnStartRequest
+    turn: ActiveTurn
+    emit: (event: TurnStreamEvent) => void
     onTitleUpdated?: (update: SessionTitleUpdate) => void
   }): Promise<void> {
     let receivedChunk = false
-    const assistantTextBuilder = new CappedTextBuilder(this.maxAssistantTextChars)
-
     try {
       const provider = this.resolveProvider()
       if (!provider) throw new Error('Select an enabled model in Settings before chatting.')
@@ -182,20 +187,26 @@ class ChatService {
       if (this.runtime) {
         const configuration = this.getSelectedChatConfiguration?.()
         if (!configuration) throw new Error('Select an enabled model in Settings before chatting.')
-        const started = this.runtime.startTurn({
-          sessionId: request.conversationId,
-          requestId: request.requestId,
-          userMessage: getLatestUserMessage(request.messages),
-          profile: toExecutionProfile(configuration, request.thinkingEffort ?? 'default')
-        })
-        run.runId = started.runId
+        const started = request.retry
+          ? this.runtime.retryTurn({
+              sessionId: request.sessionId,
+              requestId: request.requestId,
+              userMessage: request.userMessage
+            })
+          : this.runtime.startTurn({
+              sessionId: request.sessionId,
+              requestId: request.requestId,
+              userMessage: request.userMessage,
+              profile: toExecutionProfile(configuration, request.thinkingEffort ?? 'default')
+            })
+        turn.runId = started.runId
         this.runtime.markRequestStarted(started.runId)
-        if (started.contextBuild.sourceManifest.events.length === 1) {
+        if (started.shouldGenerateTitle) {
           this.startTitleGeneration(
             provider,
-            request.conversationId,
-            getMessageText(getLatestUserMessage(request.messages)),
-            run.controller.signal,
+            request.sessionId,
+            getMessageText(request.userMessage),
+            turn.controller.signal,
             onTitleUpdated
           )
         }
@@ -204,19 +215,19 @@ class ChatService {
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
           const stream = await provider.stream({
-            conversationKey: `${run.ownerId}:${request.conversationId}`,
-            messages: run.runId
-              ? (this.runtime?.getContextMessages(run.runId) ?? request.messages)
-              : request.messages,
+            conversationKey: `${turn.ownerId}:${request.sessionId}`,
+            messages: turn.runId
+              ? (this.runtime?.getContextMessages(turn.runId) ?? [request.userMessage])
+              : [request.userMessage],
             thinkingEffort: request.thinkingEffort ?? 'default',
-            signal: run.controller.signal
+            signal: turn.controller.signal
           })
           for await (const chunk of stream) {
-            if (!run.controller.signal.aborted) {
+            if (!turn.controller.signal.aborted) {
               receivedChunk = true
               if (chunk.type === 'text-delta') {
                 // Chunks append in O(delta); the full string is only materialized when read.
-                const visibleDelta = assistantTextBuilder.append(chunk.delta)
+                const visibleDelta = turn.assistantTextBuilder.append(chunk.delta)
                 if (visibleDelta) {
                   emit({
                     type: 'chunk',
@@ -230,21 +241,24 @@ class ChatService {
             }
           }
 
-          if (!run.controller.signal.aborted) {
-            if (run.runId) {
-              this.runtime?.finalizeRun(run.runId, {
-                role: 'assistant',
-                parts: [{ type: 'text', text: assistantTextBuilder.toString() }]
+          if (!turn.controller.signal.aborted) {
+            if (turn.runId) {
+              this.runtime?.finishRun(turn.runId, {
+                status: 'completed',
+                assistant: {
+                  role: 'assistant',
+                  parts: [{ type: 'text', text: turn.assistantTextBuilder.toString() }]
+                }
               })
             }
-            emit({ type: 'finish', requestId: request.requestId })
+            this.emitTerminal(turn, { type: 'finish', requestId: request.requestId })
           }
           return
         } catch (error) {
           const providerError =
             error instanceof Error ? error : new Error('Unknown chat provider error')
           const canRetry =
-            !run.controller.signal.aborted &&
+            !turn.controller.signal.aborted &&
             !receivedChunk &&
             attempt < this.maxAttempts &&
             describeChatError(providerError).retryable
@@ -259,18 +273,21 @@ class ChatService {
             maxAttempts: this.maxAttempts,
             retryDelayMs
           })
-          await waitForRetry(retryDelayMs, run.controller.signal)
+          await waitForRetry(retryDelayMs, turn.controller.signal)
         }
       }
     } catch (error) {
-      if (!run.controller.signal.aborted) {
-        if (run.runId) {
+      if (!turn.controller.signal.aborted) {
+        if (turn.runId) {
           const described = describeChatError(
             error instanceof Error ? error : new Error('Unknown chat provider error')
           )
-          this.runtime?.failRun(run.runId, { code: 'provider_error', message: described.message })
+          this.runtime?.finishRun(turn.runId, {
+            status: 'failed',
+            failure: { code: 'provider_error', message: described.message }
+          })
         }
-        emit({
+        this.emitTerminal(turn, {
           type: 'error',
           requestId: request.requestId,
           message: describeChatError(
@@ -279,13 +296,43 @@ class ChatService {
         })
       }
     } finally {
-      if (run.controller.signal.aborted && run.runId) this.runtime?.cancelRun(run.runId)
-      if (this.runs.get(key) === run) this.runs.delete(key)
+      if (this.activeTurns.get(key) === turn) this.activeTurns.delete(key)
     }
   }
 
-  private getRunKey(ownerId: string, requestId: string): string {
+  private getTurnKey(ownerId: string, requestId: string): string {
     return `${ownerId.length}:${ownerId}${requestId}`
+  }
+
+  private cancelPersistedRun(turn: ActiveTurn): void {
+    if (!turn.runId) return
+    const text = turn.assistantTextBuilder.toString()
+    if (!text) {
+      this.runtime?.finishRun(turn.runId, { status: 'cancelled' })
+      return
+    }
+
+    this.runtime?.finishRun(turn.runId, {
+      status: 'cancelled',
+      assistant: {
+        role: 'assistant',
+        parts: [{ type: 'text', text }],
+        metadata: { completionState: 'stopped' }
+      }
+    })
+  }
+
+  private cancelTurn(turn: ActiveTurn): void {
+    if (turn.terminal) return
+    turn.controller.abort()
+    this.cancelPersistedRun(turn)
+    this.emitTerminal(turn, { type: 'cancelled', requestId: turn.requestId })
+  }
+
+  private emitTerminal(turn: ActiveTurn, event: TurnTerminalEvent): void {
+    if (turn.terminal) return
+    turn.terminal = true
+    turn.emit(event)
   }
 
   private startTitleGeneration(
@@ -332,7 +379,7 @@ class ChatService {
           DEFAULT_SESSION_TITLE,
           title
         )
-        if (renamed) onTitleUpdated?.({ conversationId: sessionId, title: renamed.title })
+        if (renamed) onTitleUpdated?.({ sessionId, title: renamed.title })
       }
     } catch {
       // Title generation is best-effort and must never affect the user-visible chat response.
@@ -406,15 +453,7 @@ class CappedTextBuilder {
   }
 }
 
-function getLatestUserMessage(
-  messages: ChatStartRequest['messages']
-): ChatStartRequest['messages'][number] {
-  const message = [...messages].reverse().find(({ role }) => role === 'user')
-  if (!message) throw new Error('Chat request must include a user message.')
-  return message
-}
-
-function getMessageText(message: ChatStartRequest['messages'][number]): string {
+function getMessageText(message: TurnStartRequest['userMessage']): string {
   return message.parts
     .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
     .map((part) => part.text)
@@ -452,4 +491,4 @@ function toExecutionProfile(
   }
 }
 
-export { ChatService }
+export { TurnExecutor }

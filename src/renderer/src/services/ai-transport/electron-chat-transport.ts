@@ -1,36 +1,41 @@
 import type { ChatTransport, UIMessageChunk } from 'ai'
 
-import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
-import type { ChatAPI } from '@shared/ipc/schemas/chat'
+import type { ChatUserMessage, ThinkingSelection } from '@shared/data/schemas/chat'
+import type { ChatAPI, TurnStartRequest } from '@shared/ipc/schemas/chat'
 import type { MicoUIMessage } from '@renderer/types/chat'
 
-function toChatMessages(messages: MicoUIMessage[]): ChatMessage[] {
-  return messages.flatMap((message) => {
-    const parts: ChatMessage['parts'] = []
-    for (const part of message.parts) {
-      if (part.type === 'text' && part.text.trim()) parts.push({ type: 'text', text: part.text })
-      if (part.type === 'reasoning' && part.text) {
-        const reasoningPart: ChatMessage['parts'][number] = { type: 'reasoning', text: part.text }
-        if (part.providerMetadata) reasoningPart.providerMetadata = part.providerMetadata
-        parts.push(reasoningPart)
+function toLatestUserMessage(messages: MicoUIMessage[]): ChatUserMessage {
+  const message = messages.findLast(({ role }) => role === 'user')
+  if (!message) throw new Error('Chat request must include a user message.')
+
+  const parts: ChatUserMessage['parts'] = []
+  for (const part of message.parts) {
+    if (part.type === 'text' && part.text.trim()) parts.push({ type: 'text', text: part.text })
+    if (part.type === 'reasoning' && part.text) {
+      const reasoningPart: ChatUserMessage['parts'][number] = {
+        type: 'reasoning',
+        text: part.text
       }
+      if (part.providerMetadata) reasoningPart.providerMetadata = part.providerMetadata
+      parts.push(reasoningPart)
     }
-    if (!parts.length) return []
-    const chatMessage: ChatMessage = { role: message.role, parts }
-    if (message.metadata?.providerMetadata)
-      chatMessage.providerMetadata = message.metadata.providerMetadata
-    return [chatMessage]
-  })
+  }
+  if (!parts.length) throw new Error('Chat request must include message content.')
+
+  const userMessage: ChatUserMessage = { role: 'user', parts }
+  if (message.metadata?.providerMetadata)
+    userMessage.providerMetadata = message.metadata.providerMetadata
+  return userMessage
 }
 
-type ChatTransportStatus =
+type TurnTransportStatus =
   | { type: 'retrying'; attempt: number; maxAttempts: number; retryDelayMs: number }
   | { type: 'streaming' }
 
 type ElectronChatTransportOptions = {
-  conversationId: string
+  sessionId: string
   getThinkingEffort: () => ThinkingSelection
-  onStatusChange?: (status: ChatTransportStatus) => void
+  onStatusChange?: (status: TurnTransportStatus) => void
 }
 
 const TEXT_DELTA_BATCH_DELAY_MS = 16
@@ -38,16 +43,16 @@ const TEXT_DELTA_BATCH_MAX_CHARS = 4 * 1024
 
 class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   readonly #api: ChatAPI
-  readonly #conversationId: string
+  readonly #sessionId: string
   readonly #getThinkingEffort: () => ThinkingSelection
   readonly #onStatusChange?: ElectronChatTransportOptions['onStatusChange']
 
   constructor(
     api: ChatAPI,
-    { conversationId, getThinkingEffort, onStatusChange }: ElectronChatTransportOptions
+    { sessionId, getThinkingEffort, onStatusChange }: ElectronChatTransportOptions
   ) {
     this.#api = api
-    this.#conversationId = conversationId
+    this.#sessionId = sessionId
     this.#getThinkingEffort = getThinkingEffort
     this.#onStatusChange = onStatusChange
   }
@@ -115,7 +120,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
 
           enqueueTextDelta(chunk)
         }
-        const unsubscribe = this.#api.onEvent((event) => {
+        const unsubscribe = this.#api.onTurnEvent((event) => {
           if (!active || event.requestId !== requestId) return
 
           if (event.type === 'chunk') {
@@ -137,15 +142,21 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
           // Terminal events must not discard the last batched text delta.
           flushPendingTextDelta()
           stop?.()
-          if (event.type === 'error') controller.error(new Error(event.message))
-          else controller.close()
+          switch (event.type) {
+            case 'error':
+              controller.error(new Error(event.message))
+              return
+            case 'cancelled':
+            case 'finish':
+              controller.close()
+          }
         })
         const abort = (): void => {
           if (!active) return
 
           clearPendingTextDelta()
           stop?.()
-          void this.#api.abort(requestId)
+          void this.#api.abortTurn(requestId)
           controller.close()
         }
 
@@ -161,23 +172,23 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
         options.abortSignal?.addEventListener('abort', abort, { once: true })
         if (options.abortSignal?.aborted) abort()
         else {
-          void this.#api
-            .start({
-              conversationId: this.#conversationId,
-              requestId,
-              messages: toChatMessages(options.messages),
-              thinkingEffort
-            })
-            .catch(() => {
-              if (!active) return
+          const request: TurnStartRequest = {
+            sessionId: this.#sessionId,
+            requestId,
+            userMessage: toLatestUserMessage(options.messages),
+            thinkingEffort
+          }
+          if (options.trigger === 'regenerate-message') request.retry = true
+          void this.#api.startTurn(request).catch(() => {
+            if (!active) return
 
-              stop?.()
-              controller.error(new Error('Unable to start chat. Please try again.'))
-            })
+            stop?.()
+            controller.error(new Error('Unable to start chat. Please try again.'))
+          })
         }
       }
     })
   }
 }
 
-export { ElectronChatTransport, type ChatTransportStatus }
+export { ElectronChatTransport, type TurnTransportStatus }

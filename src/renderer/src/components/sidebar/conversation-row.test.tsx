@@ -2,11 +2,15 @@ import '@testing-library/jest-dom/vitest'
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SidebarProvider } from '@mico/ui'
 
 import { ConversationRow } from './conversation-row'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('ConversationRow', () => {
   it('focuses and selects the title after renaming from the context menu', async () => {
@@ -65,28 +69,24 @@ describe('ConversationRow', () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
 
-    try {
-      render(
-        <SidebarProvider>
-          <ConversationRow
-            conversation={{ id: 'conversation-1', title: 'Design notes' }}
-            isResponding
-            onDeleteConversation={vi.fn()}
-            onRenameConversation={vi.fn()}
-            onSelectConversation={vi.fn()}
-            selected={false}
-          />
-        </SidebarProvider>
-      )
+    render(
+      <SidebarProvider>
+        <ConversationRow
+          conversation={{ id: 'conversation-1', title: 'Design notes' }}
+          isResponding
+          onDeleteConversation={vi.fn()}
+          onRenameConversation={vi.fn()}
+          onSelectConversation={vi.fn()}
+          selected={false}
+        />
+      </SidebarProvider>
+    )
 
-      const spinner = screen.getByRole('status', { name: 'Generating response' })
-      expect(spinner).not.toHaveStyle({ animationDelay: '-500ms' })
+    const spinner = screen.getByRole('status', { name: 'Generating response' })
+    expect(spinner).not.toHaveStyle({ animationDelay: '-500ms' })
 
-      await act(() => vi.advanceTimersByTime(500))
+    await act(() => vi.advanceTimersByTime(500))
 
-      expect(spinner).toHaveStyle({ animationDelay: '-500ms' })
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(spinner).toHaveStyle({ animationDelay: '-500ms' })
   })
 })

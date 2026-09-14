@@ -76,20 +76,20 @@ const appearance: AppearanceAPI = {
 }
 
 const chat: ChatAPI = {
-  abort: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_Abort, requestId),
+  abortTurn: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_AbortTurn, requestId),
   getCapabilities: () => ipcRenderer.invoke(IpcChannel.Chat_GetCapabilities),
-  onEvent: (listener) => {
+  onTurnEvent: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,
-      chatEvent: Parameters<typeof listener>[0]
+      turnEvent: Parameters<typeof listener>[0]
     ): void => {
-      listener(chatEvent)
+      listener(turnEvent)
     }
 
-    ipcRenderer.on(IpcChannel.Chat_Event, wrappedListener)
-    return () => ipcRenderer.removeListener(IpcChannel.Chat_Event, wrappedListener)
+    ipcRenderer.on(IpcChannel.Chat_TurnEvent, wrappedListener)
+    return () => ipcRenderer.removeListener(IpcChannel.Chat_TurnEvent, wrappedListener)
   },
-  start: (request) => ipcRenderer.invoke(IpcChannel.Chat_Start, request)
+  startTurn: (request) => ipcRenderer.invoke(IpcChannel.Chat_StartTurn, request)
 }
 
 const providers: ProvidersAPI = {

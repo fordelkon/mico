@@ -21,26 +21,38 @@ type SessionSummary = {
 
 type PersistedSession = SessionSummary & { messages: ChatMessage[] }
 
-type SourceManifest = { events: Array<{ eventId: string; digest: string }> }
-type ContextBuild = { id: string; sourceManifest: SourceManifest }
-type AppendedEvent = { id: string; payloadDigest: string }
-type VisibleMessage = { role: ChatMessage['role']; parts: Array<{ type: 'text'; text: string }> }
-type EventPayload = {
-  code?: string
-  contextBuildId?: string
-  message?: string | VisibleMessage
-  requestId?: string
-  sourceManifest?: SourceManifest
+type VisibleMessage = {
+  role: ChatMessage['role']
+  parts: Array<{ type: 'text'; text: string }>
+  metadata?: ChatMessage['metadata']
 }
+type RuntimeEventPayloads = {
+  run_started: {
+    attempt: number
+    profile: ExecutionProfileSnapshot
+    requestId: string
+  }
+  user_message_recorded: { message: VisibleMessage }
+  model_request_started: Record<string, never>
+  assistant_output_finalized: { message: VisibleMessage }
+  run_failed: { code: string; message: string }
+  run_cancelled: Record<string, never>
+  run_completed: Record<string, never>
+}
+type RuntimeEventKind = keyof RuntimeEventPayloads
 type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string
 type JsonObject = { [key: string]: JsonValue }
-type StartedRun = { runId: string; turnId: string; contextBuild: ContextBuild }
+type StartedRun = { runId: string; turnId: string; shouldGenerateTitle: boolean }
 type StartTurnInput = {
   sessionId: string
   requestId: string
   userMessage: ChatMessage
   profile: ExecutionProfileSnapshot
 }
+type RunOutcome =
+  | { status: 'completed'; assistant: ChatMessage }
+  | { status: 'failed'; failure: { code: string; message: string } }
+  | { status: 'cancelled'; assistant?: ChatMessage }
 type SessionRuntimeServiceDependencies = {
   createId?: () => string
   database: SessionDatabase
@@ -99,14 +111,15 @@ class SessionRuntimeService {
     // SAFETY: the selected columns are fixed by this query.
     const rows = this.dependencies.database.connection
       .prepare(
-        `SELECT runtime_events.kind, runtime_events.payload_json
+        `SELECT runtime_events.payload_json, runtime_events.payload_digest
          FROM runtime_events
          JOIN runs ON runs.id = runtime_events.run_id
          JOIN turns ON turns.id = runs.turn_id
          WHERE turns.session_id = ? AND runtime_events.kind IN ('user_message_recorded', 'assistant_output_finalized')
-         ORDER BY turns.ordinal, runs.attempt, runtime_events.sequence`
+         ORDER BY turns.ordinal, runs.attempt, runtime_events.session_sequence`
       )
-      .all(sessionId) as Array<{ kind: string; payload_json: string }>
+      .all(sessionId) as Array<{ payload_json: string; payload_digest: string }>
+    for (const row of rows) this.assertPayloadDigest(row)
     return {
       ...toSessionSummary(session),
       messages: rows.map(({ payload_json }) => parseMessagePayload(payload_json).message)
@@ -114,15 +127,81 @@ class SessionRuntimeService {
   }
 
   getContextMessages(runId: string): ChatMessage[] {
-    const { contextBuild } = this.toStartedRun(this.getRunRow(runId))
-    return contextBuild.sourceManifest.events.map(({ eventId }) => {
-      // SAFETY: source manifests only reference runtime events created by this service.
-      const event = this.dependencies.database.connection
-        .prepare('SELECT payload_json FROM runtime_events WHERE id = ?')
-        .get(eventId) as { payload_json: string } | undefined
-      if (!event) throw new Error('Context source event does not exist.')
-      return parseMessagePayload(event.payload_json).message
-    })
+    // A terminal event accepts one attempt into model history. Ordering accepted attempts by the
+    // terminal event's session sequence preserves retries at the point they actually succeeded,
+    // while the current turn's user message is always projected last.
+    // SAFETY: the CTE selects only schema-owned event payload and digest columns.
+    const rows = this.dependencies.database.connection
+      .prepare(
+        `WITH current_run AS (
+           SELECT runs.id, runs.session_id, runs.turn_id,
+                  started.session_sequence AS started_sequence
+           FROM runs
+           JOIN runtime_events AS started
+             ON started.run_id = runs.id AND started.kind = 'run_started'
+           WHERE runs.id = ?
+         ), accepted_messages AS (
+           SELECT terminal.session_sequence AS group_sequence,
+                  0 AS item_order,
+                  user_event.payload_json,
+                  user_event.payload_digest
+           FROM current_run
+           JOIN runs AS accepted_run
+             ON accepted_run.session_id = current_run.session_id
+            AND accepted_run.id <> current_run.id
+           JOIN runtime_events AS terminal
+             ON terminal.run_id = accepted_run.id
+            AND terminal.kind IN ('run_completed', 'run_cancelled')
+            AND terminal.session_sequence < current_run.started_sequence
+           JOIN runs AS user_run ON user_run.turn_id = accepted_run.turn_id
+           JOIN runtime_events AS user_event
+             ON user_event.run_id = user_run.id
+            AND user_event.kind = 'user_message_recorded'
+
+           UNION ALL
+
+           SELECT terminal.session_sequence AS group_sequence,
+                  1 AS item_order,
+                  assistant_event.payload_json,
+                  assistant_event.payload_digest
+           FROM current_run
+           JOIN runs AS accepted_run
+             ON accepted_run.session_id = current_run.session_id
+            AND accepted_run.id <> current_run.id
+           JOIN runtime_events AS terminal
+             ON terminal.run_id = accepted_run.id
+            AND terminal.kind IN ('run_completed', 'run_cancelled')
+            AND terminal.session_sequence < current_run.started_sequence
+           JOIN runtime_events AS assistant_event
+             ON assistant_event.run_id = accepted_run.id
+            AND assistant_event.kind = 'assistant_output_finalized'
+         ), current_message AS (
+           SELECT 9223372036854775807 AS group_sequence,
+                  0 AS item_order,
+                  user_event.payload_json,
+                  user_event.payload_digest
+           FROM current_run
+           JOIN runs AS user_run ON user_run.turn_id = current_run.turn_id
+           JOIN runtime_events AS user_event
+             ON user_event.run_id = user_run.id
+            AND user_event.kind = 'user_message_recorded'
+         )
+         SELECT payload_json, payload_digest
+         FROM (
+           SELECT * FROM accepted_messages
+           UNION ALL
+           SELECT * FROM current_message
+         )
+         ORDER BY group_sequence, item_order`
+      )
+      .all(runId) as Array<{
+      payload_json: string
+      payload_digest: string
+    }>
+    if (!rows.length) throw new Error('Run does not exist.')
+    if (rows.some(({ payload_json, payload_digest }) => digest(payload_json) !== payload_digest))
+      throw new Error('Runtime event payload digest does not match its stored value.')
+    return rows.map(({ payload_json }) => parseMessagePayload(payload_json).message)
   }
 
   renameSession(sessionId: string, title: string): SessionSummary {
@@ -162,8 +241,13 @@ class SessionRuntimeService {
   startTurn(input: StartTurnInput): StartedRun {
     return this.dependencies.database.transaction(() => {
       const existing = this.findRunByRequestId(input.sessionId, input.requestId)
-      if (existing) return this.toStartedRun(existing)
-      if (!this.findSession(input.sessionId)) throw new Error('Session does not exist.')
+      if (existing) {
+        if (existing.attempt !== 1)
+          throw new Error('Request ID was already used to retry an existing turn.')
+        this.assertStartTurnReplay(existing, input)
+        return this.toStartedRun(existing)
+      }
+      this.findSession(input.sessionId)
       const active = this.dependencies.database.connection
         .prepare("SELECT id FROM runs WHERE session_id = ? AND status = 'running'")
         .get(input.sessionId)
@@ -172,65 +256,87 @@ class SessionRuntimeService {
       const now = this.dependencies.now()
       const turnId = this.dependencies.createId()
       const runId = this.dependencies.createId()
-      const turnOrdinal = this.nextOrdinal('turns', 'session_id', input.sessionId)
+      const run: RunRow = {
+        id: runId,
+        session_id: input.sessionId,
+        turn_id: turnId,
+        attempt: 1,
+        status: 'running'
+      }
+      const turnOrdinal = this.nextTurnOrdinal(input.sessionId)
       this.dependencies.database.connection
         .prepare('INSERT INTO turns (id, session_id, ordinal, created_at) VALUES (?, ?, ?, ?)')
         .run(turnId, input.sessionId, turnOrdinal, now)
-      const profileJson = canonicalJson(input.profile)
       this.dependencies.database.connection
         .prepare(
-          `INSERT INTO runs (id, session_id, turn_id, attempt, status, execution_profile_snapshot_json, profile_digest, started_at, finished_at, failure_json)
-           VALUES (?, ?, ?, 1, 'running', ?, ?, ?, NULL, NULL)`
+          `INSERT INTO runs (id, session_id, turn_id, attempt, status, started_at, finished_at, failure_json)
+           VALUES (?, ?, ?, 1, 'running', ?, NULL, NULL)`
         )
-        .run(runId, input.sessionId, turnId, profileJson, digest(profileJson), now)
-      const userEvent = this.appendEvent(runId, 'user_message_recorded', {
-        message: visibleMessage(input.userMessage),
+        .run(runId, input.sessionId, turnId, now)
+      this.appendEvent(run, 'run_started', {
+        attempt: 1,
+        profile: input.profile,
         requestId: input.requestId
       })
-      const sourceManifest = this.compileSourceManifest(input.sessionId, userEvent)
-      const contextBuild = this.createContextBuild(runId, sourceManifest)
-      this.appendEvent(runId, 'context_built', { contextBuildId: contextBuild.id, sourceManifest })
+      this.appendEvent(run, 'user_message_recorded', {
+        message: visibleMessage(input.userMessage)
+      })
       this.touchSession(input.sessionId)
-      return { runId, turnId, contextBuild }
+      return this.toStartedRun(run)
     })
   }
 
   markRequestStarted(runId: string): void {
     this.dependencies.database.transaction(() => {
-      if (this.findTerminalEvent(runId)) return
+      const run = this.getRunRow(runId)
+      if (run.status !== 'running' || this.findTerminalEvent(runId)) return
       const started = this.dependencies.database.connection
         .prepare(
           "SELECT id FROM runtime_events WHERE run_id = ? AND kind = 'model_request_started'"
         )
         .get(runId)
       if (started) return
-      this.appendEvent(runId, 'model_request_started', {})
+      this.appendEvent(run, 'model_request_started', {})
     })
   }
 
-  finalizeRun(runId: string, assistant: ChatMessage): void {
-    this.completeTerminalRun(runId, 'completed', 'run_completed', () => {
-      this.appendEvent(runId, 'assistant_output_finalized', { message: visibleMessage(assistant) })
-    })
+  finishRun(runId: string, outcome: RunOutcome): void {
+    switch (outcome.status) {
+      case 'completed':
+        this.completeTerminalRun(runId, 'completed', 'run_completed', (run) =>
+          this.appendEvent(run, 'assistant_output_finalized', {
+            message: visibleMessage(outcome.assistant)
+          })
+        )
+        return
+      case 'failed':
+        this.completeTerminalRun(runId, 'failed', 'run_failed', () => undefined, outcome.failure)
+        return
+      case 'cancelled':
+        this.completeTerminalRun(runId, 'cancelled', 'run_cancelled', (run) =>
+          outcome.assistant
+            ? this.appendEvent(run, 'assistant_output_finalized', {
+                message: visibleMessage(outcome.assistant)
+              })
+            : undefined
+        )
+    }
   }
 
-  failRun(runId: string, failure: { code: string; message: string }): void {
-    this.completeTerminalRun(runId, 'failed', 'run_failed', () => undefined, failure)
-  }
-
-  cancelRun(runId: string): void {
-    this.completeTerminalRun(runId, 'cancelled', 'run_cancelled', () => undefined)
-  }
-
-  retryRun({ failedRunId, requestId }: { failedRunId: string; requestId: string }): StartedRun {
+  private retryRun({
+    failedRunId,
+    requestId
+  }: {
+    failedRunId: string
+    requestId: string
+  }): StartedRun {
     const failed = this.getRunRow(failedRunId)
     if (failed.status !== 'failed') throw new Error('Only failed runs can be retried.')
     return this.dependencies.database.transaction(() => {
       const userEvent = this.dependencies.database.connection
         .prepare(
-          "SELECT payload_json FROM runtime_events WHERE run_id = ? AND kind = 'user_message_recorded'"
+          "SELECT id FROM runtime_events WHERE run_id = ? AND kind = 'user_message_recorded'"
         )
-        .pluck()
         .get(failedRunId)
       if (!userEvent) throw new Error('Failed run has no user message.')
       const runId = this.dependencies.createId()
@@ -242,47 +348,75 @@ class SessionRuntimeService {
             .prepare('SELECT COALESCE(MAX(attempt), 0) AS attempt FROM runs WHERE turn_id = ?')
             .get(failed.turn_id) as { attempt: number }
         ).attempt + 1
+      const profile = this.getExecutionProfile(failed.id)
+      const run: RunRow = {
+        id: runId,
+        session_id: failed.session_id,
+        turn_id: failed.turn_id,
+        attempt,
+        status: 'running'
+      }
       this.dependencies.database.connection
-        .prepare(`INSERT INTO runs (id, session_id, turn_id, attempt, status, execution_profile_snapshot_json, profile_digest, started_at, finished_at, failure_json)
-        VALUES (?, ?, ?, ?, 'running', ?, ?, ?, NULL, NULL)`)
-        .run(
-          runId,
-          failed.session_id,
-          failed.turn_id,
-          attempt,
-          failed.execution_profile_snapshot_json,
-          digest(failed.execution_profile_snapshot_json),
-          now
-        )
-      // SAFETY: a failed run was created with exactly one user-message event.
-      const originalUserEvent = this.dependencies.database.connection
-        .prepare(
-          "SELECT id, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'user_message_recorded'"
-        )
-        .get(failedRunId) as { id: string; payload_digest: string }
-      const sourceManifest = this.compileSourceManifest(failed.session_id, {
-        id: originalUserEvent.id,
-        payloadDigest: originalUserEvent.payload_digest
-      })
-      const contextBuild = this.createContextBuild(runId, sourceManifest)
-      this.appendEvent(runId, 'context_built', {
-        contextBuildId: contextBuild.id,
-        requestId,
-        sourceManifest
+        .prepare(`INSERT INTO runs (id, session_id, turn_id, attempt, status, started_at, finished_at, failure_json)
+        VALUES (?, ?, ?, ?, 'running', ?, NULL, NULL)`)
+        .run(runId, failed.session_id, failed.turn_id, attempt, now)
+      this.appendEvent(run, 'run_started', {
+        attempt,
+        profile,
+        requestId
       })
       this.touchSession(failed.session_id)
-      return { runId, turnId: failed.turn_id, contextBuild }
+      return this.toStartedRun(run)
     })
   }
 
+  retryTurn({
+    sessionId,
+    requestId,
+    userMessage
+  }: {
+    sessionId: string
+    requestId: string
+    userMessage: ChatMessage
+  }): StartedRun {
+    const existing = this.findRunByRequestId(sessionId, requestId)
+    if (existing) {
+      if (existing.attempt === 1)
+        throw new Error('Request ID was already used to start a new turn.')
+      this.assertRetryReplay(existing, userMessage)
+      return this.toStartedRun(existing)
+    }
+
+    const messageJson = canonicalJson(visibleMessage(userMessage))
+    // SAFETY: runs.* maps to the schema-controlled runs table. The user event identifies the
+    // original turn while the failed alias selects its latest failed attempt.
+    const failed = this.dependencies.database.connection
+      .prepare(
+        `SELECT failed_runs.*
+         FROM runs AS failed_runs
+         JOIN turns ON turns.id = failed_runs.turn_id
+         JOIN runs AS source_run ON source_run.turn_id = failed_runs.turn_id
+         JOIN runtime_events AS user_event ON user_event.run_id = source_run.id
+         WHERE failed_runs.session_id = ?
+           AND failed_runs.status = 'failed'
+           AND user_event.kind = 'user_message_recorded'
+           AND json_extract(user_event.payload_json, '$.message') = json(?)
+         ORDER BY turns.ordinal DESC, failed_runs.attempt DESC
+         LIMIT 1`
+      )
+      .get(sessionId, messageJson) as RunRow | undefined
+    if (!failed) throw new Error('Failed turn does not exist for this user message.')
+    return this.retryRun({ failedRunId: failed.id, requestId })
+  }
+
   recoverInterruptedRuns(): number {
-    // SAFETY: the selected id column is defined by the migration.
+    // SAFETY: runs.* maps to the schema-controlled runs table.
     const runningRuns = this.dependencies.database.connection
-      .prepare("SELECT id FROM runs WHERE status = 'running'")
-      .all() as Array<{ id: string }>
-    for (const { id } of runningRuns) {
+      .prepare("SELECT * FROM runs WHERE status = 'running'")
+      .all() as RunRow[]
+    for (const run of runningRuns) {
       this.dependencies.database.transaction(() => {
-        this.appendEvent(id, 'run_failed', {
+        this.appendEvent(run, 'run_failed', {
           code: 'process_interrupted',
           message: 'The app closed while this run was active.'
         })
@@ -296,7 +430,7 @@ class SessionRuntimeService {
               code: 'process_interrupted',
               message: 'The app closed while this run was active.'
             }),
-            id
+            run.id
           )
       })
     }
@@ -307,7 +441,7 @@ class SessionRuntimeService {
     runId: string,
     status: 'completed' | 'failed' | 'cancelled',
     event: 'run_completed' | 'run_failed' | 'run_cancelled',
-    beforeEvent: () => void,
+    beforeEvent: (run: RunRow) => void,
     failure?: { code: string; message: string }
   ): void {
     this.dependencies.database.transaction(() => {
@@ -315,85 +449,131 @@ class SessionRuntimeService {
       if (run.status === status && this.findTerminalEvent(runId)) return
       if (run.status !== 'running')
         throw new Error('Run already has a contradictory terminal state.')
-      beforeEvent()
-      this.appendEvent(runId, event, failure ?? {})
+      beforeEvent(run)
+      this.appendEvent(run, event, failure ?? {})
       this.dependencies.database.connection
         .prepare('UPDATE runs SET status = ?, finished_at = ?, failure_json = ? WHERE id = ?')
         .run(status, this.dependencies.now(), failure ? canonicalJson(failure) : null, runId)
     })
   }
 
-  private appendEvent(runId: string, kind: string, payload: EventPayload): AppendedEvent {
+  private appendEvent<Kind extends RuntimeEventKind>(
+    run: Pick<RunRow, 'id' | 'session_id'>,
+    kind: Kind,
+    payload: RuntimeEventPayloads[Kind]
+  ): void {
     const payloadJson = canonicalJson(payload)
-    const payloadDigest = digest(payloadJson)
-    const id = this.dependencies.createId()
+    // appendEvent is only called inside an IMMEDIATE transaction, so sequence allocation and the
+    // insert are atomic even though the next value is derived from the existing session log.
     this.dependencies.database.connection
       .prepare(
-        'INSERT INTO runtime_events (id, run_id, sequence, kind, payload_json, payload_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        `INSERT INTO runtime_events (
+           id, session_id, run_id, session_sequence,
+           kind, payload_json, payload_digest, created_at
+         )
+         SELECT ?, ?, ?, COALESCE(MAX(session_sequence), 0) + 1, ?, ?, ?, ?
+         FROM runtime_events
+         WHERE session_id = ?`
       )
       .run(
-        id,
-        runId,
-        this.nextOrdinal('runtime_events', 'run_id', runId),
+        this.dependencies.createId(),
+        run.session_id,
+        run.id,
         kind,
         payloadJson,
-        payloadDigest,
-        this.dependencies.now()
+        digest(payloadJson),
+        this.dependencies.now(),
+        run.session_id
       )
-    return { id, payloadDigest }
-  }
-
-  private createContextBuild(runId: string, sourceManifest: SourceManifest): ContextBuild {
-    const id = this.dependencies.createId()
-    const manifestJson = canonicalJson(sourceManifest)
-    this.dependencies.database.connection
-      .prepare(
-        'INSERT INTO context_builds (id, run_id, ordinal, source_manifest_json, context_digest, token_budget, estimated_tokens, compiler_version, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)'
-      )
-      .run(
-        id,
-        runId,
-        1,
-        manifestJson,
-        digest(manifestJson),
-        Math.ceil(manifestJson.length / 4),
-        'v1-visible-text-char4',
-        this.dependencies.now()
-      )
-    return { id, sourceManifest }
-  }
-
-  private compileSourceManifest(sessionId: string, userEvent: AppendedEvent): SourceManifest {
-    // SAFETY: the selected columns are fixed by this query and migration.
-    const rows = this.dependencies.database.connection
-      .prepare(
-        `SELECT runtime_events.id, runtime_events.payload_digest FROM runtime_events JOIN runs ON runs.id = runtime_events.run_id JOIN turns ON turns.id = runs.turn_id WHERE turns.session_id = ? AND runs.status = 'completed' AND runtime_events.kind IN ('user_message_recorded', 'assistant_output_finalized') ORDER BY turns.ordinal, runtime_events.sequence`
-      )
-      .all(sessionId) as Array<{ id: string; payload_digest: string }>
-    return {
-      events: [
-        ...rows.map((row) => ({ eventId: row.id, digest: row.payload_digest })),
-        { eventId: userEvent.id, digest: userEvent.payloadDigest }
-      ]
-    }
   }
 
   private findRunByRequestId(sessionId: string, requestId: string): RunRow | undefined {
     // SAFETY: runs.* maps to the schema-controlled runs table.
     return this.dependencies.database.connection
       .prepare(
-        "SELECT runs.* FROM runs JOIN runtime_events ON runtime_events.run_id = runs.id WHERE runs.session_id = ? AND runtime_events.kind = 'user_message_recorded' AND json_extract(runtime_events.payload_json, '$.requestId') = ?"
+        "SELECT runs.* FROM runtime_events JOIN runs ON runs.id = runtime_events.run_id WHERE runtime_events.session_id = ? AND runtime_events.kind = 'run_started' AND json_extract(runtime_events.payload_json, '$.requestId') = ?"
       )
       .get(sessionId, requestId) as RunRow | undefined
   }
+
+  private assertStartTurnReplay(run: RunRow, input: StartTurnInput): void {
+    const storedMessage = this.getTurnUserMessage(run.turn_id)
+    const storedProfile = this.getExecutionProfile(run.id)
+    if (
+      canonicalJson(storedMessage) !== canonicalJson(visibleMessage(input.userMessage)) ||
+      canonicalJson(storedProfile) !== canonicalJson(input.profile)
+    ) {
+      throw new Error('Request ID was already used with different turn input.')
+    }
+  }
+
+  private assertRetryReplay(run: RunRow, userMessage: ChatMessage): void {
+    if (
+      canonicalJson(this.getTurnUserMessage(run.turn_id)) !==
+      canonicalJson(visibleMessage(userMessage))
+    ) {
+      throw new Error('Request ID was already used with a different user message.')
+    }
+  }
+
+  private getTurnUserMessage(turnId: string): VisibleMessage {
+    // SAFETY: the source attempt is the only run in a turn that records the user message.
+    const row = this.dependencies.database.connection
+      .prepare(
+        `SELECT runtime_events.payload_json, runtime_events.payload_digest
+         FROM runtime_events
+         JOIN runs ON runs.id = runtime_events.run_id
+         WHERE runs.turn_id = ? AND runtime_events.kind = 'user_message_recorded'`
+      )
+      .get(turnId) as { payload_json: string; payload_digest: string } | undefined
+    if (!row) throw new Error('Turn has no user message.')
+    this.assertPayloadDigest(row)
+    return parseMessagePayload(row.payload_json).message
+  }
+
+  private getExecutionProfile(runId: string): ExecutionProfileSnapshot {
+    // SAFETY: every run starts by appending exactly one run_started event.
+    const row = this.dependencies.database.connection
+      .prepare(
+        "SELECT payload_json, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'run_started'"
+      )
+      .get(runId) as { payload_json: string; payload_digest: string } | undefined
+    if (!row) throw new Error('Run has no start event.')
+    this.assertPayloadDigest(row)
+    // SAFETY: run_started payloads are serialized from RuntimeEventPayloads by appendEvent.
+    return (JSON.parse(row.payload_json) as RuntimeEventPayloads['run_started']).profile
+  }
+
+  private assertPayloadDigest(row: { payload_json: string; payload_digest: string }): void {
+    if (digest(row.payload_json) !== row.payload_digest)
+      throw new Error('Runtime event payload digest does not match its stored value.')
+  }
+
   private toStartedRun(run: RunRow): StartedRun {
-    // SAFETY: context builds are created with a schema-controlled source manifest.
-    const context = this.dependencies.database.connection
-      .prepare('SELECT * FROM context_builds WHERE run_id = ? ORDER BY ordinal LIMIT 1')
-      .get(run.id) as { id: string; source_manifest_json: string }
-    // SAFETY: source_manifest_json is serialized by canonicalJson from a SourceManifest.
-    const sourceManifest = JSON.parse(context.source_manifest_json) as SourceManifest
-    return { runId: run.id, turnId: run.turn_id, contextBuild: { id: context.id, sourceManifest } }
+    return {
+      runId: run.id,
+      turnId: run.turn_id,
+      shouldGenerateTitle: this.shouldGenerateTitle(run)
+    }
+  }
+
+  private shouldGenerateTitle(run: RunRow): boolean {
+    if (run.attempt !== 1) return false
+    // SAFETY: the aggregate query always returns one boolean-compatible numeric row.
+    const row = this.dependencies.database.connection
+      .prepare(
+        `SELECT NOT EXISTS (
+           SELECT 1
+           FROM runtime_events AS terminal
+           JOIN runtime_events AS started
+             ON started.run_id = ? AND started.kind = 'run_started'
+           WHERE terminal.session_id = ?
+             AND terminal.kind IN ('run_completed', 'run_cancelled')
+             AND terminal.session_sequence < started.session_sequence
+         ) AS should_generate_title`
+      )
+      .get(run.id, run.session_id) as { should_generate_title: number }
+    return Boolean(row.should_generate_title)
   }
   private findSession(id: string): SessionRow {
     // SAFETY: sessions.* maps to the schema-controlled sessions table.
@@ -419,17 +599,11 @@ class SessionRuntimeService {
       )
       .get(runId) as { id: string } | undefined
   }
-  private nextOrdinal(
-    table: 'turns' | 'runtime_events',
-    column: 'session_id' | 'run_id',
-    value: string
-  ): number {
-    const orderColumn = table === 'turns' ? 'ordinal' : 'sequence' // SAFETY: the aggregate query always returns one numeric row.
+  private nextTurnOrdinal(sessionId: string): number {
+    // SAFETY: the aggregate query always returns one numeric row.
     const row = this.dependencies.database.connection
-      .prepare(
-        `SELECT COALESCE(MAX(${orderColumn}), 0) AS ordinal FROM ${table} WHERE ${column} = ?`
-      )
-      .get(value) as { ordinal: number }
+      .prepare('SELECT COALESCE(MAX(ordinal), 0) AS ordinal FROM turns WHERE session_id = ?')
+      .get(sessionId) as { ordinal: number }
     return row.ordinal + 1
   }
   private touchSession(id: string): void {
@@ -452,8 +626,8 @@ type RunRow = {
   id: string
   session_id: string
   turn_id: string
+  attempt: number
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
-  execution_profile_snapshot_json: string
 }
 function toSessionSummary(row: SessionRow): SessionSummary {
   // SAFETY: default profiles are serialized by canonicalJson from an ExecutionProfileSnapshot.
@@ -469,7 +643,12 @@ function toSessionSummary(row: SessionRow): SessionSummary {
   }
 }
 function visibleMessage(message: ChatMessage): VisibleMessage {
-  return { role: message.role, parts: message.parts.filter((part) => part.type === 'text') }
+  const visible: VisibleMessage = {
+    role: message.role,
+    parts: message.parts.filter((part) => part.type === 'text')
+  }
+  if (message.metadata) visible.metadata = message.metadata
+  return visible
 }
 function parseMessagePayload(value: string): { message: VisibleMessage } {
   // SAFETY: these payloads are written by appendEvent with a visible message.

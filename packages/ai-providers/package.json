@@ -12,10 +12,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "ai": "^7.0.77",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "ai": "^7.0.77",
     "vitest": "4.1.6"
   }
 }
