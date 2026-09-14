@@ -522,6 +522,7 @@ function ProvidersSection({
             </section>
           ) : null}
           <ProviderModelsSection
+            isCustomProvider={Boolean(customProvider)}
             onFetchStart={() => {
               setStatus(null)
               setTestState('idle')

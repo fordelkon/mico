@@ -64,6 +64,11 @@ function toPersistedLibrary(library: ProviderLibrary): PersistedProviderLibrary 
 }
 type ProviderLibraryActions = {
   addCustomProvider: (provider: AddCustomProviderRequest) => Promise<CustomProvider>
+  addModel: (model: {
+    displayName?: string
+    modelId: string
+    provider: ProviderId
+  }) => Promise<void>
   commitProviderDrafts: () => Promise<void>
   removeCustomProvider: (providerId: ProviderId) => Promise<void>
   selectModel: (modelId: string) => Promise<void>
@@ -143,6 +148,7 @@ const unavailable = async (): Promise<never> => {
 }
 const ProviderLibraryActionsContext = React.createContext<ProviderLibraryActions>({
   addCustomProvider: unavailable,
+  addModel: async () => undefined,
   commitProviderDrafts: async () => undefined,
   removeCustomProvider: unavailable,
   selectModel: async () => undefined,
@@ -337,6 +343,14 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     },
     [scheduleLibrarySave, waitForConfigurationSaves]
   )
+  const addModel = React.useCallback(
+    async (model: { displayName?: string; modelId: string; provider: ProviderId }) => {
+      await commitProviderDrafts()
+      await window.api.providers.addModel(model)
+      await refresh()
+    },
+    [commitProviderDrafts, refresh]
+  )
   const syncModels = React.useCallback(
     async (providerId: ProviderId, models: DiscoveredModel[]) => {
       await commitProviderDrafts()
@@ -402,6 +416,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   const actions = React.useMemo(
     () => ({
       addCustomProvider,
+      addModel,
       commitProviderDrafts,
       flushConfiguration,
       removeCustomProvider,
@@ -414,6 +429,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     }),
     [
       addCustomProvider,
+      addModel,
       commitProviderDrafts,
       flushConfiguration,
       removeCustomProvider,
@@ -438,11 +454,12 @@ function useProviderLibraryActions(): ProviderLibraryActions {
 function useProviderLibraryState(): ProviderLibraryState {
   return React.useContext(ProviderLibraryStateContext)
 }
+
 export {
-  ProviderLibraryProvider,
-  useProviderLibraryActions,
-  useProviderLibraryState,
   type ProviderConfiguration,
   type ProviderLibrary,
-  type ProviderModel
+  ProviderLibraryProvider,
+  type ProviderModel,
+  useProviderLibraryActions,
+  useProviderLibraryState
 }

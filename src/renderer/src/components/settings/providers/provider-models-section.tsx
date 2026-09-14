@@ -1,10 +1,10 @@
-import { Button, InputGroup, InputGroupAddon, InputGroupInput, Toggle } from '@mico/ui'
-import { DownloadIcon, SearchIcon } from 'lucide-react'
-import * as React from 'react'
-import type { ProviderConfiguration } from '@shared/data/schemas/provider'
-
+import { Button, Input, InputGroup, InputGroupAddon, InputGroupInput, Toggle } from '@mico/ui'
 import { useListReorderAnimation } from '@renderer/hooks/use-list-reorder-animation'
 import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
+import type { ProviderConfiguration } from '@shared/data/schemas/provider'
+import type { AddModelRequest } from '@shared/ipc/schemas/providers'
+import { DownloadIcon, PlusIcon, SearchIcon } from 'lucide-react'
+import * as React from 'react'
 
 import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
 import type { ProviderId } from './providers-sidebar'
@@ -12,6 +12,7 @@ import type { ProviderId } from './providers-sidebar'
 type ProviderStatus = { kind: 'error' | 'success'; message: string } | null
 
 function ProviderModelsSection({
+  isCustomProvider,
   onModelsFetched,
   onFetchStart,
   onStatusChange,
@@ -19,6 +20,7 @@ function ProviderModelsSection({
   providerId,
   providerLabel
 }: {
+  isCustomProvider: boolean
   onFetchStart: () => void
   onModelsFetched: () => void
   onStatusChange: (status: ProviderStatus) => void
@@ -26,11 +28,14 @@ function ProviderModelsSection({
   providerId: ProviderId
   providerLabel: string
 }): React.JSX.Element {
-  const { syncModels, toggleModel } = useProviderLibraryActions()
+  const { addModel, syncModels, toggleModel } = useProviderLibraryActions()
   const { library } = useProviderLibraryState()
   const [hasFetchedModels, setHasFetchedModels] = React.useState(false)
   const [isFetchingModels, setIsFetchingModels] = React.useState(false)
   const [modelsSearch, setModelsSearch] = React.useState('')
+  const [modelId, setModelId] = React.useState('')
+  const [displayName, setDisplayName] = React.useState('')
+  const [isAddingModel, setIsAddingModel] = React.useState(false)
   const modelReorderAnimation = useListReorderAnimation()
   const models = library.models.filter((model) => model.providerId === providerId)
   const hasModels = hasFetchedModels || models.length > 0
@@ -57,6 +62,33 @@ function ProviderModelsSection({
     }
   }
 
+  const addManualModel = async (): Promise<void> => {
+    const trimmedModelId = modelId.trim()
+    if (!trimmedModelId) return
+
+    setIsAddingModel(true)
+    onFetchStart()
+    try {
+      const manualModel: AddModelRequest = {
+        provider: providerId,
+        modelId: trimmedModelId
+      }
+      if (displayName.trim()) manualModel.displayName = displayName.trim()
+      await addModel(manualModel)
+      setModelId('')
+      setDisplayName('')
+      setHasFetchedModels(true)
+      onModelsFetched()
+    } catch (error) {
+      onStatusChange({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Unable to add the model.'
+      })
+    } finally {
+      setIsAddingModel(false)
+    }
+  }
+
   return (
     <section aria-labelledby="models-heading" className="space-y-3">
       <div className="flex items-center justify-between">
@@ -67,7 +99,7 @@ function ProviderModelsSection({
         </div>
         <Button
           aria-label={`Fetch ${providerLabel} models`}
-          disabled={isFetchingModels}
+          disabled={isFetchingModels || isAddingModel}
           onClick={() => void fetchModels()}
           size="sm"
           variant="outline"
@@ -76,6 +108,40 @@ function ProviderModelsSection({
           {isFetchingModels ? 'Fetching' : 'Fetch'}
         </Button>
       </div>
+      {isCustomProvider ? (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void addManualModel()
+          }}
+        >
+          <Input
+            aria-label={`Model ID for ${providerLabel}`}
+            disabled={isFetchingModels || isAddingModel}
+            onChange={(event) => setModelId(event.target.value)}
+            placeholder="Model ID (e.g. gpt-4o)"
+            value={modelId}
+          />
+          <Input
+            aria-label={`Display name for ${providerLabel}`}
+            disabled={isFetchingModels || isAddingModel}
+            onChange={(event) => setDisplayName(event.target.value)}
+            placeholder="Display Name (optional)"
+            value={displayName}
+          />
+          <Button
+            aria-label={`Add ${providerLabel} model`}
+            disabled={isFetchingModels || isAddingModel || !modelId.trim()}
+            size="sm"
+            type="submit"
+            variant="outline"
+          >
+            <PlusIcon aria-hidden="true" />
+            Add
+          </Button>
+        </form>
+      ) : null}
       <InputGroup className="rounded-lg border-input/30 bg-input/30 shadow-none">
         <InputGroupInput
           aria-label={`Search ${providerLabel} models`}

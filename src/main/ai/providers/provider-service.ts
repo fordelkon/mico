@@ -1,20 +1,17 @@
-import { and, eq } from 'drizzle-orm'
-
-import { createChatProvider, discoverModels } from '@mico/ai-providers'
 import type {
   ChatProviderConfiguration,
   ChatProviderMessage,
   DiscoveredModel
 } from '@mico/ai-providers'
-import { ProviderDatabase } from '../../data/provider-database'
-import { providerLibraryState, providerModels, providers } from '../../data/provider-schema'
-import { CustomProviderSchema, ProviderHeadersSchema } from '@shared/data/schemas/provider'
+
+import { createChatProvider, discoverModels } from '@mico/ai-providers'
 import type {
   CustomProvider,
   ModelEntry,
   ProviderConfiguration,
   ProviderLibrary
 } from '@shared/data/schemas/provider'
+import { CustomProviderSchema, ProviderHeadersSchema } from '@shared/data/schemas/provider'
 import type {
   AddModelRequest,
   ImportModelRequest,
@@ -22,6 +19,9 @@ import type {
   SyncModelsRequest,
   TestModelRequest
 } from '@shared/ipc/schemas/providers'
+import { and, eq } from 'drizzle-orm'
+import { ProviderDatabase } from '../../data/provider-database'
+import { providerLibraryState, providerModels, providers } from '../../data/provider-schema'
 
 type ProviderServiceDependencies = {
   createId?: () => string
@@ -388,11 +388,44 @@ class ProviderService {
   }
 
   async addModel(model: AddModelRequest): Promise<ModelEntry> {
-    return this.importModel({
-      provider: model.provider,
-      modelId: model.modelId,
-      displayName: model.displayName ?? model.modelId
-    })
+    const database = this.dependencies.database.db
+    const existing = database
+      .select()
+      .from(providerModels)
+      .where(
+        and(
+          eq(providerModels.providerId, model.provider),
+          eq(providerModels.modelId, model.modelId)
+        )
+      )
+      .get()
+    if (existing) return toModelEntry(existing)
+
+    database
+      .insert(providerModels)
+      .values({
+        id: this.dependencies.createId(),
+        providerId: model.provider,
+        modelId: model.modelId,
+        displayName: model.displayName ?? model.modelId,
+        enabled: false,
+        // New manual entries lead the inactive list, making the next activation easy to find.
+        discoveryOrder: getFirstDiscoveryOrder(database, model.provider),
+        enabledOrder: null
+      })
+      .run()
+    const saved = database
+      .select()
+      .from(providerModels)
+      .where(
+        and(
+          eq(providerModels.providerId, model.provider),
+          eq(providerModels.modelId, model.modelId)
+        )
+      )
+      .get()
+    if (!saved) throw new Error('Provider model was not saved.')
+    return toModelEntry(saved)
   }
 
   async removeModel(modelId: string): Promise<void> {
@@ -630,6 +663,15 @@ function getNextDiscoveryOrder(database: ProviderDatabase['db'], providerId: str
   return Math.max(-1, ...discoveryOrders.map(({ discoveryOrder }) => discoveryOrder)) + 1
 }
 
+function getFirstDiscoveryOrder(database: ProviderDatabase['db'], providerId: string): number {
+  const discoveryOrders = database
+    .select({ discoveryOrder: providerModels.discoveryOrder })
+    .from(providerModels)
+    .where(eq(providerModels.providerId, providerId))
+    .all()
+  return Math.min(0, ...discoveryOrders.map(({ discoveryOrder }) => discoveryOrder)) - 1
+}
+
 function getNextEnabledOrder(database: ProviderDatabase['db']): number {
   const enabledOrders = database
     .select({ enabledOrder: providerModels.enabledOrder })
@@ -695,5 +737,5 @@ function toChatProviderConfiguration(
   return { ...connection, modelId: model.modelId }
 }
 
-export { ProviderService }
 export type { ProviderServiceDependencies }
+export { ProviderService }

@@ -1,6 +1,6 @@
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
@@ -268,6 +268,7 @@ describe('ProviderService', () => {
       enabled: true
     })
     await service.addModel({ provider: 'ollama', modelId: 'llama3.2' })
+    await service.setModelEnabled({ enabled: true, modelId: 'entry-1' })
     await service.selectModel('entry-1')
     await service.removeModel('entry-1')
 
@@ -287,6 +288,37 @@ describe('ProviderService', () => {
       modelId: 'llama3.2',
       provider: 'ollama'
     })
+  })
+
+  it('adds manual models as disabled entries before other inactive models without duplicating them', async () => {
+    const service = await createService()
+    await service.syncModels({
+      provider: 'ollama',
+      models: [{ modelId: 'fetched-model', displayName: 'Fetched model' }]
+    })
+
+    await service.addModel({
+      provider: 'ollama',
+      modelId: 'manual-model',
+      displayName: 'Manual model'
+    })
+    const existing = await service.addModel({
+      provider: 'ollama',
+      modelId: 'manual-model',
+      displayName: 'Changed manual model'
+    })
+
+    expect(existing).toEqual({
+      displayName: 'Manual model',
+      enabled: false,
+      id: 'entry-2',
+      modelId: 'manual-model',
+      provider: 'ollama'
+    })
+    expect(service.getLibrary().models.map(({ modelId }) => modelId)).toEqual([
+      'manual-model',
+      'fetched-model'
+    ])
   })
 
   it('resolves only an enabled selected model from an enabled built-in provider', async () => {
@@ -342,6 +374,7 @@ describe('ProviderService', () => {
     const providerId = provider.id
     if (!providerId) throw new Error('Custom provider was not created.')
     await service.addModel({ provider: providerId, modelId: 'gpt-5.6' })
+    await service.setModelEnabled({ modelId: 'entry-2', enabled: true })
     await service.selectModel('entry-2')
 
     expect(service.getSelectedChatConfiguration()).toEqual({

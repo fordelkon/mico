@@ -1,17 +1,16 @@
 import '@testing-library/jest-dom/vitest'
 
+import type { ProviderLibrary as PersistedProviderLibrary } from '@shared/data/schemas/provider'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProviderLibrary as PersistedProviderLibrary } from '@shared/data/schemas/provider'
-
-import { SettingsMain } from './settings-main'
 import {
   ProviderLibraryProvider,
   useProviderLibraryActions,
   useProviderLibraryState
 } from './providers/provider-library'
+import { SettingsMain } from './settings-main'
 
 function renderSettings(): void {
   render(
@@ -38,6 +37,7 @@ async function waitForOllama(): Promise<void> {
 
 const providerApi = {
   addCustomProvider: vi.fn(),
+  addModel: vi.fn(),
   discoverModels: vi.fn(),
   getLibrary: vi.fn(),
   saveLibrary: vi.fn(),
@@ -76,6 +76,22 @@ beforeEach(() => {
       ...persistedLibrary,
       customProviders: [...persistedLibrary.customProviders, saved]
     }
+    return saved
+  })
+  providerApi.addModel.mockReset()
+  providerApi.addModel.mockImplementation(async ({ displayName, modelId, provider }) => {
+    const saved = {
+      displayName: displayName ?? modelId,
+      enabled: false,
+      id: `${provider}:${modelId}`,
+      modelId,
+      provider
+    }
+    if (!persistedLibrary.models.some((model) => model.id === saved.id))
+      persistedLibrary = {
+        ...persistedLibrary,
+        models: [saved, ...persistedLibrary.models]
+      }
     return saved
   })
   providerApi.getLibrary.mockReset()
@@ -364,6 +380,60 @@ describe('SettingsMain', () => {
     await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
 
     expect(screen.getByLabelText('Ollama fetched models')).toBeVisible()
+  })
+
+  it('does not show manual model controls for built-in providers', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+
+    await waitForOllama()
+    expect(screen.queryByLabelText('Model ID for Ollama')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
+
+    expect(screen.queryByLabelText('Model ID for LM Studio')).not.toBeInTheDocument()
+  })
+
+  it('adds a disabled manual model for a custom provider and clears the form', async () => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: [
+        {
+          apiFormat: 'openai-compatible',
+          baseUrl: 'https://api.example.com/v1',
+          enabled: true,
+          headers: {},
+          icon: 'cloud',
+          id: 'example-ai',
+          name: 'Example AI',
+          useMaxCompletionTokens: false
+        }
+      ],
+      selectedProviderId: 'example-ai'
+    }
+    const user = userEvent.setup()
+    renderSettings()
+
+    await screen.findByRole('heading', { level: 2, name: 'Example AI' })
+    const modelId = screen.getByLabelText('Model ID for Example AI')
+    const displayName = screen.getByLabelText('Display name for Example AI')
+    await user.type(modelId, ' manual-model ')
+    await user.type(displayName, ' Manual model ')
+    await user.click(screen.getByRole('button', { name: 'Add Example AI model' }))
+
+    await waitFor(() =>
+      expect(providerApi.addModel).toHaveBeenCalledWith({
+        displayName: 'Manual model',
+        modelId: 'manual-model',
+        provider: 'example-ai'
+      })
+    )
+    expect(modelId).toHaveValue('')
+    expect(displayName).toHaveValue('')
+    expect(await screen.findByRole('switch', { name: 'Enable Manual model' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    )
   })
 
   it('keeps enabled models and their order after refreshing a provider', async () => {
