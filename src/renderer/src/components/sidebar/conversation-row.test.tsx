@@ -10,9 +10,81 @@ import { ConversationRow } from './conversation-row'
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 describe('ConversationRow', () => {
+  it('only enables title translation when the title is clipped', () => {
+    const observers = new Map<Element, () => void>()
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: () => void) {}
+
+      observe(target: Element): void {
+        observers.set(target, this.callback)
+      }
+
+      disconnect(): void {
+        observers.clear()
+      }
+    }
+
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+
+    render(
+      <SidebarProvider>
+        <ConversationRow
+          conversation={{ id: 'conversation-1', title: 'A very long conversation title' }}
+          isResponding={false}
+          onDeleteConversation={vi.fn()}
+          onRenameConversation={vi.fn()}
+          onSelectConversation={vi.fn()}
+          selected={false}
+        />
+        <ConversationRow
+          conversation={{ id: 'conversation-2', title: 'Short title' }}
+          isResponding={false}
+          onDeleteConversation={vi.fn()}
+          onRenameConversation={vi.fn()}
+          onSelectConversation={vi.fn()}
+          selected={false}
+        />
+      </SidebarProvider>
+    )
+
+    const setTitleDimensions = (title: string, scrollWidth: number): HTMLButtonElement => {
+      const button = screen.getByRole('button', { name: title })
+      if (!(button instanceof HTMLButtonElement)) {
+        throw new Error('Conversation title must render as a button.')
+      }
+
+      const viewport = button.querySelector('.conversation-row__title-viewport')
+      if (!(viewport instanceof HTMLSpanElement)) {
+        throw new Error('Conversation title viewport must render as a span.')
+      }
+
+      Object.defineProperties(viewport, {
+        clientWidth: { configurable: true, value: 100 },
+        scrollWidth: { configurable: true, value: scrollWidth }
+      })
+
+      const observer = observers.get(viewport)
+      if (!observer) throw new Error('Conversation title viewport must be observed for resizing.')
+      act(() => observer())
+      return button
+    }
+
+    const longTitleButton = setTitleDimensions('A very long conversation title', 220)
+    const shortTitleButton = setTitleDimensions('Short title', 100)
+
+    expect(longTitleButton).toHaveAttribute('data-title-overflowing', 'true')
+    expect(longTitleButton).toHaveStyle({
+      '--conversation-row-title-duration': '2500ms',
+      '--conversation-row-title-offset': '120px'
+    })
+    expect(shortTitleButton).not.toHaveAttribute('data-title-overflowing')
+  })
+
   it('focuses and selects the title after renaming from the context menu', async () => {
     const user = userEvent.setup()
 

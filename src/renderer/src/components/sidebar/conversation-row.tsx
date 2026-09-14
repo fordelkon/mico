@@ -28,6 +28,7 @@ import './conversation-row.css'
 
 const SPINNER_PHASE_LOCK_DELAY_MS = 500
 const SPINNER_ANIMATION_DURATION_MS = 1000
+const TITLE_SCROLL_SPEED_PX_PER_SECOND = 48
 
 type ConversationRowProps = {
   conversation: Conversation
@@ -71,7 +72,30 @@ function ConversationRowComponent({
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = React.useState(false)
   const [draft, setDraft] = React.useState(conversation.title)
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const titleViewportRef = React.useRef<HTMLSpanElement>(null)
   const cancelledRef = React.useRef(false)
+  const [titleOverflow, setTitleOverflow] = React.useState(0)
+
+  React.useLayoutEffect(() => {
+    const titleViewport = titleViewportRef.current
+    if (!titleViewport) return
+
+    const measureTitleOverflow = (): void => {
+      const overflow = Math.max(0, titleViewport.scrollWidth - titleViewport.clientWidth)
+      setTitleOverflow((currentOverflow) =>
+        currentOverflow === overflow ? currentOverflow : overflow
+      )
+    }
+
+    measureTitleOverflow()
+
+    const ResizeObserverClass = window.ResizeObserver
+    if (!ResizeObserverClass) return
+
+    const resizeObserver = new ResizeObserverClass(measureTitleOverflow)
+    resizeObserver.observe(titleViewport)
+    return () => resizeObserver.disconnect()
+  }, [conversation.title, editing])
 
   // Focus after edit mode renders its input; the row itself has no editable target.
   React.useEffect(() => {
@@ -128,6 +152,12 @@ function ConversationRowComponent({
     onDeleteConversation(conversation.id)
   }
 
+  const titleStyle: React.CSSProperties &
+    Record<'--conversation-row-title-offset' | '--conversation-row-title-duration', string> = {
+    '--conversation-row-title-offset': `${titleOverflow}px`,
+    '--conversation-row-title-duration': `${(titleOverflow / TITLE_SCROLL_SPEED_PX_PER_SECOND) * 1000}ms`
+  }
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={editing || deleting}>
@@ -170,13 +200,17 @@ function ConversationRowComponent({
             <SidebarMenuButton
               aria-pressed={selected}
               className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+              data-title-overflowing={titleOverflow > 0 || undefined}
               disabled={deleting}
               isActive={selected}
               onClick={() => onSelectConversation(conversation.id)}
               onDoubleClick={handleDoubleClick}
+              style={titleStyle}
               tooltip={conversation.title}
             >
-              <span>{conversation.title}</span>
+              <span className="conversation-row__title-viewport" ref={titleViewportRef}>
+                <span className="conversation-row__title">{conversation.title}</span>
+              </span>
             </SidebarMenuButton>
           )}
           {!editing && !deleting && (
