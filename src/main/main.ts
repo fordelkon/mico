@@ -1,7 +1,6 @@
 import { app, ipcMain, type BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 
-import icon from '../../build/icons/512x512.png?asset'
 import { createChatProviderResolver } from './ai/chat/chat-provider-resolver'
 import { TurnExecutor } from './ai/chat/turn-executor'
 import { createChatProvider } from '@mico/ai-providers'
@@ -79,10 +78,6 @@ app.on('web-contents-created', (_, webContents) => {
 if (gotTheLock) {
   const startup = app.whenReady().then(async () => {
     electronApp.setAppUserModelId('com.electron')
-
-    if (process.platform === 'darwin' && app.dock) {
-      app.dock.setIcon(icon)
-    }
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
