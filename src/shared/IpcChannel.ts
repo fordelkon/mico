@@ -75,6 +75,10 @@ export enum IpcChannel {
   WindowControls_Close = 'window-controls:close',
   /** Notifies the renderer that fullscreen state changed. */
   WindowControls_FullscreenChanged = 'window-controls:fullscreen-changed',
+  /** Notifies the renderer that native window focus changed. */
+  WindowControls_FocusChanged = 'window-controls:focus-changed',
+  /** Returns whether the main window has native focus. */
+  WindowControls_IsFocused = 'window-controls:is-focused',
   /** Returns whether the main window is fullscreen. */
   WindowControls_IsFullscreen = 'window-controls:is-fullscreen',
   /** Returns whether the main window is maximized. */

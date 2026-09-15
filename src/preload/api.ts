@@ -9,10 +9,19 @@ import { IpcChannel } from '@shared/IpcChannel'
 
 const windowControls: WindowControlsAPI = {
   close: () => ipcRenderer.invoke(IpcChannel.WindowControls_Close),
+  isFocused: () => ipcRenderer.invoke(IpcChannel.WindowControls_IsFocused),
   isFullScreen: () => ipcRenderer.invoke(IpcChannel.WindowControls_IsFullscreen),
   isMaximized: () => ipcRenderer.invoke(IpcChannel.WindowControls_IsMaximized),
   maximize: () => ipcRenderer.invoke(IpcChannel.WindowControls_Maximize),
   minimize: () => ipcRenderer.invoke(IpcChannel.WindowControls_Minimize),
+  onFocusChange: (listener) => {
+    const wrappedListener = (_event: IpcRendererEvent, isFocused: boolean): void => {
+      listener(isFocused)
+    }
+
+    ipcRenderer.on(IpcChannel.WindowControls_FocusChanged, wrappedListener)
+    return () => ipcRenderer.removeListener(IpcChannel.WindowControls_FocusChanged, wrappedListener)
+  },
   onFullScreenChange: (listener) => {
     const wrappedListener = (_event: IpcRendererEvent, isFullScreen: boolean): void => {
       listener(isFullScreen)

@@ -19,7 +19,7 @@ function WindowControls(): React.JSX.Element | null {
   const [isOptionPressed, setIsOptionPressed] = React.useState(false)
   // Frameless controls can retain CSS hover after tray restore, so visual hover uses fresh pointer events.
   const [hoveredControl, setHoveredControl] = React.useState<WindowControl | null>(null)
-  const [isWindowFocused, setIsWindowFocused] = React.useState(() => document.hasFocus())
+  const [isWindowFocused, setIsWindowFocused] = React.useState(false)
 
   React.useEffect(() => {
     if (!isMac && !isWindows) return undefined
@@ -38,30 +38,24 @@ function WindowControls(): React.JSX.Element | null {
   }, [isMac, isWindows])
 
   React.useEffect(() => {
-    const clearHover = (): void => setHoveredControl(null)
-    const handleBlur = (): void => {
-      clearHover()
-      setIsWindowFocused(false)
-    }
-    const handleFocus = (): void => setIsWindowFocused(true)
-    const handleVisibilityChange = (): void => {
-      // Hide/show does not guarantee pointerleave, so clear visual hover here.
-      if (document.visibilityState === 'hidden') {
-        clearHover()
-        setIsWindowFocused(false)
-      }
-    }
+    if (!isMac) return undefined
 
-    window.addEventListener('blur', handleBlur)
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
+    let isMounted = true
+    const removeFocusListener = window.api.windowControls.onFocusChange((isFocused) => {
+      if (!isMounted) return
+      if (!isFocused) setHoveredControl(null)
+      setIsWindowFocused(isFocused)
+    })
+
+    void window.api.windowControls.isFocused().then((isFocused) => {
+      if (isMounted) setIsWindowFocused(isFocused)
+    })
 
     return () => {
-      window.removeEventListener('blur', handleBlur)
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      isMounted = false
+      removeFocusListener()
     }
-  }, [])
+  }, [isMac])
 
   React.useEffect(() => {
     if (!isMac) return undefined

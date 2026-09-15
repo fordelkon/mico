@@ -10,6 +10,8 @@ type Handler = Parameters<IpcMain['handle']>[1]
 
 function createHarness() {
   const handlers = new Map<string, Handler>()
+  // SAFETY: The test double is only passed through to assert the IPC handler delegates correctly.
+  const window = Object.create(null) as BrowserWindow
   const turnExecutor = {
     abortTurn: vi.fn(),
     abortAllTurns: vi.fn(),
@@ -18,6 +20,7 @@ function createHarness() {
   }
   const mainWindow = {
     close: vi.fn(),
+    isFocused: vi.fn(),
     isFullscreen: vi.fn(),
     isMaximized: vi.fn(),
     isTrustedRendererUrl: vi.fn(() => true),
@@ -63,11 +66,11 @@ function createHarness() {
     {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
-      getWindow: () => Object.create(null) as BrowserWindow
+      getWindow: () => window
     }
   )
 
-  return { turnExecutor, handlers, mainWindow, preference, provider, session }
+  return { turnExecutor, handlers, mainWindow, preference, provider, session, window }
 }
 
 function createEvent({
@@ -102,6 +105,17 @@ function createEvent({
 
   return { destroyedListeners, event, sender, trusted }
 }
+
+describe('registerIpc window control handlers', () => {
+  it('returns native focus state for the invoking window', () => {
+    const { handlers, mainWindow, window } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    mainWindow.isFocused.mockReturnValue(true)
+
+    expect(handlers.get(IpcChannel.WindowControls_IsFocused)?.(event)).toBe(true)
+    expect(mainWindow.isFocused).toHaveBeenCalledWith(window)
+  })
+})
 
 describe('registerIpc chat handlers', () => {
   it('returns capabilities only to a trusted renderer', async () => {

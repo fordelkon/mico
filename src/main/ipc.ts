@@ -40,6 +40,7 @@ interface IpcServices {
   mainWindow: Pick<
     MainWindowService,
     | 'close'
+    | 'isFocused'
     | 'isFullscreen'
     | 'isMaximized'
     | 'isTrustedRendererUrl'
@@ -107,6 +108,9 @@ function registerIpc(
 
   dependencies.ipcMain.handle(IpcChannel.WindowControls_Close, (event) =>
     mainWindow.close(getCallingWindow(event))
+  )
+  dependencies.ipcMain.handle(IpcChannel.WindowControls_IsFocused, (event) =>
+    mainWindow.isFocused(getCallingWindow(event))
   )
   dependencies.ipcMain.handle(IpcChannel.WindowControls_IsFullscreen, (event) =>
     mainWindow.isFullscreen(getCallingWindow(event))

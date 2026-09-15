@@ -49,6 +49,10 @@ class MainWindowService {
     window.close()
   }
 
+  isFocused(window: BrowserWindow): boolean {
+    return window.isFocused()
+  }
+
   isFullscreen(window: BrowserWindow): boolean {
     return window.isFullScreen()
   }
@@ -120,6 +124,12 @@ class MainWindowService {
     })
     window.on('unmaximize', () => {
       window.webContents.send(IpcChannel.WindowControls_MaximizedChanged, false)
+    })
+    window.on('focus', () => {
+      window.webContents.send(IpcChannel.WindowControls_FocusChanged, true)
+    })
+    window.on('blur', () => {
+      window.webContents.send(IpcChannel.WindowControls_FocusChanged, false)
     })
 
     window.on('ready-to-show', () => {
