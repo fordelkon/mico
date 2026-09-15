@@ -1,0 +1,1 @@
+C:/Users/EEGPROG/Desktop/iWorks/mico/CLAUDE.md
