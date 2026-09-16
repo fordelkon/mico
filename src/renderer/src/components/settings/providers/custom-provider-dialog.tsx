@@ -25,6 +25,7 @@ import { CustomProviderSchema } from '@shared/data/schemas/provider'
 import { BoxesIcon, ChevronDownIcon, CloudIcon, ServerIcon, TerminalIcon } from 'lucide-react'
 import * as React from 'react'
 
+import lmStudioIcon from '@renderer/assets/providers/lmstudio.svg'
 import { useProviderLibraryActions } from './provider-library'
 
 type CustomProviderIcon = {
@@ -44,6 +45,11 @@ const customProviderIcons = [
     id: 'default',
     label: 'Default icon',
     preview: <BoxesIcon aria-hidden="true" className="size-5" />
+  },
+  {
+    id: 'lmstudio',
+    label: 'LM Studio',
+    preview: <img alt="" aria-hidden="true" className="size-5" src={lmStudioIcon} />
   },
   { id: 'cloud', label: 'Cloud', preview: <CloudIcon aria-hidden="true" className="size-5" /> },
   { id: 'server', label: 'Server', preview: <ServerIcon aria-hidden="true" className="size-5" /> },

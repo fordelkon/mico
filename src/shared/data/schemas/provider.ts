@@ -3,7 +3,7 @@ import * as z from 'zod'
 import { defineSchema } from '../define'
 
 const ProviderIdSchema = defineSchema(
-  z.enum(['lm-studio', 'ollama', 'openai-responses', 'openai-compatible', 'anthropic-compatible'])
+  z.enum(['ollama', 'openai-responses', 'openai-compatible', 'anthropic-compatible'])
 )
 const ModelProviderSchema = defineSchema(z.string().trim().min(1))
 const ProviderBaseUrlSchema = defineSchema(
@@ -46,13 +46,6 @@ const CustomProviderSchema = defineSchema(
 )
 const ProviderConfigurationSchema = defineSchema(
   z.discriminatedUnion('provider', [
-    z.object({
-      provider: z.literal('lm-studio'),
-      baseUrl: ProviderBaseUrlSchema,
-      apiKey: ProviderApiKeySchema.optional(),
-      enabled: z.boolean().optional(),
-      headers: ProviderHeadersSchema.optional()
-    }),
     z.object({
       provider: z.literal('ollama'),
       baseUrl: ProviderBaseUrlSchema,

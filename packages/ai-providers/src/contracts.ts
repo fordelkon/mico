@@ -79,13 +79,6 @@ type ChatProvider = {
 
 type ChatProviderConfiguration =
   | {
-      provider: 'lm-studio'
-      baseUrl: string
-      modelId: string
-      apiKey?: string
-      headers?: Record<string, string>
-    }
-  | {
       provider: 'openai-responses'
       baseUrl: string
       modelId: string
@@ -115,7 +108,7 @@ type ChatProviderConfiguration =
       headers?: Record<string, string>
     }
 
-type LocalProviderId = 'lm-studio' | 'ollama'
+type LocalProviderId = 'ollama'
 type DiscoverableProviderId = ChatProviderConfiguration['provider']
 type DiscoveredModel = { modelId: string; displayName: string }
 type ModelDiscoveryInput = {

@@ -31,27 +31,6 @@ function createFetch(response: Response): RecordingFetch {
 }
 
 describe('discoverModels', () => {
-  it('lists LM Studio native model keys', async () => {
-    const client = createFetch(
-      jsonResponse({
-        models: [
-          { key: ' qwen3-8b ', display_name: 'Qwen3 8B' },
-          { key: 'qwen3-8b', display_name: 'Duplicate' },
-          { key: 42 }
-        ]
-      })
-    )
-
-    await expect(
-      discoverModels(
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234/' },
-        { fetch: client.fetch }
-      )
-    ).resolves.toEqual([{ modelId: 'qwen3-8b', displayName: 'qwen3-8b' }])
-
-    expect(client.request().url).toBe('http://localhost:1234/api/v1/models')
-  })
-
   it('lists Ollama models and ignores malformed rows', async () => {
     const client = createFetch(
       jsonResponse({ models: [{ name: 'llama3.2:latest' }, {}, { name: ' ' }] })

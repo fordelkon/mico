@@ -84,12 +84,6 @@ class ProviderDatabase {
     this.db
       .insert(providers)
       .values([
-        {
-          id: 'lm-studio',
-          kind: 'builtin',
-          baseUrl: 'http://localhost:1234',
-          enabled: false
-        },
         { id: 'ollama', kind: 'builtin', baseUrl: 'http://localhost:11434', enabled: false }
       ])
       .onConflictDoNothing()

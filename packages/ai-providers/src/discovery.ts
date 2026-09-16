@@ -17,11 +17,6 @@ const ModelStringSchema = z
   .pipe(z.string().min(1))
   .optional()
   .catch(undefined)
-const LMStudioModelsSchema = z
-  .object({
-    models: z.array(z.object({ key: ModelStringSchema, display_name: ModelStringSchema })).catch([])
-  })
-  .transform(({ models }) => models.map(({ key }) => ({ modelId: key })))
 const OllamaModelsSchema = z
   .object({ models: z.array(z.object({ name: ModelStringSchema })).catch([]) })
   .transform(({ models }) => models.map(({ name }) => ({ modelId: name })))
@@ -69,11 +64,6 @@ function getHeaders(
 
 function getRequest(input: ModelDiscoveryInput): ModelDiscoveryRequest {
   switch (input.provider) {
-    case 'lm-studio':
-      return {
-        url: new URL('/api/v1/models', input.baseUrl).toString(),
-        headers: getHeaders(input.provider, input.apiKey, input.headers)
-      }
     case 'ollama':
       return {
         url: new URL('/api/tags', input.baseUrl).toString(),
@@ -112,24 +102,20 @@ async function parseModels(
 ): Promise<DiscoveredModel[]> {
   const payload = await response.json()
   const parsed =
-    provider === 'lm-studio'
-      ? LMStudioModelsSchema.safeParse(payload)
-      : provider === 'ollama'
-        ? OllamaModelsSchema.safeParse(payload)
-        : OpenAIModelsSchema.safeParse(payload)
+    provider === 'ollama'
+      ? OllamaModelsSchema.safeParse(payload)
+      : OpenAIModelsSchema.safeParse(payload)
   return normalizeModels(parsed.success ? parsed.data : [])
 }
 
 function getProviderName(provider: DiscoverableProviderId): string {
-  return provider === 'lm-studio'
-    ? 'LM Studio'
-    : provider === 'ollama'
-      ? 'Ollama'
-      : provider === 'openai-responses'
-        ? 'OpenAI Responses'
-        : provider === 'openai-compatible'
-          ? 'OpenAI-compatible'
-          : 'Anthropic-compatible'
+  return provider === 'ollama'
+    ? 'Ollama'
+    : provider === 'openai-responses'
+      ? 'OpenAI Responses'
+      : provider === 'openai-compatible'
+        ? 'OpenAI-compatible'
+        : 'Anthropic-compatible'
 }
 
 async function discoverModels(

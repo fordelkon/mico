@@ -22,7 +22,6 @@ function getProviderDetails(
   const customProvider = library.customProviders.find(({ id }) => id === providerId)
   if (customProvider)
     return { providerIcon: customProvider.icon, providerLabel: customProvider.name }
-  if (providerId === 'lm-studio') return { providerLabel: 'LM Studio' }
   if (providerId === 'ollama') return { providerLabel: 'Ollama' }
   return { providerLabel: providerId }
 }

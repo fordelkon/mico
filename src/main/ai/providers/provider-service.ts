@@ -493,16 +493,6 @@ class ProviderService {
 function toConfiguration(row: typeof providers.$inferSelect): ProviderConfiguration {
   const headers = parseHeaders(row.headers)
   switch (row.id) {
-    case 'lm-studio': {
-      const configuration: Extract<ProviderConfiguration, { provider: 'lm-studio' }> = {
-        provider: 'lm-studio' as const,
-        baseUrl: row.baseUrl,
-        enabled: row.enabled
-      }
-      if (row.apiKey) configuration.apiKey = row.apiKey
-      if (Object.keys(headers).length) configuration.headers = headers
-      return configuration
-    }
     case 'ollama': {
       const configuration: Extract<ProviderConfiguration, { provider: 'ollama' }> = {
         provider: 'ollama' as const,

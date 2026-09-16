@@ -17,10 +17,7 @@ type ProviderDescriptor = {
   customIcon?: CustomProvider['icon']
 }
 
-const providerDescriptors: ProviderDescriptor[] = [
-  { id: 'lm-studio', label: 'LM Studio' },
-  { id: 'ollama', label: 'Ollama' }
-]
+const providerDescriptors: ProviderDescriptor[] = [{ id: 'ollama', label: 'Ollama' }]
 
 const builtInProviderIds = providerDescriptors.map(({ id }) => id)
 

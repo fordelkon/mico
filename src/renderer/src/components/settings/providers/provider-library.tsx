@@ -31,19 +31,6 @@ type ProviderLibrary = {
 
 function toPersistedLibrary(library: ProviderLibrary): PersistedProviderLibrary {
   const configurations: PersistedProviderLibrary['configurations'][number][] = []
-  const lmStudio = library.configurations['lm-studio']
-  if (lmStudio) {
-    const configuration: Extract<
-      PersistedProviderLibrary['configurations'][number],
-      { provider: 'lm-studio' }
-    > = {
-      provider: 'lm-studio',
-      baseUrl: lmStudio.baseUrl,
-      enabled: lmStudio.enabled
-    }
-    if (lmStudio.apiKey) configuration.apiKey = lmStudio.apiKey
-    configurations.push(configuration)
-  }
   const ollama = library.configurations.ollama
   if (ollama)
     configurations.push({ provider: 'ollama', baseUrl: ollama.baseUrl, enabled: ollama.enabled })
@@ -91,7 +78,6 @@ type ProviderLibraryState = {
 const configurationSaveDelay = 150
 const initialLibrary: ProviderLibrary = {
   configurations: {
-    'lm-studio': { apiKey: '', baseUrl: 'http://localhost:1234', enabled: false },
     ollama: { apiKey: '', baseUrl: 'http://localhost:11434', enabled: false }
   },
   customProviders: [],
@@ -104,9 +90,9 @@ const initialLibrary: ProviderLibrary = {
 function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderLibrary {
   const configurations = { ...initialLibrary.configurations }
   for (const configuration of next.configurations) {
-    if (configuration.provider === 'lm-studio' || configuration.provider === 'ollama') {
+    if (configuration.provider === 'ollama') {
       configurations[configuration.provider] = {
-        apiKey: 'apiKey' in configuration ? (configuration.apiKey ?? '') : '',
+        apiKey: '',
         baseUrl: configuration.baseUrl,
         enabled: configuration.enabled ?? false
       }

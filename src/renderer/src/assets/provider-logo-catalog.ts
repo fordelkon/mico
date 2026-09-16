@@ -174,7 +174,6 @@ import logo172 from '@lobehub/icons-static-svg/icons/livekit-color.svg?no-inline
 import logo173 from '@lobehub/icons-static-svg/icons/llamaindex-color.svg?no-inline'
 import logo174 from '@lobehub/icons-static-svg/icons/llava-color.svg?no-inline'
 import logo175 from '@lobehub/icons-static-svg/icons/llmapi-color.svg?no-inline'
-import logo176 from '@lobehub/icons-static-svg/icons/lmstudio.svg?no-inline'
 import logo177 from '@lobehub/icons-static-svg/icons/lobehub-color.svg?no-inline'
 import logo178 from '@lobehub/icons-static-svg/icons/longcat-color.svg?no-inline'
 import logo179 from '@lobehub/icons-static-svg/icons/lovable-color.svg?no-inline'
@@ -497,7 +496,6 @@ const customProviderLogoSources = [
   { id: 'llamaindex', source: logo173 },
   { id: 'llava', source: logo174 },
   { id: 'llmapi', source: logo175 },
-  { id: 'lmstudio', source: logo176 },
   { id: 'lobehub', source: logo177 },
   { id: 'longcat', source: logo178 },
   { id: 'lovable', source: logo179 },

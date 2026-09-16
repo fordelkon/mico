@@ -26,29 +26,6 @@ describe('testChatProvider', () => {
     })
   })
 
-  it('returns LM Studio native output metrics alongside measured request timing', async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(
-        new Response(
-          'event: message.delta\ndata: {"delta":"OK"}\n\nevent: chat.end\ndata: {"result":{"stats":{"total_output_tokens":12,"tokens_per_second":30,"time_to_first_token_seconds":0.15}}}\n\n'
-        )
-      )
-    const now = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(150).mockReturnValueOnce(550)
-
-    await expect(
-      testChatProvider(
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', modelId: 'local-model' },
-        { createId: () => 'part', fetch, now }
-      )
-    ).resolves.toEqual({
-      durationMs: 550,
-      outputTokens: 12,
-      timeToFirstTokenMs: 150,
-      tokensPerSecond: 30
-    })
-  })
-
   it('returns duration for a compatible provider that does not report token statistics', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

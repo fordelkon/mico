@@ -1,7 +1,10 @@
 import type Database from 'better-sqlite3'
 
 type ProviderMigration = {
-  id: '0001_initial_provider_library' | '0002_add_provider_library_columns'
+  id:
+    | '0001_initial_provider_library'
+    | '0002_add_provider_library_columns'
+    | '0003_remove_lm_studio_builtin_provider'
   apply: (connection: Database.Database) => void
 }
 
@@ -84,6 +87,25 @@ const providerMigrations: readonly ProviderMigration[] = [
       connection.exec(
         'UPDATE providers SET enabled_order = rowid WHERE enabled = 1 AND enabled_order IS NULL'
       )
+    }
+  },
+  {
+    id: '0003_remove_lm_studio_builtin_provider',
+    apply: (connection) => {
+      connection.exec(`
+        UPDATE provider_library_state
+        SET
+          selected_model_id = NULL,
+          selected_provider_id = CASE
+            WHEN selected_provider_id = 'lm-studio' THEN NULL
+            ELSE selected_provider_id
+          END
+        WHERE selected_provider_id = 'lm-studio'
+          OR selected_model_id IN (
+            SELECT id FROM provider_models WHERE provider_id = 'lm-studio'
+          );
+        DELETE FROM providers WHERE id = 'lm-studio';
+      `)
     }
   }
 ]

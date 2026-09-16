@@ -15,7 +15,7 @@ import { ProvidersSection } from './providers/providers-section'
 import { AppearanceSettings } from './appearances/appearance-settings'
 
 function SettingsContent(): React.JSX.Element {
-  const initialProviderId = builtInProviderIds[0] ?? 'lm-studio'
+  const initialProviderId = builtInProviderIds[0] ?? 'ollama'
   const [activeProviderId, setActiveProviderId] = React.useState<ProviderId>(initialProviderId)
   const hasSelectedDefaultProvider = React.useRef(false)
   const providerReorderAnimation = useListReorderAnimation()

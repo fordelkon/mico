@@ -59,10 +59,7 @@ let persistedLibrary: PersistedProviderLibrary
 
 beforeEach(() => {
   persistedLibrary = {
-    configurations: [
-      { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-      { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-    ],
+    configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
     customProviders: [],
     enabledProviderIds: ['ollama'],
     models: [],
@@ -256,10 +253,7 @@ describe('SettingsMain', () => {
 
   it('selects the first provider in sidebar order after loading the library', async () => {
     providerApi.getLibrary.mockResolvedValueOnce({
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
-      ],
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
       customProviders: [],
       models: [],
       selectedModelId: null
@@ -267,15 +261,12 @@ describe('SettingsMain', () => {
 
     renderSettings()
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
   it('restores the last visited provider after loading the library', async () => {
     providerApi.getLibrary.mockResolvedValueOnce({
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
-      ],
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
       customProviders: [],
       models: [],
       selectedModelId: null,
@@ -289,10 +280,7 @@ describe('SettingsMain', () => {
 
   it('falls back from a missing saved provider to the first provider', async () => {
     providerApi.getLibrary.mockResolvedValueOnce({
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434' }
-      ],
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
       customProviders: [],
       models: [],
       selectedModelId: null,
@@ -301,11 +289,10 @@ describe('SettingsMain', () => {
 
     renderSettings()
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
   it('restores the last visited provider after returning to settings', async () => {
-    const user = userEvent.setup()
     const { rerender } = render(
       <ProviderLibraryProvider>
         <SettingsMain />
@@ -313,7 +300,6 @@ describe('SettingsMain', () => {
     )
 
     await waitForOllama()
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
     rerender(
       <ProviderLibraryProvider>
         <div />
@@ -325,15 +311,12 @@ describe('SettingsMain', () => {
       </ProviderLibraryProvider>
     )
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
   it('loads persisted custom providers into the sidebar', async () => {
     providerApi.getLibrary.mockResolvedValue({
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234' },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-      ],
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
       customProviders: [
         {
           apiFormat: 'openai-compatible',
@@ -355,19 +338,6 @@ describe('SettingsMain', () => {
     expect(await screen.findByRole('button', { name: 'Example AI' })).toBeVisible()
   })
 
-  it('switches the empty provider section when a provider is selected', async () => {
-    const user = userEvent.setup()
-
-    renderSettings()
-
-    await waitForOllama()
-    expect(screen.getByRole('button', { name: 'Ollama' })).toHaveAttribute('aria-current', 'page')
-
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-
-    expect(screen.getByRole('heading', { level: 2, name: 'LM Studio' })).toBeVisible()
-  })
-
   it('keeps connection and model controls visible while a provider is disabled', async () => {
     const user = userEvent.setup()
 
@@ -383,15 +353,10 @@ describe('SettingsMain', () => {
   })
 
   it('does not show manual model controls for built-in providers', async () => {
-    const user = userEvent.setup()
     renderSettings()
 
     await waitForOllama()
     expect(screen.queryByLabelText('Model ID for Ollama')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-
-    expect(screen.queryByLabelText('Model ID for LM Studio')).not.toBeInTheDocument()
   })
 
   it('adds a disabled manual model for a custom provider and clears the form', async () => {
@@ -483,34 +448,12 @@ describe('SettingsMain', () => {
     })
   })
 
-  it('places a newly enabled provider after previously enabled providers in the rail', async () => {
-    const user = userEvent.setup()
-
-    renderSettings()
-
-    await waitForOllama()
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-    await user.click(screen.getByRole('switch', { name: 'Enable LM Studio' }))
-
-    const providerButtons = screen
-      .getAllByRole('button')
-      .filter((button) => ['LM Studio', 'Ollama'].includes(button.getAttribute('aria-label') ?? ''))
-
-    expect(providerButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Ollama',
-      'LM Studio'
-    ])
-  })
-
   it('keeps provider rail order after enabling a model', async () => {
     const user = userEvent.setup()
     persistedLibrary = {
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: true },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-      ],
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
       customProviders: [],
-      enabledProviderIds: ['ollama', 'lm-studio'],
+      enabledProviderIds: ['ollama'],
       models: [
         {
           displayName: 'llama3.2',
@@ -536,38 +479,10 @@ describe('SettingsMain', () => {
       )
       const providerButtons = screen
         .getAllByRole('button')
-        .filter((button) =>
-          ['LM Studio', 'Ollama'].includes(button.getAttribute('aria-label') ?? '')
-        )
+        .filter((button) => button.getAttribute('aria-label') === 'Ollama')
 
-      expect(providerButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
-        'Ollama',
-        'LM Studio'
-      ])
+      expect(providerButtons.map((button) => button.getAttribute('aria-label'))).toEqual(['Ollama'])
     })
-  })
-
-  it('keeps provider configuration independent when switching providers', async () => {
-    const user = userEvent.setup()
-
-    renderSettings()
-
-    await waitForOllama()
-    await user.click(screen.getByRole('switch', { name: 'Enable Ollama' }))
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-
-    expect(screen.getByRole('switch', { name: 'Enable LM Studio' })).toHaveAttribute(
-      'aria-checked',
-      'false'
-    )
-    expect(screen.getByLabelText('Base URL')).toHaveValue('http://localhost:1234')
-
-    await user.click(screen.getByRole('switch', { name: 'Enable LM Studio' }))
-
-    expect(screen.getByRole('switch', { name: 'Enable LM Studio' })).toHaveAttribute(
-      'aria-checked',
-      'true'
-    )
   })
 
   it('allows testing a fetched disabled model', async () => {
@@ -609,19 +524,6 @@ describe('SettingsMain', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Search Ollama models' }), 'llama')
 
     expect(screen.getByText('llama3.2:latest')).toBeVisible()
-    expect(screen.queryByText('granite4.2:3b')).not.toBeInTheDocument()
-  })
-
-  it('does not show one provider’s fetched models after switching to another provider', async () => {
-    const user = userEvent.setup()
-
-    renderSettings()
-
-    await waitForOllama()
-    await user.click(screen.getByRole('button', { name: 'Fetch Ollama models' }))
-    await user.click(screen.getByRole('button', { name: 'LM Studio' }))
-
-    expect(screen.getByLabelText('LM Studio fetched models')).toBeVisible()
     expect(screen.queryByText('granite4.2:3b')).not.toBeInTheDocument()
   })
 
@@ -682,10 +584,9 @@ describe('SettingsMain', () => {
     renderSettings()
 
     await user.click(screen.getByRole('button', { name: 'Search providers' }))
-    await user.type(screen.getByRole('searchbox', { name: 'Search providers' }), 'studio')
+    await user.type(screen.getByRole('searchbox', { name: 'Search providers' }), 'ollama')
 
-    expect(screen.getByRole('button', { name: 'LM Studio' })).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'Ollama' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ollama' })).toBeVisible()
   })
 
   it('opens the provider search only after the search control is clicked', async () => {
@@ -852,12 +753,12 @@ describe('SettingsMain', () => {
     await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
     await user.click(screen.getByRole('button', { name: 'Default icon' }))
 
-    const openAiOption = screen.getByRole('menuitemradio', { name: 'OpenAI' })
-    expect(openAiOption).toHaveAttribute('aria-checked', 'false')
+    const lmStudioOption = screen.getByRole('menuitemradio', { name: 'LM Studio' })
+    expect(lmStudioOption).toHaveAttribute('aria-checked', 'false')
 
-    await user.click(openAiOption)
+    await user.click(lmStudioOption)
 
-    expect(screen.getByRole('button', { name: 'OpenAI' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'LM Studio' })).toBeVisible()
   })
 
   it('selects a custom provider API format from its menu', async () => {

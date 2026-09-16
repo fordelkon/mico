@@ -34,13 +34,15 @@ for await (const chunk of stream) {
 - `openai-responses` — OpenAI Responses API
 - `openai-compatible` — Chat Completions-compatible endpoints
 - `anthropic-compatible` — Messages-compatible endpoints
-- `lm-studio` — LM Studio native API
 - `ollama` — Ollama native `/api/chat` API
 
 All adapters emit `reasoning-start`, `reasoning-delta`, `reasoning-end`, and
 text chunks. The application owns message history. Provider-specific replay
 data is carried in `providerMetadata`: Anthropic signatures stay on reasoning
-parts, while LM Studio response IDs stay on assistant message metadata.
+parts.
+
+LM Studio can be connected in the application as a custom `openai-compatible`
+provider using its OpenAI-compatible server endpoint.
 
 ## Model discovery
 
@@ -53,11 +55,11 @@ occurrence of each model ID.
 import { discoverModels } from '@mico/ai-providers'
 
 const models = await discoverModels({
-  provider: 'lm-studio',
-  baseUrl: 'http://localhost:1234'
+  provider: 'openai-compatible',
+  baseUrl: 'http://localhost:1234/v1'
 })
 
-// [{ modelId: 'qwen3-8b', displayName: 'Qwen3 8B' }]
+// [{ modelId: 'qwen3-8b', displayName: 'qwen3-8b' }]
 
 for (const model of models) console.log(model.modelId, model.displayName)
 ```
@@ -67,7 +69,6 @@ provider's native model-list API and auth convention:
 
 | Provider | Model endpoint | Authentication |
 | --- | --- | --- |
-| `lm-studio` | `/api/v1/models` | Optional bearer token |
 | `ollama` | `/api/tags` | None |
 | `openai-responses` | `/v1/models` | Bearer token |
 | `openai-compatible` | `/v1/models` | Optional bearer token |
@@ -211,7 +212,6 @@ const readFile: ChatProviderTool = {
 | `openai-compatible` | Supported |
 | `anthropic-compatible` | Supported |
 | `ollama` | Supported |
-| `lm-studio` | Throws before a native request because its response-ID continuation cannot faithfully replay a generic call/result transcript |
 
 Calls are emitted as executable `tool-input-available` chunks only after the
 provider's native completion boundary and successful JSON parsing. Malformed
@@ -252,7 +252,7 @@ if (result.tokensPerSecond) console.log(`${result.tokensPerSecond} tokens/second
 
 `durationMs` is always present. `timeToFirstTokenMs`, `outputTokens`, and
 `tokensPerSecond` are optional: a provider can only report them when its stream
-supplies reliable token usage. Ollama and LM Studio use native performance
+supplies reliable token usage. Ollama uses native performance
 statistics. OpenAI Responses, OpenAI-compatible, and Anthropic-compatible
 providers use their streamed usage counters; the test helper derives throughput
 from the first generated token through completion. The OpenAI-compatible test
