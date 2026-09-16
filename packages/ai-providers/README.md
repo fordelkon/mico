@@ -1,11 +1,35 @@
 # @mico/ai-providers
 
-`@mico/ai-providers` is Mico's private workspace package for normalizing chat
-providers into AI SDK `UIMessageChunk` streams. It keeps provider protocols out
-of the main process and renderer while preserving visible reasoning as a
-first-class stream part.
+`@mico/ai-providers` normalizes chat-provider protocols into AI SDK
+`UIMessageChunk` streams. It preserves visible reasoning as a first-class
+stream part and provides one transport contract for tool definitions, calls,
+and results.
 
-## Supported configurations
+## Quick start
+
+```ts
+import { createChatProvider } from '@mico/ai-providers'
+
+const provider = createChatProvider({
+  provider: 'ollama',
+  baseUrl: 'http://localhost:11434',
+  modelId: 'granite4.2:3b'
+})
+
+const controller = new AbortController()
+const stream = await provider.stream({
+  conversationKey: 'chat-1',
+  messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello.' }] }],
+  thinkingEffort: 'none',
+  signal: controller.signal
+})
+
+for await (const chunk of stream) {
+  if (chunk.type === 'text-delta') console.log(chunk.delta)
+}
+```
+
+## Supported providers
 
 - `openai-responses` — OpenAI Responses API
 - `openai-compatible` — Chat Completions-compatible endpoints
@@ -17,24 +41,6 @@ All adapters emit `reasoning-start`, `reasoning-delta`, `reasoning-end`, and
 text chunks. The application owns message history. Provider-specific replay
 data is carried in `providerMetadata`: Anthropic signatures stay on reasoning
 parts, while LM Studio response IDs stay on assistant message metadata.
-
-OpenAI Responses, OpenAI-compatible, and Anthropic-compatible adapters expose
-the same five thinking preferences: off, low, medium, high, and extra-high.
-They optimistically map a preference to their native request field. If an
-endpoint rejects that field with a 400 or 422 response, the adapter retries
-once without it and remembers that fallback for the rest of the app session.
-
-## Usage
-
-```ts
-import { createChatProvider } from '@mico/ai-providers'
-
-const provider = createChatProvider({
-  provider: 'ollama',
-  baseUrl: 'http://localhost:11434',
-  modelId: 'granite4.2:3b'
-})
-```
 
 ## Model discovery
 
@@ -52,6 +58,8 @@ const models = await discoverModels({
 })
 
 // [{ modelId: 'qwen3-8b', displayName: 'Qwen3 8B' }]
+
+for (const model of models) console.log(model.modelId, model.displayName)
 ```
 
 Provide `apiKey` for endpoints that require authentication. Discovery uses the
@@ -64,6 +72,158 @@ provider's native model-list API and auth convention:
 | `openai-responses` | `/v1/models` | Bearer token |
 | `openai-compatible` | `/v1/models` | Optional bearer token |
 | `anthropic-compatible` | `/v1/models` | `x-api-key` and `anthropic-version`; retries once with bearer authentication after a 401 |
+
+## Tool transport
+
+Callers define arbitrary tools with a name, description, and JSON input schema,
+then pass them to `provider.stream()`. Supported adapters translate tool
+definitions, completed calls, and call-result history to their native protocol
+while emitting AI SDK `tool-input-*` chunks.
+
+The package does not register or execute tools, validate input against an
+application schema, make approval decisions, or own tool results. Those
+responsibilities belong to the caller.
+
+### Request a business tool
+
+```ts
+import {
+  createChatProvider,
+  type ChatProviderTool
+} from '@mico/ai-providers'
+
+const provider = createChatProvider({
+  provider: 'openai-compatible',
+  baseUrl: 'https://api.example.com/v1',
+  modelId: 'example-model'
+})
+
+const convertCurrency: ChatProviderTool = {
+  name: 'convert_currency',
+  description: 'Convert an amount from one ISO 4217 currency to another.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      amount: { type: 'number' },
+      from: { type: 'string' },
+      to: { type: 'string' }
+    },
+    required: ['amount', 'from', 'to'],
+    additionalProperties: false
+  }
+}
+
+const controller = new AbortController()
+const stream = await provider.stream({
+  conversationKey: 'chat-1',
+  messages: [
+    {
+      role: 'user',
+      parts: [{ type: 'text', text: 'Convert 100 EUR to USD.' }]
+    }
+  ],
+  tools: [convertCurrency],
+  thinkingEffort: 'none',
+  signal: controller.signal
+})
+
+for await (const chunk of stream) {
+  if (chunk.type === 'tool-input-available') {
+    // Validate, authorize, and execute this request in the calling application.
+    console.log(chunk.toolName, chunk.toolCallId, chunk.input)
+  }
+}
+```
+
+`tool-input-available` is the only executable tool chunk. Do not execute a
+`tool-input-delta`: its input is intentionally incomplete.
+
+### Replay a call and its result
+
+Persist a completed call and its result before requesting the next model turn.
+The original `toolCallId` must appear in both records.
+
+```ts
+import type { ChatProviderMessage } from '@mico/ai-providers'
+
+const toolHistory: ChatProviderMessage[] = [
+  {
+    role: 'assistant',
+    parts: [
+      {
+        type: 'tool-call',
+        toolCallId: 'call_currency_1',
+        toolName: 'convert_currency',
+        argumentsJson: '{"amount":100,"from":"EUR","to":"USD"}'
+      }
+    ]
+  },
+  {
+    role: 'tool',
+    parts: [
+      {
+        type: 'tool-result',
+        toolCallId: 'call_currency_1',
+        toolName: 'convert_currency',
+        output: '{"amount":108.42,"currency":"USD"}',
+        isError: false
+      }
+    ]
+  }
+]
+
+const nextStream = await provider.stream({
+  conversationKey: 'chat-1',
+  messages: [
+    { role: 'user', parts: [{ type: 'text', text: 'Convert 100 EUR to USD.' }] },
+    ...toolHistory
+  ],
+  tools: [convertCurrency],
+  thinkingEffort: 'none',
+  signal: controller.signal
+})
+```
+
+### Request a local file tool
+
+The transport contract also works for local tools, but the caller must enforce
+its own filesystem policy. For example, define `read` with a path argument,
+verify that the requested path is within an approved workspace, then return a
+`tool-result` with `isError: true` when it is not. Do not expose filesystem
+access merely because a model requested it.
+
+```ts
+const readFile: ChatProviderTool = {
+  name: 'read',
+  description: 'Read an approved UTF-8 text file.',
+  inputSchema: {
+    type: 'object',
+    properties: { path: { type: 'string' } },
+    required: ['path'],
+    additionalProperties: false
+  }
+}
+```
+
+| Provider | Tool definitions, calls, and replay |
+| --- | --- |
+| `openai-responses` | Supported |
+| `openai-compatible` | Supported |
+| `anthropic-compatible` | Supported |
+| `ollama` | Supported |
+| `lm-studio` | Throws before a native request because its response-ID continuation cannot faithfully replay a generic call/result transcript |
+
+Calls are emitted as executable `tool-input-available` chunks only after the
+provider's native completion boundary and successful JSON parsing. Malformed
+completed arguments emit `tool-input-error`; incomplete native calls fail the
+stream instead of being silently dropped. Handle either outcome before
+continuing the conversation.
+
+OpenAI Responses, OpenAI-compatible, and Anthropic-compatible adapters expose
+the same five thinking preferences: off, low, medium, high, and extra-high.
+They optimistically map a preference to their native request field. If an
+endpoint rejects that field with a 400 or 422 response, the adapter retries
+once without it and remembers that fallback for the rest of the app session.
 
 ## Provider testing
 
@@ -86,6 +246,8 @@ const result = await testChatProvider({
 //   outputTokens: 42,
 //   tokensPerSecond: 9.0
 // }
+
+if (result.tokensPerSecond) console.log(`${result.tokensPerSecond} tokens/second`)
 ```
 
 `durationMs` is always present. `timeToFirstTokenMs`, `outputTokens`, and

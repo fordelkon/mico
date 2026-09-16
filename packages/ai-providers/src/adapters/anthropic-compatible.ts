@@ -7,6 +7,8 @@ import type {
   ChatProviderConfiguration,
   ChatProviderDependencies,
   ChatProviderMessage,
+  ChatProviderTool,
+  JsonObject,
   ThinkingSelection
 } from '../contracts'
 import { createReasoningChunkEmitter, type ReasoningChunkEmitter } from '../streaming/parts'
@@ -29,7 +31,22 @@ type AnthropicRequest = {
   stream: true
   system?: string
   thinking?: { type: 'disabled' } | { type: 'enabled'; budget_tokens: number }
+  tools?: Array<{
+    name: string
+    description: string
+    input_schema: ChatProviderTool['inputSchema']
+  }>
 }
+type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string; signature: string }
+  | { type: 'tool_use'; id: string; name: string; input: JsonObject }
+  | {
+      type: 'tool_result'
+      tool_use_id: string
+      content: string
+      is_error: boolean
+    }
 // 8192 is a conservative fallback, not a universal model limit. Callers can
 // provide maxTokens when their endpoint/model has a different output ceiling.
 const DEFAULT_MAX_TOKENS = 8192
@@ -47,7 +64,10 @@ const EventSchema = z.object({
   index: z.number().int().optional(),
   content_block: z
     .object({
-      type: z.enum(['text', 'thinking']),
+      type: z.enum(['text', 'thinking', 'tool_use']),
+      id: z.string().optional(),
+      name: z.string().optional(),
+      input: z.unknown().optional(),
       text: z.string().optional(),
       thinking: z.string().optional()
     })
@@ -57,13 +77,15 @@ const EventSchema = z.object({
       type: z.string().optional(),
       text: z.string().optional(),
       thinking: z.string().optional(),
-      signature: z.string().optional()
+      signature: z.string().optional(),
+      partial_json: z.string().optional()
     })
     .optional(),
   usage: z.object({ output_tokens: z.number().nonnegative().optional() }).optional(),
   error: z.object({ message: z.string().optional() }).optional()
 })
 const SignatureSchema = z.object({ signature: z.string() })
+const ToolArgumentsSchema = z.record(z.string(), z.json())
 
 function getThinkingBudget(selection: ThinkingSelection, maxTokens: number): number | undefined {
   const ratio = thinkingBudgetRatios.get(selection)
@@ -91,16 +113,35 @@ function getSignature(
   return SignatureSchema.safeParse(part.providerMetadata?.anthropic).data?.signature
 }
 function toMessage(message: ChatProviderMessage) {
-  const content: Array<
-    { type: 'text'; text: string } | { type: 'thinking'; thinking: string; signature: string }
-  > = []
+  const content: AnthropicContentBlock[] = []
+  if (message.role === 'tool') {
+    for (const part of message.parts)
+      if (part.type === 'tool-result')
+        content.push({
+          type: 'tool_result',
+          tool_use_id: part.toolCallId,
+          content: part.output,
+          is_error: part.isError
+        })
+    return content.length ? { role: 'user' as const, content } : null
+  }
   for (const part of message.parts) {
     if (part.type === 'text') {
       content.push({ type: 'text', text: part.text })
       continue
     }
-    const signature = getSignature(part)
-    if (signature) content.push({ type: 'thinking', thinking: part.text, signature })
+    if (part.type === 'reasoning') {
+      const signature = getSignature(part)
+      if (signature) content.push({ type: 'thinking', thinking: part.text, signature })
+      continue
+    }
+    if (message.role === 'assistant' && part.type === 'tool-call')
+      content.push({
+        type: 'tool_use',
+        id: part.toolCallId,
+        name: part.toolName,
+        input: ToolArgumentsSchema.parse(JSON.parse(part.argumentsJson))
+      })
   }
   return content.length
     ? { role: message.role === 'system' ? 'user' : message.role, content }
@@ -114,7 +155,7 @@ function createAnthropicCompatibleProvider(
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
+    stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
       const system = messages
         .filter((message) => message.role === 'system')
         .flatMap((message) =>
@@ -141,6 +182,12 @@ function createAnthropicCompatibleProvider(
         stream: true
       }
       if (system) request.system = system
+      if (tools?.length)
+        request.tools = tools.map((tool: ChatProviderTool) => ({
+          name: tool.name,
+          description: tool.description,
+          input_schema: tool.inputSchema
+        }))
       const send = (includeThinking: boolean, authentication: 'api-key' | 'bearer' = 'api-key') => {
         const thinking = getThinking(includeThinking)
         const body = thinking ? { ...request, thinking } : request
@@ -180,8 +227,16 @@ function createAnthropicCompatibleProvider(
         const text = createTextChunkEmitter(dependencies.createId)
         const reasoning = new Map<number, ReasoningChunkEmitter>()
         const signatures = new Map<number, string>()
+        const toolUses = new Map<
+          number,
+          { id?: string; name?: string; argumentsJson: string; initialInput?: unknown }
+        >()
         for await (const event of parseSse(stream)) {
-          if (event.data === '[DONE]') break
+          if (event.data === '[DONE]') {
+            if (toolUses.size > 0)
+              throw new Error('The Anthropic-compatible provider returned an incomplete tool call.')
+            break
+          }
           const parsed = EventSchema.safeParse(JSON.parse(event.data))
           if (!parsed.success)
             throw new Error(
@@ -216,6 +271,36 @@ function createAnthropicCompatibleProvider(
             parsed.data.delta.text
           )
             yield* text.emitDelta(parsed.data.delta.text)
+          if (
+            event.event === 'content_block_start' &&
+            parsed.data.content_block?.type === 'tool_use'
+          ) {
+            const toolUse = {
+              id: parsed.data.content_block.id,
+              name: parsed.data.content_block.name,
+              argumentsJson: '',
+              initialInput: parsed.data.content_block.input
+            }
+            toolUses.set(index, toolUse)
+            if (toolUse.id && toolUse.name)
+              yield {
+                type: 'tool-input-start',
+                toolCallId: toolUse.id,
+                toolName: toolUse.name
+              }
+          }
+          if (
+            event.event === 'content_block_delta' &&
+            parsed.data.delta?.type === 'input_json_delta'
+          ) {
+            const tool = toolUses.get(index)
+            const delta = parsed.data.delta.partial_json ?? ''
+            if (tool) {
+              tool.argumentsJson += delta
+              if (tool.id && delta)
+                yield { type: 'tool-input-delta', toolCallId: tool.id, inputTextDelta: delta }
+            }
+          }
           if (event.event === 'content_block_stop') {
             const signature = signatures.get(index)
             yield* reasoning
@@ -223,13 +308,48 @@ function createAnthropicCompatibleProvider(
               ?.finish(
                 signature ? ({ anthropic: { signature } } satisfies ProviderMetadata) : undefined
               ) ?? []
+            const tool = toolUses.get(index)
+            if (tool) {
+              if (!tool.id || !tool.name)
+                throw new Error(
+                  'The Anthropic-compatible provider returned an incomplete tool call.'
+                )
+              if (!tool.argumentsJson && tool.initialInput === undefined)
+                throw new Error(
+                  'The Anthropic-compatible provider returned an incomplete tool call.'
+                )
+              const argumentsJson = tool.argumentsJson || JSON.stringify(tool.initialInput)
+              try {
+                yield {
+                  type: 'tool-input-available',
+                  toolCallId: tool.id,
+                  toolName: tool.name,
+                  input: JSON.parse(argumentsJson)
+                }
+              } catch {
+                yield {
+                  type: 'tool-input-error',
+                  toolCallId: tool.id,
+                  toolName: tool.name,
+                  input: argumentsJson,
+                  errorText: 'The Anthropic-compatible provider returned invalid tool arguments.'
+                }
+              }
+              toolUses.delete(index)
+            }
           }
           if (event.event === 'error')
             throw new Error(
               parsed.data.error?.message ?? 'The Anthropic-compatible provider returned an error.'
             )
-          if (event.event === 'message_stop') break
+          if (event.event === 'message_stop') {
+            if (toolUses.size > 0)
+              throw new Error('The Anthropic-compatible provider returned an incomplete tool call.')
+            break
+          }
         }
+        if (toolUses.size > 0)
+          throw new Error('The Anthropic-compatible provider returned an incomplete tool call.')
         for (const [index, emitter] of reasoning)
           yield* emitter.finish(
             signatures.has(index) ? { anthropic: { signature: signatures.get(index) } } : undefined

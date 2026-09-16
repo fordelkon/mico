@@ -91,7 +91,10 @@ function getHeaders(apiKey: string | undefined): RequestHeaders {
   return headers
 }
 function getText(message: ChatProviderMessage): string {
-  return message.parts.map((part) => part.text).join('\n')
+  return message.parts
+    .filter((part): part is Extract<typeof part, { text: string }> => 'text' in part)
+    .map((part) => part.text)
+    .join('\n')
 }
 function normalizeLMStudioOption(option: string): string {
   const result = LMStudioReasoningOptionSchema.safeParse(option)
@@ -160,7 +163,14 @@ function createLMStudioProvider(
   }
   return {
     getModelCapabilities,
-    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
+    stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
+      if (tools?.length) throw new Error('LM Studio tool calling is not supported by this adapter.')
+      if (
+        messages.some((message) =>
+          message.parts.some((part) => part.type === 'tool-call' || part.type === 'tool-result')
+        )
+      )
+        throw new Error('LM Studio tool history replay is not supported by this adapter.')
       const currentUserMessage = [...messages].reverse().find((message) => message.role === 'user')
       if (!currentUserMessage) throw new Error('LM Studio requires a user message.')
       const previousResponse = LMStudioResponseMetadataSchema.safeParse(

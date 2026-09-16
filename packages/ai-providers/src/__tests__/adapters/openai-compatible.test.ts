@@ -7,6 +7,255 @@ async function collect(stream: AsyncIterable<unknown>) {
   return chunks
 }
 describe('OpenAI-compatible provider', () => {
+  it('serializes an app-owned tool definition', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('data: [DONE]\n\n'))
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read a file.' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal,
+        tools: [
+          {
+            name: 'read',
+            description: 'Read a file.',
+            inputSchema: {
+              type: 'object',
+              properties: { path: { type: 'string' } },
+              required: ['path']
+            }
+          }
+        ]
+      })
+    )
+
+    expect(
+      await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
+    ).toMatchObject({
+      tools: [{ type: 'function', function: { name: 'read' } }]
+    })
+  })
+
+  it('emits a completed tool input from fragmented function arguments', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read","arguments":"{\\"path\\":"}}]}}]}\n\ndata: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"a.ts\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read a file.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).resolves.toEqual([
+      { type: 'tool-input-start', toolCallId: 'call_1', toolName: 'read' },
+      { type: 'tool-input-delta', toolCallId: 'call_1', inputTextDelta: '{"path":' },
+      { type: 'tool-input-delta', toolCallId: 'call_1', inputTextDelta: '"a.ts"}' },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call_1',
+        toolName: 'read',
+        input: { path: 'a.ts' }
+      }
+    ])
+  })
+
+  it('replays assistant calls and tool results with the original call ID', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('data: [DONE]\n\n'))
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [
+          {
+            role: 'assistant',
+            parts: [
+              { type: 'text', text: 'I will read it.' },
+              {
+                type: 'tool-call',
+                toolCallId: 'call_1',
+                toolName: 'read',
+                argumentsJson: '{"path":"a.ts"}'
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            parts: [
+              {
+                type: 'tool-result',
+                toolCallId: 'call_1',
+                toolName: 'read',
+                output: 'export {}',
+                isError: false
+              }
+            ]
+          }
+        ],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(
+      await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
+    ).toMatchObject({
+      messages: [
+        {
+          role: 'assistant',
+          content: 'I will read it.',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'read', arguments: '{"path":"a.ts"}' }
+            }
+          ]
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: 'export {}' }
+      ]
+    })
+  })
+
+  it('rejects a completed call that has no provider call ID', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).rejects.toThrow('incomplete tool call')
+  })
+
+  it('buffers argument deltas until the call name is available', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"arguments":"{}"}}]}}]}\n\ndata: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).resolves.toEqual([
+      { type: 'tool-input-start', toolCallId: 'call_1', toolName: 'read' },
+      { type: 'tool-input-delta', toolCallId: 'call_1', inputTextDelta: '{}' },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call_1',
+        toolName: 'read',
+        input: {}
+      }
+    ])
+  })
+
+  it('marks malformed completed arguments as a tool input error', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).resolves.toContainEqual({
+      type: 'tool-input-error',
+      toolCallId: 'call_1',
+      toolName: 'read',
+      input: '{',
+      errorText: 'The OpenAI-compatible provider returned invalid tool arguments.'
+    })
+  })
+
+  it('rejects a tool call truncated by a natural stream EOF', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{"}}]}}]}\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).rejects.toThrow('incomplete tool call')
+  })
+
   it('appends Chat Completions directly to a versioned API root', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

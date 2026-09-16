@@ -24,6 +24,68 @@ async function collect(stream: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 describe('LM Studio provider', () => {
+  it('rejects tools before making a native request', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    const provider = createChatProvider(
+      { provider: 'lm-studio', baseUrl: 'http://localhost:1234', modelId: 'local-model' },
+      { fetch: fetchMock, createId: () => 'part-1' }
+    )
+
+    await expect(
+      provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+        tools: [{ name: 'read', description: 'Read a file.', inputSchema: { type: 'object' } }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    ).rejects.toThrow('LM Studio tool calling is not supported')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects tool history even when no tool declarations are supplied', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    const provider = createChatProvider(
+      { provider: 'lm-studio', baseUrl: 'http://localhost:1234', modelId: 'local-model' },
+      { fetch: fetchMock, createId: () => 'part-1' }
+    )
+
+    await expect(
+      provider.stream({
+        conversationKey: 'x',
+        messages: [
+          { role: 'user', parts: [{ type: 'text', text: 'Read.' }] },
+          {
+            role: 'assistant',
+            parts: [
+              {
+                type: 'tool-call',
+                toolCallId: 'call_1',
+                toolName: 'read',
+                argumentsJson: '{}'
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            parts: [
+              {
+                type: 'tool-result',
+                toolCallId: 'call_1',
+                toolName: 'read',
+                output: 'ok',
+                isError: false
+              }
+            ]
+          }
+        ],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    ).rejects.toThrow('tool history replay')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('maps runtime reasoning options without inventing tiers', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({
