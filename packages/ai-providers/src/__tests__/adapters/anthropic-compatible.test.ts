@@ -6,6 +6,32 @@ async function collect(stream: AsyncIterable<unknown>) {
   return chunks
 }
 describe('Anthropic-compatible provider', () => {
+  it('appends Messages directly to an explicitly versioned API root', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://gateway.example.com/proxy/v2',
+        apiKey: 'key',
+        modelId: 'claude'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello.' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(fetch.mock.calls[0]?.[0]).toBe('https://gateway.example.com/proxy/v2/messages')
+  })
+
   it('maps and streams a tool use through the normalized tool contract', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

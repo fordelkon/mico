@@ -12,6 +12,7 @@ import { parseSse } from '../streaming/sse'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
 import { createReasoningChunkEmitter } from '../streaming/parts'
 import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
+import { getVersionedApiUrl } from '../url'
 
 type OpenAIResponsesConfiguration = Extract<
   ChatProviderConfiguration,
@@ -56,13 +57,7 @@ type OpenAIResponsesRequest = {
 }
 
 function getOpenAIResponsesUrl(baseUrl: string): string {
-  const url = new URL(baseUrl)
-  const pathname = url.pathname.replace(/\/+$/, '')
-  if (pathname.endsWith('/responses')) return url.toString()
-  // Providers such as Ark publish versioned roots (/v2, /v3); only unversioned
-  // OpenAI-style roots need the conventional /v1 segment added.
-  url.pathname = /\/v\d+$/.test(pathname) ? `${pathname}/responses` : `${pathname}/v1/responses`
-  return url.toString()
+  return getVersionedApiUrl(baseUrl, 'responses')
 }
 function toOpenAIInput(messages: ChatProviderMessage[]): OpenAIInputItem[] {
   const input: OpenAIInputItem[] = []

@@ -84,6 +84,23 @@ describe('discoverModels', () => {
     expect(client.request().headers.get('anthropic-version')).toBe('2023-06-01')
   })
 
+  it('preserves an explicitly versioned Anthropic-compatible API root', async () => {
+    const client = createFetch(jsonResponse({ data: [{ id: 'claude-sonnet' }] }))
+
+    await expect(
+      discoverModels(
+        {
+          provider: 'anthropic-compatible',
+          baseUrl: 'https://gateway.example.com/proxy/v2',
+          apiKey: 'anthropic-key'
+        },
+        { fetch: client.fetch }
+      )
+    ).resolves.toEqual([{ modelId: 'claude-sonnet', displayName: 'claude-sonnet' }])
+
+    expect(client.request().url).toBe('https://gateway.example.com/proxy/v2/models')
+  })
+
   it('retries Anthropic-compatible discovery with bearer authentication after x-api-key is rejected', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

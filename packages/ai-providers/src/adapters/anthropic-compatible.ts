@@ -19,6 +19,7 @@ import {
   getOptimisticThinkingCapabilities,
   isOptimisticThinkingEffort
 } from '../thinking-preferences'
+import { getVersionedApiUrl } from '../url'
 
 type AnthropicConfiguration = Extract<
   ChatProviderConfiguration,
@@ -98,14 +99,7 @@ function getThinkingBudget(selection: ThinkingSelection, maxTokens: number): num
 }
 
 function getUrl(baseUrl: string): string {
-  const url = new URL(baseUrl)
-  const path = url.pathname.replace(/\/+$/, '')
-  url.pathname = path.endsWith('/messages')
-    ? path
-    : path.endsWith('/v1')
-      ? `${path}/messages`
-      : `${path}/v1/messages`
-  return url.toString()
+  return getVersionedApiUrl(baseUrl, 'messages')
 }
 function getSignature(
   part: Extract<ChatProviderMessage['parts'][number], { type: 'reasoning' }>

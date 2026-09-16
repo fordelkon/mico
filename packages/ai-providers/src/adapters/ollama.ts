@@ -15,6 +15,7 @@ import { parseNdjson } from '../streaming/ndjson'
 import { createReasoningChunkEmitter } from '../streaming/parts'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
 import { getOptimisticThinkingCapabilities } from '../thinking-preferences'
+import { getNativeApiUrl } from '../url'
 
 type OllamaConfiguration = Extract<ChatProviderConfiguration, { provider: 'ollama' }>
 type OllamaMessage = {
@@ -67,7 +68,7 @@ const ChunkSchema = z.object({
 })
 const ToolArgumentsSchema = z.record(z.string(), z.json())
 function getUrl(baseUrl: string): string {
-  return new URL('/api/chat', baseUrl).toString()
+  return getNativeApiUrl(baseUrl, 'api/chat')
 }
 function toMessages(messages: ChatProviderMessage[]) {
   return messages.flatMap((message): OllamaMessage[] => {

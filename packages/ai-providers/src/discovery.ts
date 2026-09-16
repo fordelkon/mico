@@ -1,6 +1,7 @@
 import * as z from 'zod'
 
 import { createAnthropicHeaders } from './anthropic-auth'
+import { getNativeApiUrl, getVersionedSiblingApiUrl } from './url'
 import type {
   DiscoveredModel,
   DiscoverableProviderId,
@@ -32,19 +33,11 @@ function getOpenAIModelsUrl(
   baseUrl: string,
   requestPath: 'responses' | 'chat/completions'
 ): string {
-  const url = new URL(baseUrl)
-  const path = url.pathname.replace(/\/+$/, '')
-  const root = path.endsWith(`/${requestPath}`) ? path.slice(0, -requestPath.length - 1) : path
-  url.pathname = /\/v\d+$/.test(root) ? `${root}/models` : `${root}/v1/models`
-  return url.toString()
+  return getVersionedSiblingApiUrl(baseUrl, requestPath, 'models')
 }
 
 function getAnthropicModelsUrl(baseUrl: string): string {
-  const url = new URL(baseUrl)
-  const path = url.pathname.replace(/\/+$/, '')
-  const root = path.endsWith('/messages') ? path.slice(0, -'/messages'.length) : path
-  url.pathname = root.endsWith('/v1') ? `${root}/models` : `${root}/v1/models`
-  return url.toString()
+  return getVersionedSiblingApiUrl(baseUrl, 'messages', 'models')
 }
 
 function getHeaders(
@@ -66,7 +59,7 @@ function getRequest(input: ModelDiscoveryInput): ModelDiscoveryRequest {
   switch (input.provider) {
     case 'ollama':
       return {
-        url: new URL('/api/tags', input.baseUrl).toString(),
+        url: getNativeApiUrl(input.baseUrl, 'api/tags'),
         headers: getHeaders(input.provider, input.apiKey, input.headers)
       }
     case 'openai-responses':

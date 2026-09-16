@@ -13,6 +13,7 @@ import { parseSse } from '../streaming/sse'
 import { createTaggedThinkingExtractor } from '../streaming/tagged-thinking'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
 import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
+import { getVersionedApiUrl } from '../url'
 
 type OpenAICompatibleConfiguration = Extract<
   ChatProviderConfiguration,
@@ -76,15 +77,7 @@ const EventSchema = z.object({
 })
 
 function getUrl(baseUrl: string): string {
-  const url = new URL(baseUrl)
-  const path = url.pathname.replace(/\/+$/, '')
-  // A versioned base URL owns its version; otherwise preserve the OpenAI /v1 default.
-  url.pathname = path.endsWith('/chat/completions')
-    ? path
-    : /\/v\d+$/.test(path)
-      ? `${path}/chat/completions`
-      : `${path}/v1/chat/completions`
-  return url.toString()
+  return getVersionedApiUrl(baseUrl, 'chat/completions')
 }
 type OpenAICompatibleMessage =
   | { role: 'system' | 'user'; content: string }

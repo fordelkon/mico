@@ -6,6 +6,31 @@ async function collect(stream: AsyncIterable<unknown>) {
   return chunks
 }
 describe('Ollama provider', () => {
+  it('preserves a gateway path prefix when appending the native chat endpoint', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('{"done":true}\n'))
+    const provider = createChatProvider(
+      {
+        provider: 'ollama',
+        baseUrl: 'https://gateway.example.com/ollama',
+        modelId: 'qwen3'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello.' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(fetch.mock.calls[0]?.[0]).toBe('https://gateway.example.com/ollama/api/chat')
+  })
+
   it('maps tools, completed calls, and result replay to the native chat protocol', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

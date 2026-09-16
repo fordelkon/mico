@@ -44,6 +44,18 @@ parts.
 LM Studio can be connected in the application as a custom `openai-compatible`
 provider using its OpenAI-compatible server endpoint.
 
+## Base URLs
+
+For OpenAI-compatible, OpenAI Responses, and Anthropic-compatible providers,
+`baseUrl` is an API root. A terminal version segment such as `/v1`, `/v2`, or
+`/v3` is preserved and the protocol endpoint is appended beneath it. An
+unversioned root receives the conventional `/v1` fallback. A fully specified
+protocol endpoint is also accepted without duplication.
+
+Ollama uses its native `/api/...` endpoints and never receives a `/v1`
+fallback. All adapters preserve a configured gateway path prefix, such as
+`https://gateway.example/ollama`.
+
 ## Model discovery
 
 Use `discoverModels` before creating a chat provider to read the models exposed
