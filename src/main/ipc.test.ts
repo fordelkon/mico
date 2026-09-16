@@ -16,7 +16,9 @@ function createHarness() {
     abortTurn: vi.fn(),
     abortAllTurns: vi.fn(),
     getModelCapabilities: vi.fn(),
-    startTurn: vi.fn()
+    startTurn: vi.fn(),
+    updateSessionModelEntry: vi.fn(),
+    updateSessionThinkingEffort: vi.fn()
   }
   const mainWindow = {
     close: vi.fn(),
@@ -279,6 +281,38 @@ describe('registerIpc chat handlers', () => {
 
     expect(sender.send).not.toHaveBeenCalled()
     expect(turnExecutor.abortAllTurns).toHaveBeenCalledWith('42')
+  })
+})
+
+describe('registerIpc session profile handlers', () => {
+  it('delegates validated session model and thinking updates', () => {
+    const { turnExecutor, handlers } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    handlers.get(IpcChannel.Sessions_SetModelEntry)?.(event, {
+      sessionId: 'session-1',
+      modelEntryId: 'ollama:qwen3'
+    })
+    handlers.get(IpcChannel.Sessions_SetThinkingEffort)?.(event, {
+      sessionId: 'session-1',
+      thinkingEffort: 'high'
+    })
+
+    expect(turnExecutor.updateSessionModelEntry).toHaveBeenCalledWith('session-1', 'ollama:qwen3')
+    expect(turnExecutor.updateSessionThinkingEffort).toHaveBeenCalledWith('session-1', 'high')
+  })
+
+  it.each([
+    [IpcChannel.Sessions_SetModelEntry, { sessionId: 'session-1', modelEntryId: '' }],
+    [IpcChannel.Sessions_SetThinkingEffort, { sessionId: '', thinkingEffort: 'high' }],
+    [IpcChannel.Sessions_SetThinkingEffort, { sessionId: 'session-1', thinkingEffort: 'invalid' }]
+  ])('rejects an invalid session profile update', (channel, input) => {
+    const { turnExecutor, handlers } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    expect(() => handlers.get(channel)?.(event, input)).toThrow()
+    expect(turnExecutor.updateSessionModelEntry).not.toHaveBeenCalled()
+    expect(turnExecutor.updateSessionThinkingEffort).not.toHaveBeenCalled()
   })
 })
 

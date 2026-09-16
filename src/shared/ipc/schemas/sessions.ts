@@ -6,6 +6,8 @@ import {
   SessionSummarySchema,
   SessionTitleSchema
 } from '../../data/schemas/session'
+import { ThinkingSelectionSchema } from '../../data/schemas/chat'
+import { ModelEntryIdSchema } from '../../data/schemas/provider'
 import { defineRoute } from '../define'
 
 interface SessionsAPI {
@@ -17,6 +19,11 @@ interface SessionsAPI {
     sessionId: string
     title: string
   }) => Promise<z.infer<typeof SessionSummarySchema>>
+  setThinkingEffort: (input: {
+    sessionId: string
+    thinkingEffort: z.infer<typeof ThinkingSelectionSchema>
+  }) => Promise<void>
+  setModelEntry: (input: { sessionId: string; modelEntryId: string }) => Promise<void>
   onTitleUpdated: (listener: (update: { sessionId: string; title: string }) => void) => () => void
 }
 
@@ -33,7 +40,15 @@ const sessionsRequestSchemas = {
   'sessions.delete': defineRoute({ input: SessionIdSchema, output: z.void() }),
   'sessions.list': defineRoute({ input: z.void(), output: z.array(SessionSummarySchema) }),
   'sessions.load': defineRoute({ input: SessionIdSchema, output: PersistedSessionSchema }),
-  'sessions.rename': renameSessionRequestSchema
+  'sessions.rename': renameSessionRequestSchema,
+  'sessions.set-thinking-effort': defineRoute({
+    input: z.object({ sessionId: SessionIdSchema, thinkingEffort: ThinkingSelectionSchema }),
+    output: z.void()
+  }),
+  'sessions.set-model-entry': defineRoute({
+    input: z.object({ sessionId: SessionIdSchema, modelEntryId: ModelEntryIdSchema }),
+    output: z.void()
+  })
 }
 
 export { sessionsRequestSchemas, type SessionsAPI }

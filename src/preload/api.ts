@@ -131,6 +131,8 @@ const sessions: SessionsAPI = {
   list: () => ipcRenderer.invoke(IpcChannel.Sessions_List),
   load: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Load, sessionId),
   rename: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Rename, input),
+  setThinkingEffort: (input) => ipcRenderer.invoke(IpcChannel.Sessions_SetThinkingEffort, input),
+  setModelEntry: (input) => ipcRenderer.invoke(IpcChannel.Sessions_SetModelEntry, input),
   onTitleUpdated: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,

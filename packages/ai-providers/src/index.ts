@@ -5,6 +5,7 @@ import { createAnthropicCompatibleProvider } from './adapters/anthropic-compatib
 import { createOllamaProvider } from './adapters/ollama'
 import { discoverModels } from './discovery'
 import { testChatProvider } from './testing'
+export { resolveThinkingSelection } from './reasoning'
 
 const defaultDependencies: ChatProviderDependencies = {
   fetch,

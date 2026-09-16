@@ -47,6 +47,8 @@ class FakeChatAPI implements ChatAPI {
       updatedAt: 3,
       lastActivityAt: 2
     }),
+    setThinkingEffort: async (): Promise<void> => {},
+    setModelEntry: async (): Promise<void> => {},
     onTitleUpdated: (listener: (update: { sessionId: string; title: string }) => void) => {
       this.titleListeners.add(listener)
       return () => this.titleListeners.delete(listener)
@@ -382,6 +384,53 @@ describe('useChatWorkspaceState', () => {
         { completionState: 'stopped', role: 'assistant', text: 'Saved answer' }
       ])
     )
+  })
+
+  it('restores the cached session model selection after opening a new chat', async () => {
+    const api = new FakeChatAPI()
+    api.sessions.list = async () => [
+      {
+        id: 'session-1',
+        title: 'Saved chat',
+        defaultProfile: {
+          modelEntryId: 'ollama:qwen3',
+          providerId: 'ollama',
+          modelId: 'qwen3:8b',
+          thinkingEffort: 'high',
+          configurationDigest: 'saved-configuration'
+        },
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2
+      }
+    ]
+    api.sessions.load = async () => ({
+      id: 'session-1',
+      title: 'Saved chat',
+      defaultProfile: {
+        modelEntryId: 'ollama:qwen3',
+        providerId: 'ollama',
+        modelId: 'qwen3:8b',
+        thinkingEffort: 'high',
+        configurationDigest: 'saved-configuration'
+      },
+      createdAt: 1,
+      updatedAt: 2,
+      lastActivityAt: 2,
+      messages: []
+    })
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() => expect(result.current.conversations).toHaveLength(1))
+    act(() => result.current.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.selectedModelEntryId).toBe('ollama:qwen3'))
+
+    act(() => result.current.startNewChat())
+    act(() => result.current.selectConversation('session-1'))
+
+    expect(result.current.selectedModelEntryId).toBe('ollama:qwen3')
+    expect(result.current.thinkingEffort).toBe('high')
   })
 
   it('persists a manual conversation rename before updating the sidebar title', async () => {

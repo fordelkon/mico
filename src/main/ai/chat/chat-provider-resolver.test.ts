@@ -16,7 +16,7 @@ function createProvider(): ResolvedProvider {
 async function* emptyStream(): AsyncIterable<UIMessageChunk> {}
 
 describe('createChatProviderResolver', () => {
-  it('uses the current selection and stops resolving after it is cleared', () => {
+  it('uses the requested model entry and stops resolving after it is cleared', () => {
     const firstProvider = createProvider()
     const secondProvider = createProvider()
     let selection: ChatProviderConfiguration | null = {
@@ -25,18 +25,18 @@ describe('createChatProviderResolver', () => {
       modelId: 'qwen3:8b'
     }
     const resolveProvider = createChatProviderResolver({
-      getSelectedChatConfiguration: () => selection,
+      getChatConfigurationForModelEntry: () => selection,
       createChatProvider: ({ modelId }) => (modelId === 'qwen3:8b' ? firstProvider : secondProvider)
     })
 
-    expect(resolveProvider()).toBe(firstProvider)
+    expect(resolveProvider('entry-1')).toBe(firstProvider)
 
     selection = { ...selection, modelId: 'llama3.2' }
 
-    expect(resolveProvider()).toBe(secondProvider)
+    expect(resolveProvider('entry-1')).toBe(secondProvider)
 
     selection = null
 
-    expect(resolveProvider()).toBeNull()
+    expect(resolveProvider('entry-1')).toBeNull()
   })
 })

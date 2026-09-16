@@ -4,6 +4,7 @@ import { TurnRequestIdSchema, TurnStartRequestSchema } from '@shared/ipc/schemas
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
 import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
 import { SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
+import { ThinkingSelectionSchema } from '@shared/data/schemas/chat'
 import {
   CustomProviderSchema,
   CustomProviderIdSchema,
@@ -35,7 +36,12 @@ type IpcDependencies = {
 interface IpcServices {
   turnExecutor: Pick<
     TurnExecutor,
-    'abortAllTurns' | 'abortTurn' | 'getModelCapabilities' | 'startTurn'
+    | 'abortAllTurns'
+    | 'abortTurn'
+    | 'getModelCapabilities'
+    | 'startTurn'
+    | 'updateSessionModelEntry'
+    | 'updateSessionThinkingEffort'
   >
   mainWindow: Pick<
     MainWindowService,
@@ -243,6 +249,21 @@ function registerIpc(
     if (!sessionId.success || !title.success) throw new Error('Invalid session rename')
 
     return session.renameSession(sessionId.data, title.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_SetThinkingEffort, (event, input) => {
+    getCallingWindow(event)
+    const sessionId = SessionIdSchema.safeParse(input?.sessionId)
+    const thinkingEffort = ThinkingSelectionSchema.safeParse(input?.thinkingEffort)
+    if (!sessionId.success || !thinkingEffort.success)
+      throw new Error('Invalid session thinking effort')
+    turnExecutor.updateSessionThinkingEffort(sessionId.data, thinkingEffort.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_SetModelEntry, (event, input) => {
+    getCallingWindow(event)
+    const sessionId = SessionIdSchema.safeParse(input?.sessionId)
+    const modelEntryId = ModelEntryIdSchema.safeParse(input?.modelEntryId)
+    if (!sessionId.success || !modelEntryId.success) throw new Error('Invalid session model')
+    turnExecutor.updateSessionModelEntry(sessionId.data, modelEntryId.data)
   })
 
   dependencies.ipcMain.handle(IpcChannel.Providers_GetLibrary, (event) => {

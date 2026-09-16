@@ -20,11 +20,13 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
   const [refreshedCapabilities, setRefreshedCapabilities] = React.useState<
     ModelReasoningCapabilities | null | undefined
   >(undefined)
+  const { setThinkingEffort } = workspace
 
   const refreshCapabilities = React.useCallback(async (): Promise<void> => {
     const capabilities = await window.api.chat.getCapabilities()
     setRefreshedCapabilities(capabilities ?? null)
-  }, [])
+    if (!capabilities) setThinkingEffort('none')
+  }, [setThinkingEffort])
 
   const isActiveResponse =
     (workspace.response.status === 'submitted' ||
@@ -54,6 +56,10 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
       focusKey={workspace.composerFocusKey}
       mode={composerMode}
       onModelSelected={refreshCapabilities}
+      selectedModelEntryId={
+        workspace.activeConversation ? workspace.selectedModelEntryId : undefined
+      }
+      selectSessionModel={workspace.activeConversation ? workspace.setSessionModelEntry : undefined}
       onSend={workspace.sendMessage}
       onStop={workspace.stopResponse}
       reasoningCapabilities={
@@ -87,6 +93,7 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
                   conversationId={workspace.activeConversation.id}
                   errorMessage={errorMessage}
                   isResponding={isActiveResponse}
+                  isThinkingEnabled={workspace.thinkingEffort !== 'none'}
                   onRetry={errorMessage ? workspace.retryResponse : undefined}
                   retry={retry}
                 />

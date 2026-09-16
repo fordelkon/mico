@@ -34,6 +34,8 @@ type ChatWorkspace = {
   respondingConversationIds: ReadonlySet<string>
   reasoningCapabilities: ModelReasoningCapabilities | null
   thinkingEffort: ThinkingSelection
+  selectedModelEntryId: string | null
+  setSessionModelEntry: (modelEntryId: string) => Promise<void>
   setThinkingEffort: (thinkingEffort: ThinkingSelection) => void
   composerFocusKey: number
   startNewChat: () => void
@@ -48,6 +50,8 @@ type ChatWorkspace = {
 type ChatSession = {
   conversation: Conversation
   chat: Chat<MicoUIMessage>
+  modelEntryId: string | null
+  thinkingEffort: ThinkingSelection | null
 }
 
 type ActiveChatSession = {
@@ -89,6 +93,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   const [reasoningCapabilities, setReasoningCapabilities] =
     React.useState<ModelReasoningCapabilities | null>(null)
   const [thinkingEffort, setThinkingEffortState] = React.useState<ThinkingSelection>('default')
+  const [selectedModelEntryId, setSelectedModelEntryId] = React.useState<string | null>(null)
   const [thinkingEffortStore] = React.useState(() => new ThinkingEffortStore())
   const getThinkingEffort = React.useCallback(
     () => thinkingEffortStore.get(),
@@ -102,8 +107,16 @@ function useChatWorkspaceState(): ChatWorkspace {
     (next: ThinkingSelection): void => {
       thinkingEffortStore.set(next)
       setThinkingEffortState(next)
+      if (activeSession) {
+        const session = sessionsRef.current.get(activeSession.conversationId)
+        if (session) session.thinkingEffort = next
+      }
+      if (activeSession)
+        void window.api.sessions
+          .setThinkingEffort({ sessionId: activeSession.conversationId, thinkingEffort: next })
+          .catch(() => undefined)
     },
-    [thinkingEffortStore]
+    [activeSession, thinkingEffortStore]
   )
 
   React.useEffect(() => {
@@ -111,7 +124,14 @@ function useChatWorkspaceState(): ChatWorkspace {
 
     void window.api.chat.getCapabilities().then(
       (capabilities) => {
-        if (!active || !capabilities) return
+        if (!active) return
+
+        if (!capabilities) {
+          setReasoningCapabilities(null)
+          thinkingEffortStore.set('none')
+          setThinkingEffortState('none')
+          return
+        }
 
         setReasoningCapabilities(capabilities)
         if (
@@ -196,7 +216,14 @@ function useChatWorkspaceState(): ChatWorkspace {
   }, [])
 
   const createSession = React.useCallback(
-    (conversation: Conversation, messages: ChatMessage[] = []): ChatSession => {
+    (
+      conversation: Conversation,
+      messages: ChatMessage[] = [],
+      selection: Pick<ChatSession, 'modelEntryId' | 'thinkingEffort'> = {
+        modelEntryId: null,
+        thinkingEffort: null
+      }
+    ): ChatSession => {
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
         messages: toUiMessages(messages),
@@ -233,7 +260,7 @@ function useChatWorkspaceState(): ChatWorkspace {
           })
       })
 
-      const session = { conversation, chat }
+      const session = { conversation, chat, ...selection }
       sessionsRef.current.set(conversation.id, session)
       return session
     },
@@ -248,6 +275,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const startNewChat = React.useCallback((): void => {
     setActiveSession(null)
+    setSelectedModelEntryId(null)
     // A new token requests focus without coupling the workspace to the textarea ref.
     setComposerFocusKey((key) => key + 1)
   }, [])
@@ -257,20 +285,35 @@ function useChatWorkspaceState(): ChatWorkspace {
       const existing = sessionsRef.current.get(conversationId)
       if (existing) {
         setActiveSession({ conversationId, chat: existing.chat })
+        setSelectedModelEntryId(existing.modelEntryId)
+        if (existing.thinkingEffort) {
+          thinkingEffortStore.set(existing.thinkingEffort)
+          setThinkingEffortState(existing.thinkingEffort)
+        }
         if (focusComposer) setComposerFocusKey((key) => key + 1)
         return
       }
 
       void window.api.sessions.load(conversationId).then((persisted) => {
+        const savedThinkingEffort = persisted.defaultProfile?.thinkingEffort
+        setSelectedModelEntryId(persisted.defaultProfile?.modelEntryId ?? null)
+        if (savedThinkingEffort) {
+          thinkingEffortStore.set(savedThinkingEffort)
+          setThinkingEffortState(savedThinkingEffort)
+        }
         const session = createSession(
           { id: persisted.id, title: persisted.title },
-          persisted.messages
+          persisted.messages,
+          {
+            modelEntryId: persisted.defaultProfile?.modelEntryId ?? null,
+            thinkingEffort: persisted.defaultProfile?.thinkingEffort ?? null
+          }
         )
         setActiveSession({ conversationId: persisted.id, chat: session.chat })
         if (focusComposer) setComposerFocusKey((key) => key + 1)
       })
     },
-    [createSession]
+    [createSession, thinkingEffortStore]
   )
 
   const renameConversation = React.useCallback((conversationId: string, title: string): void => {
@@ -293,6 +336,20 @@ function useChatWorkspaceState(): ChatWorkspace {
       })
       .catch(() => undefined)
   }, [])
+
+  const setSessionModelEntry = React.useCallback(
+    async (modelEntryId: string): Promise<void> => {
+      if (!activeSession) return
+      await window.api.sessions.setModelEntry({
+        sessionId: activeSession.conversationId,
+        modelEntryId
+      })
+      const session = sessionsRef.current.get(activeSession.conversationId)
+      if (session) session.modelEntryId = modelEntryId
+      setSelectedModelEntryId(modelEntryId)
+    },
+    [activeSession]
+  )
 
   const deleteConversation = React.useCallback(
     (conversationId: string): void => {
@@ -444,6 +501,8 @@ function useChatWorkspaceState(): ChatWorkspace {
       respondingConversationIds,
       reasoningCapabilities,
       thinkingEffort,
+      selectedModelEntryId,
+      setSessionModelEntry,
       setThinkingEffort,
       composerFocusKey,
       startNewChat,
@@ -468,9 +527,11 @@ function useChatWorkspaceState(): ChatWorkspace {
       selectConversation,
       sendMessage,
       setThinkingEffort,
+      setSessionModelEntry,
       startNewChat,
       stopResponse,
-      thinkingEffort
+      thinkingEffort,
+      selectedModelEntryId
     ]
   )
 }

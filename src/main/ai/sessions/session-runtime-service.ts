@@ -4,6 +4,7 @@ import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
 import { SessionDatabase } from '../../data/session-database'
 
 type ExecutionProfileSnapshot = {
+  modelEntryId: string
   providerId: string
   modelId: string
   thinkingEffort: ThinkingSelection
@@ -42,7 +43,12 @@ type RuntimeEventPayloads = {
 type RuntimeEventKind = keyof RuntimeEventPayloads
 type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string
 type JsonObject = { [key: string]: JsonValue }
-type StartedRun = { runId: string; turnId: string; shouldGenerateTitle: boolean }
+type StartedRun = {
+  runId: string
+  turnId: string
+  shouldGenerateTitle: boolean
+  profile: ExecutionProfileSnapshot
+}
 type StartTurnInput = {
   sessionId: string
   requestId: string
@@ -124,6 +130,10 @@ class SessionRuntimeService {
       ...toSessionSummary(session),
       messages: rows.map(({ payload_json }) => parseMessagePayload(payload_json).message)
     }
+  }
+
+  getDefaultProfile(sessionId: string): ExecutionProfileSnapshot | null {
+    return toSessionSummary(this.findSession(sessionId)).defaultProfile
   }
 
   getContextMessages(runId: string): ChatMessage[] {
@@ -209,6 +219,20 @@ class SessionRuntimeService {
     const result = this.dependencies.database.connection
       .prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?')
       .run(title, now, sessionId)
+    if (!result.changes) throw new Error('Session does not exist.')
+    return toSessionSummary(this.findSession(sessionId))
+  }
+
+  updateDefaultProfile(
+    sessionId: string,
+    defaultProfile: ExecutionProfileSnapshot
+  ): SessionSummary {
+    const now = this.dependencies.now()
+    const result = this.dependencies.database.connection
+      .prepare(
+        'UPDATE sessions SET default_execution_profile_json = ?, updated_at = ? WHERE id = ?'
+      )
+      .run(canonicalJson(defaultProfile), now, sessionId)
     if (!result.changes) throw new Error('Session does not exist.')
     return toSessionSummary(this.findSession(sessionId))
   }
@@ -553,7 +577,8 @@ class SessionRuntimeService {
     return {
       runId: run.id,
       turnId: run.turn_id,
-      shouldGenerateTitle: this.shouldGenerateTitle(run)
+      shouldGenerateTitle: this.shouldGenerateTitle(run),
+      profile: this.getExecutionProfile(run.id)
     }
   }
 

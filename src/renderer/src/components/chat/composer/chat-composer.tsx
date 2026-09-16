@@ -20,6 +20,8 @@ type ChatComposerProps = {
   focusKey: number
   mode: ChatComposerMode
   onModelSelected: () => Promise<void>
+  selectedModelEntryId?: string | null
+  selectSessionModel?: (modelEntryId: string) => Promise<void>
   onSend: (content: string) => void
   onStop: () => void
   reasoningCapabilities: ModelReasoningCapabilities | null
@@ -42,15 +44,16 @@ function ChatComposer({
   focusKey,
   mode,
   onModelSelected,
+  selectedModelEntryId,
+  selectSessionModel,
   onSend,
   onStop,
   reasoningCapabilities,
   thinkingEffort,
   onThinkingEffortChange
 }: ChatComposerProps): React.JSX.Element {
-  const { hasSelectedModel, library, selectionError, selectModel } = useComposerModelSelection({
-    onModelSelected
-  })
+  const { currentModelId, hasSelectedModel, library, selectionError, selectModel } =
+    useComposerModelSelection({ onModelSelected, selectedModelEntryId, selectSessionModel })
   const [draft, setDraft] = React.useState('')
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const mountedRef = React.useRef(false)
@@ -116,7 +119,11 @@ function ChatComposer({
         <div className="flex min-h-8 items-center justify-between gap-4 px-0.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <div className="flex flex-col gap-1">
-              <ChatModelSelector library={library} onSelect={selectModel} />
+              <ChatModelSelector
+                library={library}
+                onSelect={selectModel}
+                selectedModelId={currentModelId}
+              />
               {selectionError ? (
                 <p className="px-2 text-xs text-destructive">{selectionError}</p>
               ) : null}

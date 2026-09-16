@@ -1,33 +1,31 @@
 import type { ChatProvider, ChatProviderConfiguration } from '@mico/ai-providers'
 
-type ChatProviderResolver = () => Pick<ChatProvider, 'getModelCapabilities' | 'stream'> | null
+type ChatProviderResolver = (
+  modelEntryId?: string
+) => Pick<ChatProvider, 'getModelCapabilities' | 'stream'> | null
 
 function createChatProviderResolver({
-  getSelectedChatConfiguration,
+  getChatConfigurationForModelEntry,
   createChatProvider
 }: {
-  getSelectedChatConfiguration: () => ChatProviderConfiguration | null
+  getChatConfigurationForModelEntry: (modelEntryId: string) => ChatProviderConfiguration | null
   createChatProvider: (
     configuration: ChatProviderConfiguration
   ) => Pick<ChatProvider, 'getModelCapabilities' | 'stream'>
 }): ChatProviderResolver {
-  let cachedConfigurationKey: string | null = null
-  let cachedProvider: Pick<ChatProvider, 'getModelCapabilities' | 'stream'> | null = null
+  const cachedProviders = new Map<string, Pick<ChatProvider, 'getModelCapabilities' | 'stream'>>()
 
-  return () => {
-    const configuration = getSelectedChatConfiguration()
-    if (!configuration) {
-      cachedConfigurationKey = null
-      cachedProvider = null
-      return null
-    }
+  return (modelEntryId) => {
+    if (!modelEntryId) return null
+    const configuration = getChatConfigurationForModelEntry(modelEntryId)
+    if (!configuration) return null
 
     const configurationKey = JSON.stringify(configuration)
-    if (cachedConfigurationKey !== configurationKey || !cachedProvider) {
-      cachedConfigurationKey = configurationKey
-      cachedProvider = createChatProvider(configuration)
-    }
-    return cachedProvider
+    const cachedProvider = cachedProviders.get(configurationKey)
+    if (cachedProvider) return cachedProvider
+    const provider = createChatProvider(configuration)
+    cachedProviders.set(configurationKey, provider)
+    return provider
   }
 }
 

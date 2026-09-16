@@ -6,6 +6,39 @@ async function collect(stream: AsyncIterable<unknown>) {
   return chunks
 }
 describe('Ollama provider', () => {
+  it('reports no reasoning capabilities for a model without the native thinking capability', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ capabilities: ['completion', 'tools'] })))
+    const provider = createChatProvider(
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'llama3.2' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(provider.getModelCapabilities()).resolves.toBeNull()
+
+    expect(fetch.mock.calls[0]?.[0]).toBe('http://localhost:11434/api/show')
+    expect(await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()).toEqual({
+      model: 'llama3.2'
+    })
+  })
+
+  it('retains optimistic effort choices for a model with the native thinking capability', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ capabilities: ['completion', 'thinking'] })))
+    const provider = createChatProvider(
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'qwen3' },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(provider.getModelCapabilities()).resolves.toEqual({
+      availability: 'unknown',
+      selectableEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+      defaultEffort: 'medium'
+    })
+  })
+
   it('preserves a gateway path prefix when appending the native chat endpoint', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

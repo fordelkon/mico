@@ -66,9 +66,13 @@ const ChunkSchema = z.object({
   eval_duration: z.number().positive().optional(),
   error: z.string().optional()
 })
+const ModelDetailsSchema = z.object({ capabilities: z.array(z.string()) })
 const ToolArgumentsSchema = z.record(z.string(), z.json())
 function getUrl(baseUrl: string): string {
   return getNativeApiUrl(baseUrl, 'api/chat')
+}
+function getModelDetailsUrl(baseUrl: string): string {
+  return getNativeApiUrl(baseUrl, 'api/show')
 }
 function toMessages(messages: ChatProviderMessage[]) {
   return messages.flatMap((message): OllamaMessage[] => {
@@ -125,9 +129,22 @@ function createOllamaProvider(
   dependencies: ChatProviderDependencies
 ): ChatProvider {
   return {
-    // Ollama does not expose per-model reasoning capabilities, so it follows the
-    // same stable, optimistic five-level UI contract as compatible endpoints.
-    getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
+    getModelCapabilities: async () => {
+      const response = await dependencies.fetch(getModelDetailsUrl(configuration.baseUrl), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: configuration.modelId })
+      })
+      if (!response.ok)
+        throw new Error(
+          `Ollama model capabilities request failed (${response.status} ${response.statusText}).`
+        )
+      const details = ModelDetailsSchema.safeParse(await response.json())
+      if (!details.success) throw new Error('Ollama returned invalid model capabilities.')
+      return details.data.capabilities.includes('thinking')
+        ? getOptimisticThinkingCapabilities()
+        : null
+    },
     stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
       const think = toThink(thinkingEffort)
       const body: OllamaRequest = {

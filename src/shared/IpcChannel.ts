@@ -33,6 +33,10 @@ export enum IpcChannel {
   Sessions_Load = 'sessions:load',
   /** Changes a session title. */
   Sessions_Rename = 'sessions:rename',
+  /** Persists the requested thinking effort for a session. */
+  Sessions_SetThinkingEffort = 'sessions:set-thinking-effort',
+  /** Persists the selected model entry for a session without changing the global selection. */
+  Sessions_SetModelEntry = 'sessions:set-model-entry',
   /** Notifies the renderer that a background title generation completed. */
   Sessions_TitleUpdated = 'sessions:title-updated',
 

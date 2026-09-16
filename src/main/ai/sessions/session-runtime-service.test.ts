@@ -6,6 +6,7 @@ import { SessionDatabase } from '../../data/session-database'
 import { SessionRuntimeService, type ExecutionProfileSnapshot } from './session-runtime-service'
 
 const profile: ExecutionProfileSnapshot = {
+  modelEntryId: 'ollama:qwen3',
   providerId: 'ollama',
   modelId: 'qwen3:8b',
   thinkingEffort: 'default',

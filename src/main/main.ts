@@ -91,9 +91,13 @@ if (gotTheLock) {
     turnExecutor = new TurnExecutor(
       createChatProviderResolver({
         createChatProvider,
-        getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
+        getChatConfigurationForModelEntry: (modelEntryId) =>
+          providerService.getChatConfigurationForModelEntry(modelEntryId)
       }),
       {
+        getChatConfigurationForModelEntry: (modelEntryId) =>
+          providerService.getChatConfigurationForModelEntry(modelEntryId),
+        getSelectedModelEntryId: () => providerService.getLibrary().selectedModelId,
         getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration(),
         runtime: sessionRuntimeService
       }

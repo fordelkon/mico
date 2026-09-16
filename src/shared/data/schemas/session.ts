@@ -1,12 +1,14 @@
 import * as z from 'zod'
 
 import { ChatMessageSchema, ThinkingSelectionSchema } from './chat'
+import { ModelEntryIdSchema } from './provider'
 import { defineSchema } from '../define'
 
 const SessionIdSchema = defineSchema(z.string().trim().min(1))
 const SessionTitleSchema = defineSchema(z.string().trim().min(1).max(200))
 const ExecutionProfileSnapshotSchema = defineSchema(
   z.object({
+    modelEntryId: ModelEntryIdSchema,
     providerId: z.string().trim().min(1),
     modelId: z.string().trim().min(1),
     thinkingEffort: ThinkingSelectionSchema,

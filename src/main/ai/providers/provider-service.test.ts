@@ -39,6 +39,31 @@ async function createPersistentService(userDataPath: string) {
 }
 
 describe('ProviderService', () => {
+  it('resolves an enabled model entry without consulting the global selected model', async () => {
+    const service = await createService()
+    await service.saveConfiguration({
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      enabled: true
+    })
+    const first = await service.importModel({
+      provider: 'ollama',
+      modelId: 'first-model',
+      displayName: 'First model'
+    })
+    const second = await service.importModel({
+      provider: 'ollama',
+      modelId: 'second-model',
+      displayName: 'Second model'
+    })
+    await service.selectModel(first.id)
+
+    expect(service.getChatConfigurationForModelEntry(second.id)).toMatchObject({
+      provider: 'ollama',
+      modelId: 'second-model'
+    })
+  })
+
   it('seeds only Ollama as a disabled built-in provider in an empty SQLite library', async () => {
     const service = await createService()
 

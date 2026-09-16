@@ -17,4 +17,8 @@ describe('reasoning capabilities', () => {
   it('does not expose a menu capability for a fixed one-value model', () => {
     expect(normalizeCapabilities(['high'], 'high')).toBeNull()
   })
+
+  it('turns off thinking for a model with no reasoning capabilities', () => {
+    expect(resolveThinkingSelection('xhigh', null)).toBe('none')
+  })
 })

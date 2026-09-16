@@ -98,12 +98,50 @@ function partialPendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk
 }
 
 describe('TurnExecutor', () => {
+  it('uses the session model entry instead of the global selected model', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({
+      title: 'Session',
+      defaultProfile: {
+        modelEntryId: 'session-model',
+        providerId: 'ollama',
+        modelId: 'session-model-id',
+        thinkingEffort: 'default',
+        configurationDigest: 'saved-configuration'
+      }
+    })
+    const resolvedEntryIds: Array<string | undefined> = []
+    const finished = createDeferred()
+    const service = new TurnExecutor(
+      (modelEntryId) => {
+        resolvedEntryIds.push(modelEntryId)
+        return modelEntryId === 'session-model' ? createProvider(async () => streamFrom([])) : null
+      },
+      {
+        getChatConfigurationForModelEntry: (modelEntryId) =>
+          modelEntryId === 'session-model' ? configuration : null,
+        getSelectedModelEntryId: () => 'global-model',
+        runtime
+      }
+    )
+
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      (event) => {
+        if (event.type === 'finish') finished.resolve()
+      }
+    )
+
+    await finished.promise
+    expect(resolvedEntryIds).toEqual(['session-model'])
+  })
+
   it('returns no capabilities and emits an error when no enabled model is selected', async () => {
     const recorded = collectEvents()
     const service = new TurnExecutor(
       createChatProviderResolver({
         createChatProvider: () => createProvider(async () => streamFrom([])),
-        getSelectedChatConfiguration: () => null
+        getChatConfigurationForModelEntry: () => null
       })
     )
 
@@ -367,6 +405,7 @@ describe('TurnExecutor', () => {
       requestId: 'request-0',
       userMessage: request.userMessage,
       profile: {
+        modelEntryId: 'ollama:qwen3',
         providerId: 'ollama',
         modelId: 'qwen3:8b',
         thinkingEffort: 'default',
@@ -458,6 +497,7 @@ describe('TurnExecutor', () => {
       requestId: 'request-2',
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'Continue' }] },
       profile: {
+        modelEntryId: 'ollama:qwen3',
         providerId: 'ollama',
         modelId: 'qwen3:8b',
         thinkingEffort: 'default',
@@ -483,6 +523,7 @@ describe('TurnExecutor', () => {
       requestId: 'request-0',
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'Saved prompt' }] },
       profile: {
+        modelEntryId: 'ollama:qwen3',
         providerId: 'ollama',
         modelId: 'qwen3:8b',
         thinkingEffort: 'default',

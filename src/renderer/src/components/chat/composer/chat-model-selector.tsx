@@ -13,6 +13,7 @@ type EligibleModel = ModelEntry & {
 type ChatModelSelectorProps = {
   library: ProviderLibrary | null
   onSelect: (modelId: string) => void
+  selectedModelId?: string | null
 }
 
 function getProviderDetails(
@@ -41,9 +42,14 @@ function getEligibleModels(library: ProviderLibrary | null): EligibleModel[] {
   })
 }
 
-function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React.JSX.Element {
+function ChatModelSelector({
+  library,
+  onSelect,
+  selectedModelId
+}: ChatModelSelectorProps): React.JSX.Element {
   const eligibleModels = getEligibleModels(library)
-  const selectedModel = eligibleModels.find(({ id }) => id === library?.selectedModelId)
+  const currentModelId = selectedModelId ?? library?.selectedModelId
+  const selectedModel = eligibleModels.find(({ id }) => id === currentModelId)
 
   return (
     <SearchPopover
@@ -108,7 +114,7 @@ function ChatModelSelector({ library, onSelect }: ChatModelSelectorProps): React
                     {models.map((model) => (
                       <Button
                         aria-label={model.displayName}
-                        aria-selected={model.id === library?.selectedModelId}
+                        aria-selected={model.id === currentModelId}
                         className="h-auto min-h-8 w-full justify-between gap-3 px-2 py-1.5 text-left text-sm focus-visible:border-transparent focus-visible:bg-accent focus-visible:ring-0"
                         key={model.id}
                         onClick={() => {

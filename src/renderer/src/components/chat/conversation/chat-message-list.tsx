@@ -41,6 +41,7 @@ function ThinkingOrbStateScope({
 type ChatMessageListProps = {
   conversationId: string
   errorMessage?: string
+  isThinkingEnabled?: boolean
   messages: MicoUIMessage[]
   isResponding: boolean
   onRetry?: () => void
@@ -92,6 +93,7 @@ function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Elemen
 function ChatMessageList({
   conversationId,
   errorMessage,
+  isThinkingEnabled = true,
   messages,
   isResponding,
   onRetry,
@@ -101,7 +103,9 @@ function ChatMessageList({
   const hasEmptyAssistantMessage =
     isResponding && latestMessage?.role === 'assistant' && latestMessage.parts.length === 0
   const showPendingThinking =
-    isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
+    isThinkingEnabled &&
+    isResponding &&
+    (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
   const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
 
   return (

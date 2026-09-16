@@ -33,7 +33,8 @@ function resolveThinkingSelection(
   selection: ThinkingSelection,
   capabilities: ModelReasoningCapabilities | null
 ): ThinkingSelection {
-  return capabilities?.selectableEfforts.includes(selection) ? selection : 'default'
+  if (!capabilities) return 'none'
+  return capabilities.selectableEfforts.includes(selection) ? selection : 'default'
 }
 
 export { isThinkingSelection, normalizeCapabilities, resolveThinkingSelection }
