@@ -1,4 +1,10 @@
 import {
+  Attachment,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
   Bubble,
   BubbleContent,
   IconTooltipButton,
@@ -7,7 +13,7 @@ import {
   MessageFooter
 } from '@mico/ui'
 import type { MicoUIMessage } from '@renderer/types/chat'
-import { CheckIcon, CopyIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, FileTextIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMarkdown } from '../markdown/chat-markdown'
@@ -18,6 +24,8 @@ type ChatMessageProps = {
   isStreaming: boolean
   thinkingOrbState?: ThinkingOrbState
 }
+
+const textEncoder = new TextEncoder()
 
 function ChatMessageComponent({
   message,
@@ -33,6 +41,21 @@ function ChatMessageComponent({
     (part): part is Extract<typeof part, { type: 'reasoning' }> => part.type === 'reasoning'
   )
   const isUser = message.role === 'user'
+  const documents = message.parts
+    .filter((part) => part.type === 'data-document')
+    .map(({ data }) => {
+      const bytes = textEncoder.encode(data.text).byteLength
+      return {
+        name: data.name,
+        size: `${bytes.toLocaleString('en-US')} ${bytes === 1 ? 'byte' : 'bytes'}`
+      }
+    })
+  const copyText = [
+    text,
+    documents.map(({ name, size }) => `Attached document: ${name} (${size})`).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
   const canCopy = isUser || message.metadata?.completionState === 'complete'
 
   // Keep copy confirmation transient so repeated copies retain clear feedback.
@@ -44,7 +67,7 @@ function ChatMessageComponent({
   }, [copyState])
 
   const handleCopy = (): void => {
-    void navigator.clipboard.writeText(text).then(
+    void navigator.clipboard.writeText(copyText).then(
       () => setCopyState('copied'),
       () => setCopyState('idle')
     )
@@ -53,6 +76,21 @@ function ChatMessageComponent({
   return (
     <Message align={isUser ? 'end' : 'start'} className={isUser ? 'chat-message--sent' : undefined}>
       <MessageContent className="gap-1.5">
+        {documents.length > 0 ? (
+          <AttachmentGroup aria-label="Attached documents">
+            {documents.map(({ name, size }, index) => (
+              <Attachment key={`${message.id}-${index}`} size="sm" className="max-w-72">
+                <AttachmentMedia>
+                  <FileTextIcon aria-hidden="true" />
+                </AttachmentMedia>
+                <AttachmentContent>
+                  <AttachmentTitle title={name}>{name}</AttachmentTitle>
+                  <AttachmentDescription>{size}</AttachmentDescription>
+                </AttachmentContent>
+              </Attachment>
+            ))}
+          </AttachmentGroup>
+        ) : null}
         {!isUser &&
           (reasoningParts.length > 0
             ? reasoningParts.map((part, index) => (
@@ -69,25 +107,27 @@ function ChatMessageComponent({
               !text && (
                 <ThinkingBlock id={message.id} isStreaming orbState={thinkingOrbState} text="" />
               ))}
-        <Bubble
-          align={isUser ? 'end' : 'start'}
-          variant={isUser ? 'secondary' : 'ghost'}
-          className={
-            isUser
-              ? '*:data-[slot=bubble-content]:bg-chat-user *:data-[slot=bubble-content]:text-chat-user-foreground'
-              : undefined
-          }
-        >
-          <BubbleContent
+        {text || !documents.length ? (
+          <Bubble
+            align={isUser ? 'end' : 'start'}
+            variant={isUser ? 'secondary' : 'ghost'}
             className={
               isUser
-                ? 'rounded-[var(--radius-message)] px-4 py-2.5'
-                : 'w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
+                ? '*:data-[slot=bubble-content]:bg-chat-user *:data-[slot=bubble-content]:text-chat-user-foreground'
+                : undefined
             }
           >
-            <ChatMarkdown isStreaming={isStreaming} text={text} />
-          </BubbleContent>
-        </Bubble>
+            <BubbleContent
+              className={
+                isUser
+                  ? 'rounded-[var(--radius-message)] px-4 py-2.5'
+                  : 'w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
+              }
+            >
+              <ChatMarkdown isStreaming={isStreaming} text={text} />
+            </BubbleContent>
+          </Bubble>
+        ) : null}
         {canCopy && (
           <MessageFooter className="min-h-6 text-text-tertiary opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100">
             <IconTooltipButton

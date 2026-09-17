@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatMessage } from './chat-message'
@@ -14,6 +15,41 @@ afterEach(() => {
 })
 
 describe('ChatMessage', () => {
+  it.each(['', 'Review these files'])(
+    'shows persisted document names and UTF-8 sizes alongside text %j',
+    async (text) => {
+      const user = userEvent.setup()
+      const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+      render(
+        <ChatMessage
+          isStreaming={false}
+          message={{
+            id: 'persisted-user',
+            role: 'user',
+            parts: [
+              ...(text ? [{ type: 'text' as const, text }] : []),
+              {
+                type: 'data-document',
+                data: { type: 'document', name: 'example.ts', text: '你好' }
+              },
+              { type: 'data-document', data: { type: 'document', name: 'notes.md', text: 'x' } }
+            ]
+          }}
+        />
+      )
+
+      expect(screen.getByText('example.ts')).toBeVisible()
+      expect(screen.getByText('6 bytes')).toBeVisible()
+      expect(screen.getByText('notes.md')).toBeVisible()
+      expect(screen.getByText('1 byte')).toBeVisible()
+      if (text) expect(screen.getByTestId('answer-content')).toHaveTextContent(text)
+      await user.click(screen.getByRole('button', { name: 'Copy message' }))
+      expect(writeText).toHaveBeenCalledWith(
+        `${text ? `${text}\n\n` : ''}Attached document: example.ts (6 bytes)\nAttached document: notes.md (1 byte)`
+      )
+    }
+  )
+
   it('keeps an unfinished streamed code fence readable before highlighting finishes', () => {
     render(
       <ChatMessage
