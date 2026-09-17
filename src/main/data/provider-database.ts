@@ -46,6 +46,7 @@ class ProviderDatabase {
       sqlite.pragma('journal_mode = WAL')
       sqlite.pragma('synchronous = NORMAL')
       sqlite.pragma('foreign_keys = ON')
+      // This table records the schema changes already applied to the provider library.
       sqlite.exec(`
         CREATE TABLE IF NOT EXISTS provider_schema_migrations (
           id TEXT PRIMARY KEY NOT NULL,
