@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto'
 import {
   resolveThinkingSelection,
   type ChatProvider,
+  type ChatProviderMessage,
   type ChatProviderConfiguration
 } from '@mico/ai-providers'
+import type { ChatDocumentPart, ChatMessage } from '@shared/data/schemas/chat'
 import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
 
 import { describeChatError } from './chat-error'
@@ -282,9 +284,10 @@ class TurnExecutor {
         try {
           const stream = await provider.stream({
             conversationKey: `${turn.ownerId}:${request.sessionId}`,
-            messages: turn.runId
+            messages: (turn.runId
               ? (this.runtime?.getContextMessages(turn.runId) ?? [request.userMessage])
-              : [request.userMessage],
+              : [request.userMessage]
+            ).map(toProviderMessage),
             thinkingEffort: effectiveThinkingEffort,
             signal: turn.controller.signal
           })
@@ -519,10 +522,28 @@ class CappedTextBuilder {
   }
 }
 
+function formatDocument(part: ChatDocumentPart): string {
+  const name = part.name
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+  return `<document name="${name}">\n${part.text}\n</document>`
+}
+
+function toProviderMessage(message: ChatMessage): ChatProviderMessage {
+  return {
+    ...message,
+    parts: message.parts.map((part) =>
+      part.type === 'document' ? { type: 'text', text: formatDocument(part) } : part
+    )
+  }
+}
+
 function getMessageText(message: TurnStartRequest['userMessage']): string {
   return message.parts
-    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-    .map((part) => part.text)
+    .filter((part) => part.type === 'text' || part.type === 'document')
+    .map((part) => (part.type === 'document' ? formatDocument(part) : part.text))
     .join('\n')
     .trim()
 }

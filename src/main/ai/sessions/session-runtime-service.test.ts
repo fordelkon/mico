@@ -47,6 +47,67 @@ async function createService(verbose?: (message: string) => void): Promise<{
 }
 
 describe('SessionRuntimeService', () => {
+  it('preserves documents through reload, retry, and later context while omitting reasoning', async () => {
+    const { database, service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const attachedMessage: ChatMessage = {
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'Review this file.' },
+        { type: 'reasoning', text: 'Private reasoning' },
+        { type: 'document', name: 'index.ts', text: '  export {}\n' }
+      ]
+    }
+    const expectedMessage = {
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'Review this file.' },
+        { type: 'document', name: 'index.ts', text: '  export {}\n' }
+      ]
+    }
+    const firstRun = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage: attachedMessage,
+      profile
+    })
+    service.finishRun(firstRun.runId, {
+      status: 'failed',
+      failure: { code: 'provider_error', message: 'Offline' }
+    })
+
+    const reloaded = new SessionRuntimeService({ database })
+    expect(reloaded.loadSession(session.id).messages).toEqual([expectedMessage])
+    expect(() =>
+      reloaded.retryTurn({
+        sessionId: session.id,
+        requestId: 'wrong-document',
+        userMessage: {
+          ...attachedMessage,
+          parts: [{ type: 'document', name: 'index.ts', text: 'different' }]
+        }
+      })
+    ).toThrow(/Failed turn/)
+    const retried = reloaded.retryTurn({
+      sessionId: session.id,
+      requestId: 'retry-1',
+      userMessage: attachedMessage
+    })
+    expect(reloaded.getContextMessages(retried.runId)).toEqual([expectedMessage])
+    reloaded.finishRun(retried.runId, { status: 'completed', assistant: assistantMessage })
+    const next = reloaded.startTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage,
+      profile
+    })
+    expect(reloaded.getContextMessages(next.runId)).toEqual([
+      expectedMessage,
+      assistantMessage,
+      userMessage
+    ])
+  })
+
   it('preserves the project context captured with a project session', async () => {
     const { service } = await createService()
     const session = service.createSession({

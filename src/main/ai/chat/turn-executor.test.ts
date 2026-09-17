@@ -98,6 +98,96 @@ function partialPendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk
 }
 
 describe('TurnExecutor', () => {
+  it('formats document-only messages as named text for the provider and title generation', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
+    const calls: Parameters<ChatProvider['stream']>[0][] = []
+    const titleGenerated = createDeferred()
+    const recorded = collectEvents()
+    const provider = createProvider(async (input) => {
+      calls.push(input)
+      return streamFrom([{ type: 'text-delta', id: 'part-1', delta: 'Review code' }])
+    })
+    const service = new TurnExecutor(() => provider, {
+      runtime,
+      getSelectedChatConfiguration: () => configuration
+    })
+    service.startTurn(
+      {
+        ownerId: 'window-1',
+        request: {
+          ...request,
+          sessionId: session.id,
+          userMessage: {
+            role: 'user',
+            parts: [{ type: 'document', name: 'index.ts', text: '  export {}\n' }]
+          }
+        }
+      },
+      recorded.emit,
+      titleGenerated.resolve
+    )
+    await recorded.terminal
+
+    const expected = {
+      role: 'user',
+      parts: [{ type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' }]
+    }
+    expect(
+      calls.find(({ conversationKey }) => conversationKey === `window-1:${session.id}`)?.messages
+    ).toEqual([expected])
+    expect(
+      calls.find(({ conversationKey }) => conversationKey === `title:${session.id}`)?.messages[1]
+    ).toEqual(expected)
+    await titleGenerated.promise
+  })
+
+  it('formats attached documents without a persisted runtime and preserves reasoning metadata', async () => {
+    const calls: Parameters<ChatProvider['stream']>[0][] = []
+    const recorded = collectEvents()
+    const provider = createProvider(async (input) => {
+      calls.push(input)
+      return streamFrom([])
+    })
+    const service = new TurnExecutor(() => provider)
+    service.startTurn(
+      {
+        ownerId: 'window-1',
+        request: {
+          ...request,
+          userMessage: {
+            role: 'user',
+            parts: [
+              { type: 'text', text: 'Review this file.' },
+              { type: 'document', name: 'a&"b.ts', text: 'export {}' },
+              {
+                type: 'reasoning',
+                text: 'Reasoning',
+                providerMetadata: { test: { signature: 'value' } }
+              }
+            ]
+          }
+        }
+      },
+      recorded.emit
+    )
+    await recorded.terminal
+    expect(calls[0]?.messages).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: 'Review this file.' },
+          { type: 'text', text: '<document name="a&amp;&quot;b.ts">\nexport {}\n</document>' },
+          {
+            type: 'reasoning',
+            text: 'Reasoning',
+            providerMetadata: { test: { signature: 'value' } }
+          }
+        ]
+      }
+    ])
+  })
+
   it('uses the session model entry instead of the global selected model', async () => {
     const { runtime } = await createRuntime()
     const session = runtime.createSession({

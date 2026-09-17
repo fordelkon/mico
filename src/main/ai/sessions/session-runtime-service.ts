@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto'
+import * as z from 'zod'
 
-import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
+import {
+  ChatDocumentPartSchema,
+  ChatMessageRoleSchema,
+  type ChatMessage,
+  type ThinkingSelection
+} from '@shared/data/schemas/chat'
 import { SessionDatabase } from '../../data/session-database'
 
 type ExecutionProfileSnapshot = {
@@ -24,11 +30,15 @@ type SessionSummary = {
 
 type PersistedSession = SessionSummary & { messages: ChatMessage[] }
 
-type VisibleMessage = {
-  role: ChatMessage['role']
-  parts: Array<{ type: 'text'; text: string }>
-  metadata?: ChatMessage['metadata']
-}
+const VisibleMessageSchema = z.object({
+  role: ChatMessageRoleSchema,
+  parts: z.array(
+    z.union([z.object({ type: z.literal('text'), text: z.string() }), ChatDocumentPartSchema])
+  ),
+  metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional()
+})
+const MessagePayloadSchema = z.object({ message: VisibleMessageSchema })
+type VisibleMessage = z.infer<typeof VisibleMessageSchema>
 type RuntimeEventPayloads = {
   run_started: {
     attempt: number
@@ -693,14 +703,13 @@ function toSessionSummary(row: SessionRow): SessionSummary {
 function visibleMessage(message: ChatMessage): VisibleMessage {
   const visible: VisibleMessage = {
     role: message.role,
-    parts: message.parts.filter((part) => part.type === 'text')
+    parts: message.parts.filter((part) => part.type === 'text' || part.type === 'document')
   }
   if (message.metadata) visible.metadata = message.metadata
-  return visible
+  return VisibleMessageSchema.parse(visible)
 }
 function parseMessagePayload(value: string): { message: VisibleMessage } {
-  // SAFETY: these payloads are written by appendEvent with a visible message.
-  return JSON.parse(value) as { message: VisibleMessage }
+  return MessagePayloadSchema.parse(JSON.parse(value))
 }
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')

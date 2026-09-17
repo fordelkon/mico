@@ -8,6 +8,17 @@ import { registerIpc } from './ipc'
 
 type Handler = Parameters<IpcMain['handle']>[1]
 
+function createFileHandle(bytes: Uint8Array, maxChunkSize = bytes.byteLength) {
+  return {
+    close: vi.fn().mockResolvedValue(undefined),
+    read: vi.fn(async (buffer: Uint8Array, offset: number, length: number, position: number) => {
+      const chunk = bytes.subarray(position, position + Math.min(length, maxChunkSize))
+      buffer.set(chunk, offset)
+      return { bytesRead: chunk.byteLength }
+    })
+  }
+}
+
 function createHarness() {
   const handlers = new Map<string, Handler>()
   // SAFETY: The test double is only passed through to assert the IPC handler delegates correctly.
@@ -77,6 +88,9 @@ function createHarness() {
     setDefaultProject: vi.fn()
   }
   const openPath = vi.fn().mockResolvedValue('')
+  const pickCodeDocuments = vi.fn().mockResolvedValue({ canceled: true, filePaths: [] })
+  const openFile = vi.fn()
+  const stat = vi.fn()
 
   registerIpc(
     { mainWindow, preference, turnExecutor, provider, session, workspace },
@@ -85,7 +99,10 @@ function createHarness() {
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
       getWindow: () => window,
       openPath,
-      pickDirectory: async () => undefined
+      pickDirectory: async () => undefined,
+      pickCodeDocuments,
+      openFile,
+      stat
     }
   )
 
@@ -97,6 +114,9 @@ function createHarness() {
     provider,
     session,
     openPath,
+    pickCodeDocuments,
+    openFile,
+    stat,
     window,
     workspace
   }
@@ -143,6 +163,114 @@ describe('registerIpc window control handlers', () => {
 
     expect(handlers.get(IpcChannel.WindowControls_IsFocused)?.(event)).toBe(true)
     expect(mainWindow.isFocused).toHaveBeenCalledWith(window)
+  })
+})
+
+describe('registerIpc attachment handlers', () => {
+  it('returns selected UTF-8 code documents without exposing their paths', async () => {
+    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/a.ts'] })
+    stat.mockResolvedValue({ size: 22 })
+    openFile.mockResolvedValue(createFileHandle(new TextEncoder().encode('export const value = 1')))
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).resolves.toEqual([
+      { type: 'document', name: 'a.ts', text: 'export const value = 1' }
+    ])
+    expect(openFile).toHaveBeenCalledWith('/tmp/a.ts')
+  })
+
+  it('rejects unsupported extensions before reading a document', async () => {
+    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/archive.zip'] })
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
+      'Only code and text documents can be attached.'
+    )
+    expect(stat).not.toHaveBeenCalled()
+    expect(openFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects a file larger than 256 KiB before reading it', async () => {
+    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/large.ts'] })
+    stat.mockResolvedValue({ size: 256 * 1024 + 1 })
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
+      'larger than 256 KiB'
+    )
+    expect(openFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects documents that are not valid UTF-8', async () => {
+    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/binary.ts'] })
+    stat.mockResolvedValue({ size: 2 })
+    openFile.mockResolvedValue(createFileHandle(Uint8Array.from([0xc3, 0x28])))
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
+      'not valid UTF-8'
+    )
+  })
+
+  it('rejects a batch larger than 1 MiB', async () => {
+    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const paths = Array.from({ length: 5 }, (_, index) => `/tmp/${index}.ts`)
+    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: paths })
+    stat.mockResolvedValue({ size: 256 * 1024 })
+    openFile.mockResolvedValue(createFileHandle(new Uint8Array(256 * 1024)))
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
+      'exceed the 1 MiB total limit'
+    )
+    expect(openFile).toHaveBeenCalledTimes(4)
+  })
+
+  it('returns no documents when the native picker is cancelled', async () => {
+    const { handlers } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).resolves.toEqual(
+      []
+    )
+  })
+
+  it('reads through short filesystem reads before decoding a document', async () => {
+    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const source = new TextEncoder().encode('export {}')
+    const fileHandle = {
+      close: vi.fn().mockResolvedValue(undefined),
+      read: vi.fn(async (buffer: Uint8Array, offset: number, length: number, position: number) => {
+        const chunk = source.subarray(position, position + Math.min(2, length))
+        buffer.set(chunk, offset)
+        return { bytesRead: chunk.byteLength }
+      })
+    }
+    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/short.ts'] })
+    stat.mockResolvedValue({ size: source.byteLength })
+    openFile.mockResolvedValue(fileHandle)
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).resolves.toEqual([
+      { type: 'document', name: 'short.ts', text: 'export {}' }
+    ])
+  })
+
+  it('asks the user to shorten an overlong document name', async () => {
+    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const name = `${'a'.repeat(198)}.ts`
+    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: [`/tmp/${name}`] })
+
+    await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
+      'Shorten or rename'
+    )
+    expect(stat).not.toHaveBeenCalled()
+    expect(openFile).not.toHaveBeenCalled()
   })
 })
 
