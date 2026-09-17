@@ -9,6 +9,7 @@ import {
 } from '@renderer/types/chat'
 import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
 import type {
+  ChatDocumentPart,
   ChatMessage,
   ModelReasoningCapabilities,
   ThinkingSelection
@@ -37,7 +38,10 @@ type ChatWorkspace = {
   thinkingEffort: ThinkingSelection
   selectedModelEntryId: string | null
   pendingProject: WorkspaceProject | null
+  activeProject: WorkspaceProject | null
+  projects: WorkspaceProject[]
   addProjectToNewChat: () => Promise<void>
+  selectProjectForNewChat: (project: WorkspaceProject) => void
   setSessionModelEntry: (modelEntryId: string) => Promise<void>
   setThinkingEffort: (thinkingEffort: ThinkingSelection) => void
   composerFocusKey: number
@@ -45,7 +49,7 @@ type ChatWorkspace = {
   selectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
   renameConversation: (conversationId: string, title: string) => void
   deleteConversation: (conversationId: string) => void
-  sendMessage: (content: string) => void
+  sendMessage: (content: ChatSendInput) => Promise<boolean>
   retryResponse: () => void
   stopResponse: () => void
 }
@@ -55,13 +59,16 @@ type ChatSession = {
   chat: Chat<MicoUIMessage>
   modelEntryId: string | null
   thinkingEffort: ThinkingSelection | null
+  project: WorkspaceProject | null
 }
 
 type ActiveChatSession = {
   conversationId: string
   chat: Chat<MicoUIMessage>
+  project: WorkspaceProject | null
 }
-type PendingMessage = { content: string; session: ChatSession }
+type ChatSendInput = { text: string; documents: ChatDocumentPart[] }
+type PendingMessage = { parts: MicoUIMessage['parts']; session: ChatSession }
 type ActiveChatResponse = Exclude<ChatResponseState, { status: 'idle' }>
 
 function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
@@ -69,9 +76,10 @@ function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
     id: crypto.randomUUID(),
     role: message.role,
     metadata: message.metadata,
-    parts: message.parts.flatMap((part) =>
-      part.type === 'text' ? [{ type: 'text', text: part.text, state: 'done' as const }] : []
-    )
+    parts: message.parts.flatMap<MicoUIMessage['parts'][number]>((part) => {
+      if (part.type === 'document') return [{ type: 'data-document', data: part }]
+      return part.type === 'text' ? [{ type: 'text', text: part.text, state: 'done' }] : []
+    })
   }))
 }
 
@@ -98,6 +106,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   const [thinkingEffort, setThinkingEffortState] = React.useState<ThinkingSelection>('default')
   const [selectedModelEntryId, setSelectedModelEntryId] = React.useState<string | null>(null)
   const [pendingProject, setPendingProject] = React.useState<WorkspaceProject | null>(null)
+  const [projects, setProjects] = React.useState<WorkspaceProject[]>([])
   const [thinkingEffortStore] = React.useState(() => new ThinkingEffortStore())
   const getThinkingEffort = React.useCallback(
     () => thinkingEffortStore.get(),
@@ -107,6 +116,10 @@ function useChatWorkspaceState(): ChatWorkspace {
   const responseRef = React.useRef<Map<string, ActiveChatResponse>>(new Map())
   const isCreatingSessionRef = React.useRef(false)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
+
+  React.useEffect(() => {
+    void window.api.workspaces.list().then(setProjects, () => undefined)
+  }, [])
   const setThinkingEffort = React.useCallback(
     (next: ThinkingSelection): void => {
       thinkingEffortStore.set(next)
@@ -226,7 +239,8 @@ function useChatWorkspaceState(): ChatWorkspace {
       selection: Pick<ChatSession, 'modelEntryId' | 'thinkingEffort'> = {
         modelEntryId: null,
         thinkingEffort: null
-      }
+      },
+      project: WorkspaceProject | null = null
     ): ChatSession => {
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
@@ -264,7 +278,7 @@ function useChatWorkspaceState(): ChatWorkspace {
           })
       })
 
-      const session = { conversation, chat, ...selection }
+      const session = { conversation, chat, project, ...selection }
       sessionsRef.current.set(conversation.id, session)
       return session
     },
@@ -274,7 +288,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   React.useEffect(() => {
     if (!pendingMessage) return
 
-    void pendingMessage.session.chat.sendMessage({ text: pendingMessage.content })
+    void pendingMessage.session.chat.sendMessage({ parts: pendingMessage.parts })
   }, [pendingMessage])
 
   const startNewChat = React.useCallback((): void => {
@@ -288,14 +302,28 @@ function useChatWorkspaceState(): ChatWorkspace {
   const addProjectToNewChat = React.useCallback(async (): Promise<void> => {
     if (activeSession) return
     const project = await window.api.workspaces.addFromDialog()
-    if (project) setPendingProject(project)
+    if (!project) return
+    setPendingProject(project)
+    setProjects((current) => {
+      const previous = current.find(({ id }) => id === project.id)
+      return previous
+        ? current.map((candidate) => (candidate.id === project.id ? project : candidate))
+        : [...current, project]
+    })
   }, [activeSession])
+
+  const selectProjectForNewChat = React.useCallback(
+    (project: WorkspaceProject): void => {
+      if (!activeSession) setPendingProject(project)
+    },
+    [activeSession]
+  )
 
   const selectConversation = React.useCallback(
     (conversationId: string, { focusComposer = true }: { focusComposer?: boolean } = {}): void => {
       const existing = sessionsRef.current.get(conversationId)
       if (existing) {
-        setActiveSession({ conversationId, chat: existing.chat })
+        setActiveSession({ conversationId, chat: existing.chat, project: existing.project })
         setSelectedModelEntryId(existing.modelEntryId)
         if (existing.thinkingEffort) {
           thinkingEffortStore.set(existing.thinkingEffort)
@@ -305,22 +333,39 @@ function useChatWorkspaceState(): ChatWorkspace {
         return
       }
 
-      void window.api.sessions.load(conversationId).then((persisted) => {
+      void window.api.sessions.load(conversationId).then(async (persisted) => {
         const savedThinkingEffort = persisted.defaultProfile?.thinkingEffort
         setSelectedModelEntryId(persisted.defaultProfile?.modelEntryId ?? null)
         if (savedThinkingEffort) {
           thinkingEffortStore.set(savedThinkingEffort)
           setThinkingEffortState(savedThinkingEffort)
         }
+        const projects = await window.api.workspaces.list().catch(() => [])
+        const project = persisted.projectId
+          ? (projects.find(({ id }) => id === persisted.projectId) ??
+            (persisted.cwd
+              ? {
+                  id: persisted.projectId,
+                  name: persisted.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Workspace',
+                  rootPath: persisted.cwd,
+                  isDefault: false
+                }
+              : null))
+          : null
         const session = createSession(
           { id: persisted.id, title: persisted.title },
           persisted.messages,
           {
             modelEntryId: persisted.defaultProfile?.modelEntryId ?? null,
             thinkingEffort: persisted.defaultProfile?.thinkingEffort ?? null
-          }
+          },
+          project
         )
-        setActiveSession({ conversationId: persisted.id, chat: session.chat })
+        setActiveSession({
+          conversationId: persisted.id,
+          chat: session.chat,
+          project: session.project
+        })
         if (focusComposer) setComposerFocusKey((key) => key + 1)
       })
     },
@@ -385,8 +430,8 @@ function useChatWorkspaceState(): ChatWorkspace {
   )
 
   const sendMessage = React.useCallback(
-    (content: string): void => {
-      if (!content.trim()) return
+    async ({ text, documents }: ChatSendInput): Promise<boolean> => {
+      if (!text.trim() && !documents.length) return false
 
       const existingSession = activeSession
         ? sessionsRef.current.get(activeSession.conversationId)
@@ -400,35 +445,42 @@ function useChatWorkspaceState(): ChatWorkspace {
         currentResponse?.status === 'streaming' ||
         currentResponse?.status === 'retrying'
       ) {
-        return
+        return false
       }
+
+      const parts: MicoUIMessage['parts'] = []
+      if (text.trim()) parts.push({ type: 'text', text })
+      for (const document of documents) parts.push({ type: 'data-document', data: document })
 
       if (existingSession) {
         setResponseState({ status: 'submitted', conversationId: existingSession.conversation.id })
-        void existingSession.chat.sendMessage({ text: content })
-        return
+        void existingSession.chat.sendMessage({ parts })
+        return true
       }
 
-      if (isCreatingSessionRef.current) return
+      if (isCreatingSessionRef.current) return false
 
       isCreatingSessionRef.current = true
       const createInput = pendingProject
         ? { title: 'New chat', projectId: pendingProject.id }
         : { title: 'New chat' }
-      void window.api.sessions
-        .create(createInput)
-        .then((summary) => {
-          const conversation = { id: summary.id, title: summary.title }
-          const session = createSession(conversation)
-          setConversations((current) => [...current, conversation])
-          setActiveSession({ conversationId: conversation.id, chat: session.chat })
-          setPendingProject(null)
-          setResponseState({ status: 'submitted', conversationId: conversation.id })
-          setPendingMessage({ content, session })
+      try {
+        const summary = await window.api.sessions.create(createInput)
+        const conversation = { id: summary.id, title: summary.title }
+        const session = createSession(conversation, [], undefined, pendingProject)
+        setConversations((current) => [...current, conversation])
+        setActiveSession({
+          conversationId: conversation.id,
+          chat: session.chat,
+          project: session.project
         })
-        .finally(() => {
-          isCreatingSessionRef.current = false
-        })
+        setPendingProject(null)
+        setResponseState({ status: 'submitted', conversationId: conversation.id })
+        setPendingMessage({ parts, session })
+        return true
+      } finally {
+        isCreatingSessionRef.current = false
+      }
     },
     [activeSession, createSession, pendingProject, setResponseState]
   )
@@ -504,6 +556,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     [activeSession, conversations]
   )
   const activeChat = activeSession?.chat ?? null
+  const activeProject = activeSession?.project ?? pendingProject
   const response = activeSession
     ? (responses.get(activeSession.conversationId) ?? IDLE_CHAT_RESPONSE)
     : IDLE_CHAT_RESPONSE
@@ -518,7 +571,10 @@ function useChatWorkspaceState(): ChatWorkspace {
       thinkingEffort,
       selectedModelEntryId,
       pendingProject,
+      activeProject,
+      projects,
       addProjectToNewChat,
+      selectProjectForNewChat,
       setSessionModelEntry,
       setThinkingEffort,
       composerFocusKey,
@@ -534,6 +590,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       activeConversation,
       addProjectToNewChat,
       activeChat,
+      activeProject,
       composerFocusKey,
       conversations,
       deleteConversation,
@@ -550,7 +607,9 @@ function useChatWorkspaceState(): ChatWorkspace {
       stopResponse,
       thinkingEffort,
       pendingProject,
-      selectedModelEntryId
+      projects,
+      selectedModelEntryId,
+      selectProjectForNewChat
     ]
   )
 }

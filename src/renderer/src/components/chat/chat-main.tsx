@@ -57,6 +57,8 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
       focusKey={workspace.composerFocusKey}
       mode={composerMode}
       onAddProject={workspace.addProjectToNewChat}
+      onProjectSelected={workspace.selectProjectForNewChat}
+      projectId={workspace.activeProject?.id ?? null}
       onModelSelected={refreshCapabilities}
       selectedModelEntryId={
         workspace.activeConversation ? workspace.selectedModelEntryId : undefined
@@ -64,7 +66,9 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
       selectSessionModel={workspace.activeConversation ? workspace.setSessionModelEntry : undefined}
       onSend={workspace.sendMessage}
       onStop={workspace.stopResponse}
-      projectLabel={workspace.pendingProject?.name ?? null}
+      projectLabel={workspace.activeProject?.name ?? null}
+      projectPath={workspace.activeProject?.rootPath ?? null}
+      projects={workspace.projects}
       reasoningCapabilities={
         refreshedCapabilities === undefined
           ? workspace.reasoningCapabilities

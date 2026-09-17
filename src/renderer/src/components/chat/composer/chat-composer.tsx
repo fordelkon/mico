@@ -1,17 +1,18 @@
-import {
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  IconMenuButton,
-  IconTooltipButton,
-  IconSwap,
-  Textarea
-} from '@mico/ui'
-import { ArrowUpIcon, BrainIcon, FolderIcon, FolderPlusIcon, SquareIcon } from 'lucide-react'
+import { IconTooltipButton, IconSwap, Textarea } from '@mico/ui'
+import { ArrowUpIcon, SquareIcon } from 'lucide-react'
 import * as React from 'react'
 
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
+import type {
+  ChatDocumentPart,
+  ModelReasoningCapabilities,
+  ThinkingSelection
+} from '@shared/data/schemas/chat'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 
 import { ChatModelSelector } from './chat-model-selector'
+import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
+import { ProjectSelector } from './project-selector'
+import { ThinkingSelector } from './thinking-selector'
 import { useComposerModelSelection } from './use-composer-model-selection'
 
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
@@ -22,26 +23,19 @@ type ChatComposerProps = {
   mode: ChatComposerMode
   onModelSelected: () => Promise<void>
   onAddProject?: () => Promise<void>
+  onProjectSelected?: (project: WorkspaceProject) => void
+  projectId?: string | null
   projectLabel?: string | null
+  projectPath?: string | null
+  projects?: WorkspaceProject[]
   selectedModelEntryId?: string | null
   selectSessionModel?: (modelEntryId: string) => Promise<void>
-  onSend: (content: string) => void
+  onSend: (content: { text: string; documents: ChatDocumentPart[] }) => Promise<boolean>
   onStop: () => void
   reasoningCapabilities: ModelReasoningCapabilities | null
   thinkingEffort: ThinkingSelection
   onThinkingEffortChange: (selection: ThinkingSelection) => void
 }
-
-const thinkingEffortLabels = {
-  none: 'Off',
-  auto: 'On',
-  minimal: 'Minimal',
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  xhigh: 'Extra high',
-  max: 'Max'
-} satisfies Record<Exclude<ThinkingSelection, 'default'>, string>
 
 const rotatingPlaceholders = [
   'Ask Mico to explain a concept…',
@@ -55,7 +49,11 @@ function ChatComposer({
   mode,
   onModelSelected,
   onAddProject,
+  onProjectSelected,
+  projectId,
   projectLabel,
+  projectPath,
+  projects = [],
   selectedModelEntryId,
   selectSessionModel,
   onSend,
@@ -67,6 +65,9 @@ function ChatComposer({
   const { currentModelId, hasSelectedModel, library, selectionError, selectModel } =
     useComposerModelSelection({ onModelSelected, selectedModelEntryId, selectSessionModel })
   const [draft, setDraft] = React.useState('')
+  const [documents, setDocuments] = React.useState<ChatDocumentPart[]>([])
+  const [isSending, setIsSending] = React.useState(false)
+  const [sendError, setSendError] = React.useState<string | null>(null)
   const [isFocused, setIsFocused] = React.useState(false)
   const [placeholderIndex, setPlaceholderIndex] = React.useState(0)
   const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(
@@ -76,7 +77,7 @@ function ChatComposer({
   const mountedRef = React.useRef(false)
   const previousFocusKeyRef = React.useRef(focusKey)
   const previousModeRef = React.useRef(mode)
-  const isDisabled = mode === 'disabled'
+  const isDisabled = mode === 'disabled' || isSending
   const showRotatingPlaceholder =
     canAddProject && mode === 'send' && !draft && !isFocused && !prefersReducedMotion
 
@@ -121,17 +122,31 @@ function ChatComposer({
     textarea.style.height = `${textarea.scrollHeight}px`
   }, [draft])
 
-  const submit = (): void => {
-    if (mode !== 'send' || !hasSelectedModel || !draft.trim()) return
+  const submit = async (): Promise<void> => {
+    if (mode !== 'send' || isSending || !hasSelectedModel || (!draft.trim() && !documents.length))
+      return
 
-    onSend(draft)
-    setDraft('')
+    setIsSending(true)
+    setSendError(null)
+    try {
+      if (await onSend({ text: draft, documents })) {
+        setDraft('')
+        setDocuments([])
+      }
+    } catch (cause) {
+      const detail = cause instanceof Error ? ` ${cause.message}` : ''
+      setSendError(
+        `Could not send this message.${detail} Your draft and attachments are kept. Try again.`
+      )
+    } finally {
+      setIsSending(false)
+    }
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      submit()
+      void submit()
     }
   }
 
@@ -140,10 +155,15 @@ function ChatComposer({
       className="chat-composer shrink-0 px-4 pb-5 pt-3 sm:px-6"
       onSubmit={(event) => {
         event.preventDefault()
-        submit()
+        void submit()
       }}
     >
       <div className="chat-composer__surface mx-auto flex w-full max-w-[50rem] flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
+        <ComposerAttachmentList
+          disabled={mode !== 'send' || isSending}
+          documents={documents}
+          onDocumentsChange={setDocuments}
+        />
         <div className="relative">
           <Textarea
             className="min-h-16 max-h-40 resize-none border-0 px-2 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
@@ -168,26 +188,11 @@ function ChatComposer({
         </div>
         <div className="flex min-h-8 items-center justify-between gap-4 px-0.5">
           <div className="flex min-w-0 items-center gap-1.5">
-            {canAddProject && onAddProject ? (
-              <IconTooltipButton
-                className="size-8"
-                icon={<FolderPlusIcon aria-hidden="true" />}
-                label="Choose workspace"
-                onClick={() => void onAddProject()}
-                type="button"
-                variant="ghost"
-              />
-            ) : null}
-            {projectLabel ? (
-              <span
-                aria-label={`Workspace: ${projectLabel}`}
-                className="inline-flex size-8 shrink-0 items-center justify-center text-muted-foreground"
-                role="img"
-                title={`Workspace: ${projectLabel}`}
-              >
-                <FolderIcon aria-hidden="true" className="size-4" />
-              </span>
-            ) : null}
+            <ComposerAttachments
+              disabled={mode !== 'send' || isSending}
+              documents={documents}
+              onDocumentsChange={setDocuments}
+            />
             <div className="flex flex-col gap-1">
               <ChatModelSelector
                 library={library}
@@ -199,39 +204,30 @@ function ChatComposer({
               ) : null}
             </div>
             {reasoningCapabilities ? (
-              <IconMenuButton
-                className={
-                  thinkingEffort === 'none'
-                    ? 'size-8'
-                    : 'size-8 bg-accent text-accent-foreground hover:bg-accent'
-                }
+              <ThinkingSelector
                 disabled={mode !== 'send'}
-                icon={<BrainIcon aria-hidden="true" />}
-                label="Thinking effort"
-                type="button"
-                variant="secondary"
-              >
-                <DropdownMenuRadioGroup
-                  value={thinkingEffort}
-                  // SAFETY: Every selectable item is rendered with a canonical thinking-effort value.
-                  onValueChange={(selection) =>
-                    onThinkingEffortChange(selection as ThinkingSelection)
-                  }
-                >
-                  {reasoningCapabilities.selectableEfforts.map((selection) => (
-                    <DropdownMenuRadioItem key={selection} value={selection}>
-                      {thinkingEffortLabels[selection]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </IconMenuButton>
+                onValueChange={onThinkingEffortChange}
+                reasoningCapabilities={reasoningCapabilities}
+                value={thinkingEffort}
+              />
             ) : null}
+            <ProjectSelector
+              canAddProject={canAddProject}
+              onAddProject={onAddProject}
+              onProjectSelected={onProjectSelected}
+              projectId={projectId}
+              projectLabel={projectLabel}
+              projectPath={projectPath}
+              projects={projects}
+            />
           </div>
           <div className="flex shrink-0 items-center">
             <IconTooltipButton
               className="size-9"
               disabled={
-                mode === 'disabled' || (mode === 'send' && (!hasSelectedModel || !draft.trim()))
+                isSending ||
+                mode === 'disabled' ||
+                (mode === 'send' && (!hasSelectedModel || (!draft.trim() && !documents.length)))
               }
               icon={
                 <IconSwap
@@ -254,6 +250,11 @@ function ChatComposer({
             />
           </div>
         </div>
+        {sendError ? (
+          <p className="px-2 text-xs text-destructive" role="alert">
+            {sendError}
+          </p>
+        ) : null}
       </div>
     </form>
   )
