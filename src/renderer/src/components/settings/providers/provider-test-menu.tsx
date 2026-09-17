@@ -1,4 +1,5 @@
 import { Button, SearchPopover } from '@mico/ui'
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import {
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -27,6 +28,8 @@ function ProviderTestMenu({
   providerLabel: string
   testState: ProviderTestState
 }): React.JSX.Element {
+  const { clearHighlight, getItemProps, highlightProps } = useGlidingHighlight<HTMLButtonElement>()
+
   return (
     <SearchPopover
       align="end"
@@ -71,28 +74,36 @@ function ProviderTestMenu({
         return (
           <div
             aria-label={`${providerLabel} models`}
-            className="max-h-56 overflow-y-auto p-1"
+            className="relative max-h-56 overflow-y-auto p-1"
+            onMouseLeave={clearHighlight}
             role="listbox"
           >
             {filteredModels.length === 0 ? (
               <p className="py-6 text-center text-sm text-text-secondary">No models found.</p>
             ) : (
-              filteredModels.map((model) => (
-                <Button
-                  className="h-auto min-h-8 w-full justify-start rounded-sm px-2 py-1.5 text-left text-sm focus-visible:border-transparent focus-visible:bg-accent focus-visible:ring-0"
-                  disabled={isTesting}
-                  key={model.id}
-                  onClick={() => {
-                    onTestModel(model.modelId)
-                    close()
-                  }}
-                  role="option"
-                  type="button"
-                  variant="ghost"
-                >
-                  {model.name}
-                </Button>
-              ))
+              <>
+                <span
+                  {...highlightProps}
+                  className={`${highlightProps.className} inset-x-1 rounded-sm bg-accent`}
+                />
+                {filteredModels.map((model, index) => (
+                  <Button
+                    {...getItemProps(index)}
+                    className="relative z-10 h-auto min-h-8 w-full justify-start rounded-sm px-2 py-1.5 text-left text-sm hover:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent focus-visible:ring-0"
+                    disabled={isTesting}
+                    key={model.id}
+                    onClick={() => {
+                      onTestModel(model.modelId)
+                      close()
+                    }}
+                    role="option"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {model.name}
+                  </Button>
+                ))}
+              </>
             )}
           </div>
         )

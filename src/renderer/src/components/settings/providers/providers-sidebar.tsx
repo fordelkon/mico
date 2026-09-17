@@ -1,4 +1,5 @@
 import { Button, InputGroup, InputGroupInput, Separator } from '@mico/ui'
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import type { CustomProvider } from '@shared/data/schemas/provider'
 import { PlusIcon, Search } from 'lucide-react'
 import * as React from 'react'
@@ -42,6 +43,7 @@ function ProvidersSidebar({
   const [query, setQuery] = React.useState('')
   const railRef = React.useRef<HTMLElement>(null)
   const searchInputRef = React.useRef<HTMLInputElement>(null)
+  const { clearHighlight, getItemProps, highlightProps } = useGlidingHighlight<HTMLButtonElement>()
   const visibleProviders = sortByEnabledOrder(
     [
       ...providerDescriptors,
@@ -119,20 +121,28 @@ function ProvidersSidebar({
         </div>
         <Separator className="mx-auto mb-3 w-12 bg-border-subtle" />
         <div className="min-h-0 flex-1 overflow-y-auto px-3">
-          <div className="space-y-2">
-            {visibleProviders.map((provider) => {
+          <div className="relative flex flex-col gap-2" onMouseLeave={clearHighlight}>
+            <span
+              {...highlightProps}
+              className={`${highlightProps.className} inset-x-0 rounded-md bg-sidebar-row-hover`}
+            />
+            {visibleProviders.map((provider, index) => {
               const isActive = provider.id === activeProviderId
               const isEnabled = enabledProviderIds.includes(provider.id)
 
               return (
                 <Button
+                  {...getItemProps(index)}
                   aria-current={isActive ? 'page' : undefined}
                   aria-label={provider.label}
-                  className="relative h-10 w-full justify-start px-2 hover:bg-sidebar-row-hover hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-row-active data-[active=true]:text-sidebar-accent-foreground data-[active=true]:shadow-[var(--sidebar-row-active-shadow)] data-[active=true]:hover:bg-sidebar-row-active data-[active=true]:after:absolute data-[active=true]:after:-left-1 data-[active=true]:after:h-5 data-[active=true]:after:w-0.5 data-[active=true]:after:rounded-full data-[active=true]:after:bg-primary"
+                  className="relative z-10 h-10 w-full justify-start px-2 hover:bg-transparent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-row-active data-[active=true]:text-sidebar-accent-foreground data-[active=true]:hover:bg-sidebar-row-active data-[active=true]:after:absolute data-[active=true]:after:-left-1 data-[active=true]:after:h-5 data-[active=true]:after:w-0.5 data-[active=true]:after:rounded-full data-[active=true]:after:bg-primary"
                   data-active={isActive}
                   key={provider.id}
                   onClick={() => onSelect(provider.id)}
-                  ref={itemRef?.(provider.id)}
+                  ref={(element) => {
+                    getItemProps(index).ref(element)
+                    itemRef?.(provider.id)(element)
+                  }}
                   variant="ghost"
                 >
                   <span className="relative shrink-0">

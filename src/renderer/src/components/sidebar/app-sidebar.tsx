@@ -20,10 +20,21 @@ import {
   useSidebar
 } from '@mico/ui'
 import type { Conversation } from '@renderer/types/chat'
-import { ArrowLeft, Bot, Moon, Palette, PanelLeft, Search, Settings, SquarePen } from 'lucide-react'
+import {
+  ArrowLeft,
+  Bot,
+  FolderOpen,
+  Moon,
+  Palette,
+  PanelLeft,
+  Search,
+  Settings,
+  SquarePen
+} from 'lucide-react'
 import * as React from 'react'
 
 import { useAppearance } from '../appearance-provider'
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import { ConversationRow } from './conversation-row'
 import './app-sidebar.css'
 
@@ -37,8 +48,8 @@ type AppSidebarProps = {
   onOpenSettings: () => void
   onRenameConversation: (conversationId: string, title: string) => void
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
-  onSelectSettingsPage?: (page: 'providers' | 'appearance') => void
-  settingsPage?: 'providers' | 'appearance'
+  onSelectSettingsPage?: (page: 'providers' | 'appearance' | 'workspaces') => void
+  settingsPage?: 'providers' | 'appearance' | 'workspaces'
   settingsActive: boolean
 }
 
@@ -72,6 +83,8 @@ function AppSidebar({
   const { preference, setPreference } = useAppearance()
   const collapsed = state === 'collapsed'
   const [searchOpen, setSearchOpen] = React.useState(false)
+  const settingsHighlight = useGlidingHighlight<HTMLLIElement>()
+  const conversationHighlight = useGlidingHighlight<HTMLLIElement>()
 
   // Keep the new-chat shortcut available while focus is inside any sidebar control.
   React.useEffect(() => {
@@ -99,11 +112,22 @@ function AppSidebar({
         <SidebarContent className="pt-[60px]">
           <SidebarGroup>
             {settingsActive ? (
-              <SidebarMenu aria-label="Settings">
-                <SidebarMenuItem className="mx-1.5 my-px">
+              <SidebarMenu
+                aria-label="Settings"
+                className="relative"
+                onMouseLeave={settingsHighlight.clearHighlight}
+              >
+                <span
+                  {...settingsHighlight.highlightProps}
+                  className={`${settingsHighlight.highlightProps.className} inset-x-1.5 rounded-lg bg-sidebar-row-hover`}
+                />
+                <SidebarMenuItem
+                  {...settingsHighlight.getItemProps(0)}
+                  className="relative z-10 mx-1.5 my-px"
+                >
                   <SidebarMenuButton
                     aria-current={settingsPage === 'providers' ? 'page' : undefined}
-                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
                     isActive={settingsPage === 'providers'}
                     onClick={() => onSelectSettingsPage?.('providers')}
                     tooltip="Providers"
@@ -112,10 +136,28 @@ function AppSidebar({
                     <span>Providers</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                <SidebarMenuItem className="mx-1.5 my-px">
+                <SidebarMenuItem
+                  {...settingsHighlight.getItemProps(1)}
+                  className="relative z-10 mx-1.5 my-px"
+                >
+                  <SidebarMenuButton
+                    aria-current={settingsPage === 'workspaces' ? 'page' : undefined}
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    isActive={settingsPage === 'workspaces'}
+                    onClick={() => onSelectSettingsPage?.('workspaces')}
+                    tooltip="Workspaces"
+                  >
+                    <FolderOpen aria-hidden="true" />
+                    <span>Workspaces</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem
+                  {...settingsHighlight.getItemProps(2)}
+                  className="relative z-10 mx-1.5 my-px"
+                >
                   <SidebarMenuButton
                     aria-current={settingsPage === 'appearance' ? 'page' : undefined}
-                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
                     isActive={settingsPage === 'appearance'}
                     onClick={() => onSelectSettingsPage?.('appearance')}
                     tooltip="Appearance"
@@ -126,8 +168,12 @@ function AppSidebar({
                 </SidebarMenuItem>
               </SidebarMenu>
             ) : conversations.length > 0 ? (
-              <SidebarMenu>
-                {conversations.map((conversation) => (
+              <SidebarMenu className="relative" onMouseLeave={conversationHighlight.clearHighlight}>
+                <span
+                  {...conversationHighlight.highlightProps}
+                  className={`${conversationHighlight.highlightProps.className} inset-x-1.5 rounded-lg bg-sidebar-row-hover`}
+                />
+                {conversations.map((conversation, index) => (
                   <ConversationRow
                     key={conversation.id}
                     conversation={conversation}
@@ -136,6 +182,7 @@ function AppSidebar({
                     onDeleteConversation={onDeleteConversation}
                     onRenameConversation={onRenameConversation}
                     onSelectConversation={onSelectConversation}
+                    glidingHighlightItemProps={conversationHighlight.getItemProps(index)}
                   />
                 ))}
               </SidebarMenu>

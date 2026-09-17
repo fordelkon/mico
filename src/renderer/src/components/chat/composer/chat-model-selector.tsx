@@ -1,4 +1,5 @@
 import { Button, SearchPopover } from '@mico/ui'
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import type { CustomProvider, ModelEntry, ProviderLibrary } from '@shared/data/schemas/provider'
 import { ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
@@ -47,6 +48,7 @@ function ChatModelSelector({
   onSelect,
   selectedModelId
 }: ChatModelSelectorProps): React.JSX.Element {
+  const { clearHighlight, getItemProps, highlightProps } = useGlidingHighlight<HTMLButtonElement>()
   const eligibleModels = getEligibleModels(library)
   const currentModelId = selectedModelId ?? library?.selectedModelId
   const selectedModel = eligibleModels.find(({ id }) => id === currentModelId)
@@ -86,13 +88,19 @@ function ChatModelSelector({
             )
           : eligibleModels
         const modelsByProvider = Map.groupBy(visibleModels, ({ provider }) => provider)
+        const modelIndexes = new Map(visibleModels.map((model, index) => [model.id, index]))
 
         return modelsByProvider.size ? (
           <div
             aria-label="Available models"
-            className="max-h-80 overflow-y-auto p-1"
+            className="relative max-h-80 overflow-y-auto p-1"
+            onMouseLeave={clearHighlight}
             role="listbox"
           >
+            <span
+              {...highlightProps}
+              className={`${highlightProps.className} inset-x-1 rounded-md bg-accent`}
+            />
             <div className="flex flex-col gap-1">
               {[...modelsByProvider].map(([providerId, models], index) => {
                 const [{ providerIcon, providerLabel }] = models
@@ -113,9 +121,10 @@ function ChatModelSelector({
                     </div>
                     {models.map((model) => (
                       <Button
+                        {...getItemProps(modelIndexes.get(model.id) ?? 0)}
                         aria-label={model.displayName}
                         aria-selected={model.id === currentModelId}
-                        className="h-auto min-h-8 w-full justify-between gap-3 px-2 py-1.5 text-left text-sm focus-visible:border-transparent focus-visible:bg-accent focus-visible:ring-0"
+                        className="relative z-10 h-auto min-h-8 w-full justify-between gap-3 px-2 py-1.5 text-left text-sm hover:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent focus-visible:ring-0"
                         key={model.id}
                         onClick={() => {
                           onSelect(model.id)

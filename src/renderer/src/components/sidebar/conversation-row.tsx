@@ -20,6 +20,7 @@ import {
   SidebarMenuItem,
   Spinner
 } from '@mico/ui'
+import type { GlidingHighlightItemProps } from '@renderer/hooks/use-gliding-highlight'
 import type { Conversation } from '@renderer/types/chat'
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
@@ -37,6 +38,7 @@ type ConversationRowProps = {
   onDeleteConversation: (conversationId: string) => void
   onRenameConversation: (conversationId: string, title: string) => void
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
+  glidingHighlightItemProps?: GlidingHighlightItemProps<HTMLLIElement>
 }
 
 function ConversationRowStatus(): React.JSX.Element {
@@ -65,7 +67,8 @@ function ConversationRowComponent({
   selected,
   onDeleteConversation,
   onRenameConversation,
-  onSelectConversation
+  onSelectConversation,
+  glidingHighlightItemProps
 }: ConversationRowProps): React.JSX.Element {
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
@@ -166,6 +169,7 @@ function ConversationRowComponent({
           className="conversation-row mx-1.5 my-px"
           data-deleting={deleting || undefined}
           data-responding={isResponding || undefined}
+          {...glidingHighlightItemProps}
           onAnimationEnd={handleDeleteAnimationEnd}
         >
           {editing ? (

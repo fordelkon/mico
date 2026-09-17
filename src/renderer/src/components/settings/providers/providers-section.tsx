@@ -11,7 +11,6 @@ import {
   Button,
   IconTooltipButton,
   Input,
-  RadioSelect,
   Textarea,
   Toggle
 } from '@mico/ui'
@@ -23,6 +22,7 @@ import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
 
 import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
+import { GlidingRadioSelect } from './gliding-radio-select'
 import { ProviderModelsSection } from './provider-models-section'
 import { ProviderTestMenu, type ProviderTestState } from './provider-test-menu'
 import type { ProviderId } from './providers-sidebar'
@@ -425,7 +425,7 @@ function ProvidersSection({
               </h3>
               <fieldset aria-label="API format" className="space-y-1">
                 <legend className="text-sm">API format</legend>
-                <RadioSelect
+                <GlidingRadioSelect
                   aria-label="API format"
                   onValueChange={(apiFormat) => {
                     if (

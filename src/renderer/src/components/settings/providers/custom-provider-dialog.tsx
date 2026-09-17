@@ -12,7 +12,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
   Input,
-  RadioSelect,
   Textarea,
   Toggle,
   Tooltip,
@@ -26,6 +25,7 @@ import { BoxesIcon, ChevronDownIcon, CloudIcon, ServerIcon, TerminalIcon } from 
 import * as React from 'react'
 
 import lmStudioIcon from '@renderer/assets/providers/lmstudio.svg'
+import { GlidingRadioSelect } from './gliding-radio-select'
 import { useProviderLibraryActions } from './provider-library'
 
 type CustomProviderIcon = {
@@ -306,7 +306,7 @@ function CustomProviderDialog({
             </label>
             <fieldset aria-label="API format" className="space-y-1">
               <legend className="text-sm">API format</legend>
-              <RadioSelect
+              <GlidingRadioSelect
                 aria-label={selectedCustomProviderApiFormat.label}
                 onValueChange={setApiFormat}
                 options={customProviderApiFormats}
