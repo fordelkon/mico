@@ -210,7 +210,7 @@ describe('ChatComposer', () => {
     rerender(<WorkspaceComposerHarness canAddProject />)
 
     await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Add workspace' }))
+    await user.click(screen.getByRole('button', { name: 'Add workspace' }))
     expect(screen.getByRole('button', { name: 'Workspace: Project one' })).toBeVisible()
   })
 
@@ -249,11 +249,99 @@ describe('ChatComposer', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
-    expect(screen.queryByText('/projects/two')).toBeNull()
-    const projectOption = screen.getByRole('menuitemradio', { name: /Project two/ })
+    expect(screen.getByText('/projects/two')).toBeVisible()
+    const projectOption = screen.getByRole('option', { name: 'Project two' })
     await user.click(projectOption)
 
     expect(onProjectSelected).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-2' }))
+  })
+
+  it('filters new-chat workspaces by name and path', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatComposer
+        {...props}
+        canAddProject
+        onAddProject={async (): Promise<void> => undefined}
+        onProjectSelected={() => undefined}
+        projects={[
+          { id: 'project-1', name: 'Frontend', rootPath: '/projects/web', isDefault: false },
+          { id: 'project-2', name: 'Backend', rootPath: '/projects/api', isDefault: false }
+        ]}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
+    const search = screen.getByPlaceholderText('Search workspaces')
+    await user.type(search, 'api')
+
+    expect(screen.getByRole('option', { name: 'Backend' })).toBeVisible()
+    expect(screen.queryByRole('option', { name: 'Frontend' })).toBeNull()
+  })
+
+  it('refreshes workspace names when the project menu opens', async () => {
+    const user = userEvent.setup()
+    function RefreshingWorkspaceComposer(): React.JSX.Element {
+      const [projects, setProjects] = React.useState([
+        { id: 'project-1', name: 'Old workspace name', rootPath: '/projects/one', isDefault: true },
+        { id: 'project-2', name: 'Archived workspace', rootPath: '/projects/two', isDefault: false }
+      ])
+
+      return (
+        <ChatComposer
+          {...props}
+          canAddProject
+          onAddProject={async (): Promise<void> => undefined}
+          onProjectSelected={() => undefined}
+          onProjectsRefresh={async () =>
+            setProjects([
+              {
+                id: 'project-1',
+                name: 'Renamed default workspace',
+                rootPath: '/projects/one',
+                isDefault: true
+              }
+            ])
+          }
+          projects={projects}
+        />
+      )
+    }
+
+    render(<RefreshingWorkspaceComposer />)
+
+    await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
+
+    expect(await screen.findByRole('option', { name: 'Renamed default workspace' })).toBeVisible()
+    expect(screen.queryByRole('option', { name: 'Old workspace name' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'Archived workspace' })).toBeNull()
+  })
+
+  it('keeps the workspace menu usable when refreshing its list fails', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatComposer
+        {...props}
+        canAddProject
+        onAddProject={async (): Promise<void> => undefined}
+        onProjectSelected={() => undefined}
+        onProjectsRefresh={async () => {
+          throw new Error('Workspace refresh unavailable')
+        }}
+        projects={[
+          {
+            id: 'project-1',
+            name: 'Existing workspace',
+            rootPath: '/projects/one',
+            isDefault: true
+          }
+        ]}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
+
+    expect(screen.getByRole('option', { name: 'Existing workspace' })).toBeVisible()
   })
 
   it('explains that a workspace is locked after a conversation starts', async () => {

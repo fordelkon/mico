@@ -33,6 +33,7 @@ function createWorkspace(): ChatWorkspace {
     pendingProject: null,
     activeProject: null,
     projects: [],
+    refreshProjects: vi.fn(),
     addProjectToNewChat: vi.fn(),
     selectProjectForNewChat: vi.fn(),
     setThinkingEffort: vi.fn(),

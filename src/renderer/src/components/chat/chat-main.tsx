@@ -58,6 +58,7 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
       mode={composerMode}
       onAddProject={workspace.addProjectToNewChat}
       onProjectSelected={workspace.selectProjectForNewChat}
+      onProjectsRefresh={workspace.refreshProjects}
       projectId={workspace.activeProject?.id ?? null}
       onModelSelected={refreshCapabilities}
       selectedModelEntryId={

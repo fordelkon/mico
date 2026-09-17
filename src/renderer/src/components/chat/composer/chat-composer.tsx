@@ -24,6 +24,7 @@ type ChatComposerProps = {
   onModelSelected: () => Promise<void>
   onAddProject?: () => Promise<void>
   onProjectSelected?: (project: WorkspaceProject) => void
+  onProjectsRefresh?: () => Promise<void>
   projectId?: string | null
   projectLabel?: string | null
   projectPath?: string | null
@@ -50,6 +51,7 @@ function ChatComposer({
   onModelSelected,
   onAddProject,
   onProjectSelected,
+  onProjectsRefresh,
   projectId,
   projectLabel,
   projectPath,
@@ -242,6 +244,7 @@ function ChatComposer({
               canAddProject={canAddProject}
               onAddProject={onAddProject}
               onProjectSelected={onProjectSelected}
+              onProjectsRefresh={onProjectsRefresh}
               projectId={projectId}
               projectLabel={projectLabel}
               projectPath={projectPath}

@@ -40,6 +40,7 @@ type ChatWorkspace = {
   pendingProject: WorkspaceProject | null
   activeProject: WorkspaceProject | null
   projects: WorkspaceProject[]
+  refreshProjects: () => Promise<void>
   addProjectToNewChat: () => Promise<void>
   selectProjectForNewChat: (project: WorkspaceProject) => void
   setSessionModelEntry: (modelEntryId: string) => Promise<void>
@@ -91,6 +92,15 @@ function isResponding(response: ActiveChatResponse): boolean {
   )
 }
 
+function resolvePendingProject(
+  projects: WorkspaceProject[],
+  selectedProjectId: string | null
+): WorkspaceProject | null {
+  return selectedProjectId
+    ? (projects.find(({ id }) => id === selectedProjectId) ?? null)
+    : (projects.find(({ isDefault }) => isDefault) ?? null)
+}
+
 function useChatWorkspaceState(): ChatWorkspace {
   // Keep sessions alive across selection changes so background responses can continue.
   const sessionsRef = React.useRef(new Map<string, ChatSession>())
@@ -105,7 +115,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     React.useState<ModelReasoningCapabilities | null>(null)
   const [thinkingEffort, setThinkingEffortState] = React.useState<ThinkingSelection>('default')
   const [selectedModelEntryId, setSelectedModelEntryId] = React.useState<string | null>(null)
-  const [pendingProject, setPendingProject] = React.useState<WorkspaceProject | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(null)
   const [projects, setProjects] = React.useState<WorkspaceProject[]>([])
   const [thinkingEffortStore] = React.useState(() => new ThinkingEffortStore())
   const getThinkingEffort = React.useCallback(
@@ -116,6 +126,11 @@ function useChatWorkspaceState(): ChatWorkspace {
   const responseRef = React.useRef<Map<string, ActiveChatResponse>>(new Map())
   const isCreatingSessionRef = React.useRef(false)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
+
+  const refreshProjects = React.useCallback(async (): Promise<void> => {
+    const loadedProjects = await window.api.workspaces.list()
+    setProjects(loadedProjects)
+  }, [])
 
   React.useEffect(() => {
     void window.api.workspaces.list().then(setProjects, () => undefined)
@@ -294,7 +309,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   const startNewChat = React.useCallback((): void => {
     setActiveSession(null)
     setSelectedModelEntryId(null)
-    setPendingProject(null)
+    setSelectedProjectId(null)
     // A new token requests focus without coupling the workspace to the textarea ref.
     setComposerFocusKey((key) => key + 1)
   }, [])
@@ -303,7 +318,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     if (activeSession) return
     const project = await window.api.workspaces.addFromDialog()
     if (!project) return
-    setPendingProject(project)
+    setSelectedProjectId(project.id)
     setProjects((current) => {
       const previous = current.find(({ id }) => id === project.id)
       return previous
@@ -314,7 +329,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const selectProjectForNewChat = React.useCallback(
     (project: WorkspaceProject): void => {
-      if (!activeSession) setPendingProject(project)
+      if (!activeSession) setSelectedProjectId(project.id)
     },
     [activeSession]
   )
@@ -461,6 +476,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       if (isCreatingSessionRef.current) return false
 
       isCreatingSessionRef.current = true
+      const pendingProject = resolvePendingProject(projects, selectedProjectId)
       const createInput = pendingProject
         ? { title: 'New chat', projectId: pendingProject.id }
         : { title: 'New chat' }
@@ -474,7 +490,7 @@ function useChatWorkspaceState(): ChatWorkspace {
           chat: session.chat,
           project: session.project
         })
-        setPendingProject(null)
+        setSelectedProjectId(null)
         setResponseState({ status: 'submitted', conversationId: conversation.id })
         setPendingMessage({ parts, session })
         return true
@@ -482,7 +498,7 @@ function useChatWorkspaceState(): ChatWorkspace {
         isCreatingSessionRef.current = false
       }
     },
-    [activeSession, createSession, pendingProject, setResponseState]
+    [activeSession, createSession, projects, selectedProjectId, setResponseState]
   )
 
   const stopResponse = React.useCallback((): void => {
@@ -556,6 +572,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     [activeSession, conversations]
   )
   const activeChat = activeSession?.chat ?? null
+  const pendingProject = resolvePendingProject(projects, selectedProjectId)
   const activeProject = activeSession?.project ?? pendingProject
   const response = activeSession
     ? (responses.get(activeSession.conversationId) ?? IDLE_CHAT_RESPONSE)
@@ -573,6 +590,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       pendingProject,
       activeProject,
       projects,
+      refreshProjects,
       addProjectToNewChat,
       selectProjectForNewChat,
       setSessionModelEntry,
@@ -608,6 +626,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       thinkingEffort,
       pendingProject,
       projects,
+      refreshProjects,
       selectedModelEntryId,
       selectProjectForNewChat
     ]

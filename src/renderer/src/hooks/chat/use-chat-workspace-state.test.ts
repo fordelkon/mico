@@ -3,6 +3,7 @@ import { useChat } from '@ai-sdk/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import { useChatWorkspaceState } from './use-chat-workspace-state'
@@ -25,6 +26,7 @@ class FakeChatAPI implements ChatAPI {
     rootPath: '/projects/one',
     isDefault: false
   }))
+  workspaceProjects: WorkspaceProject[] = []
   readonly sessions: SessionsAPI = {
     create: (input) => this.createSession(input),
     delete: async (): Promise<void> => {},
@@ -94,7 +96,7 @@ function exposeApi(chat: FakeChatAPI): void {
       workspaces: {
         addFromDialog: () => chat.addProjectFromDialog(),
         archive: async (): Promise<void> => {},
-        list: async () => [],
+        list: async () => chat.workspaceProjects,
         rename: async () => ({
           id: 'project-1',
           name: 'Project one',
@@ -121,6 +123,34 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('selects the default workspace for a new chat and persists that selection', async () => {
+    const api = new FakeChatAPI()
+    api.workspaceProjects = [
+      {
+        id: 'project-1',
+        name: 'Archived never shown',
+        rootPath: '/projects/one',
+        isDefault: false
+      },
+      { id: 'project-2', name: 'Default workspace', rootPath: '/projects/two', isDefault: true }
+    ]
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() =>
+      expect(result.current.activeProject).toMatchObject({
+        id: 'project-2',
+        name: 'Default workspace'
+      })
+    )
+
+    await act(async () => {
+      expect(await result.current.sendMessage({ text: 'Hello', documents: [] })).toBe(true)
+    })
+
+    expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat', projectId: 'project-2' })
+  })
+
   it('reports whether a turn was accepted and declines another turn while responding', async () => {
     const api = new FakeChatAPI()
     exposeApi(api)
@@ -369,8 +399,18 @@ describe('useChatWorkspaceState', () => {
 
   it('binds a project selected in an empty composer only when its first message is sent', async () => {
     const api = new FakeChatAPI()
+    api.workspaceProjects = [
+      {
+        id: 'project-default',
+        name: 'Default workspace',
+        rootPath: '/projects/default',
+        isDefault: true
+      }
+    ]
     exposeApi(api)
     const { result } = renderHook(() => useChatWorkspaceState())
+
+    await waitFor(() => expect(result.current.activeProject?.id).toBe('project-default'))
 
     await act(async () => result.current.addProjectToNewChat())
     expect(result.current.pendingProject).toMatchObject({ id: 'project-1', name: 'Project one' })
@@ -382,7 +422,7 @@ describe('useChatWorkspaceState', () => {
 
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat', projectId: 'project-1' })
-    expect(result.current.pendingProject).toBeNull()
+    expect(result.current.pendingProject).toMatchObject({ id: 'project-default' })
     expect(result.current.activeProject).toMatchObject({
       id: 'project-1',
       name: 'Project one',
