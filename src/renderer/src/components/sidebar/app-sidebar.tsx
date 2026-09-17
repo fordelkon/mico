@@ -83,6 +83,7 @@ function AppSidebar({
   const { preference, setPreference } = useAppearance()
   const collapsed = state === 'collapsed'
   const [searchOpen, setSearchOpen] = React.useState(false)
+  const [commandKeyPressed, setCommandKeyPressed] = React.useState(false)
   const settingsHighlight = useGlidingHighlight<HTMLLIElement>()
   const conversationHighlight = useGlidingHighlight<HTMLLIElement>()
 
@@ -100,6 +101,33 @@ function AppSidebar({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onNewChat])
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.metaKey) setCommandKeyPressed(true)
+
+      if (!event.metaKey || !/^[1-9]$/.test(event.key)) return
+
+      const conversation = conversations[Number(event.key) - 1]
+      if (!conversation) return
+
+      event.preventDefault()
+      onSelectConversation(conversation.id)
+    }
+    const handleKeyUp = (event: KeyboardEvent): void => {
+      if (event.key === 'Meta' || !event.metaKey) setCommandKeyPressed(false)
+    }
+    const handleWindowBlur = (): void => setCommandKeyPressed(false)
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', handleWindowBlur)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', handleWindowBlur)
+    }
+  }, [conversations, onSelectConversation])
 
   return (
     <>
@@ -178,6 +206,7 @@ function AppSidebar({
                     key={conversation.id}
                     conversation={conversation}
                     isResponding={respondingConversationIds.has(conversation.id)}
+                    shortcutNumber={commandKeyPressed && index < 9 ? index + 1 : undefined}
                     selected={conversation.id === activeConversationId}
                     onDeleteConversation={onDeleteConversation}
                     onRenameConversation={onRenameConversation}

@@ -322,6 +322,30 @@ describe('ChatComposer', () => {
     }
   })
 
+  it('focuses the draft when typing outside an editable control', () => {
+    render(
+      <>
+        <button type="button">Conversation action</button>
+        <ChatComposer {...props} />
+      </>
+    )
+
+    const textarea = screen.getByRole('textbox')
+    screen.getByRole('button', { name: 'Conversation action' }).focus()
+
+    fireEvent.keyDown(window, { key: 'h' })
+
+    expect(textarea).toHaveFocus()
+  })
+
+  it('does not focus the draft for a non-text key', () => {
+    render(<ChatComposer {...props} />)
+
+    fireEvent.keyDown(window, { key: 'ArrowDown' })
+
+    expect(screen.getByRole('textbox')).not.toHaveFocus()
+  })
+
   it('restores a sent draft to its single-line height', async () => {
     const user = userEvent.setup()
     render(<ComposerHarness />)

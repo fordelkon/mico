@@ -99,6 +99,33 @@ function ChatComposer({
     return () => window.clearInterval(interval)
   }, [showRotatingPlaceholder])
 
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target
+      const isEditableTarget =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
+
+      if (
+        mode !== 'send' ||
+        isSending ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.key.length !== 1 ||
+        isEditableTarget
+      )
+        return
+
+      textareaRef.current?.focus()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isSending, mode])
+
   // Restore typing readiness after a conversation becomes available for input.
   React.useEffect(() => {
     const isInitialMount = !mountedRef.current
@@ -179,14 +206,14 @@ function ChatComposer({
           {showRotatingPlaceholder ? (
             <span
               aria-hidden="true"
-              className="chat-composer__suggestion pointer-events-none absolute left-2 top-2.5 max-w-[calc(100%-1rem)] truncate text-[15px] leading-6 text-muted-foreground/80"
+              className="chat-composer__suggestion pointer-events-none absolute left-2 top-2.5 max-w-[calc(100%-1rem)] truncate text-[15px] leading-6 text-muted-foreground/80 select-none"
               key={placeholderIndex}
             >
               {rotatingPlaceholders[placeholderIndex]}
             </span>
           ) : null}
         </div>
-        <div className="flex min-h-8 items-center justify-between gap-4 px-0.5">
+        <div className="flex min-h-8 select-none items-center justify-between gap-4 px-0.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <ComposerAttachments
               disabled={mode !== 'send' || isSending}

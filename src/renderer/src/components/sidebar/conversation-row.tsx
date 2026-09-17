@@ -16,6 +16,7 @@ import {
   DropdownMenuSeparator,
   IconMenuButton,
   Input,
+  Kbd,
   SidebarMenuButton,
   SidebarMenuItem,
   Spinner
@@ -38,6 +39,7 @@ type ConversationRowProps = {
   onDeleteConversation: (conversationId: string) => void
   onRenameConversation: (conversationId: string, title: string) => void
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
+  shortcutNumber?: number
   glidingHighlightItemProps?: GlidingHighlightItemProps<HTMLLIElement>
 }
 
@@ -68,6 +70,7 @@ function ConversationRowComponent({
   onDeleteConversation,
   onRenameConversation,
   onSelectConversation,
+  shortcutNumber,
   glidingHighlightItemProps
 }: ConversationRowProps): React.JSX.Element {
   const [editing, setEditing] = React.useState(false)
@@ -215,9 +218,12 @@ function ConversationRowComponent({
               <span className="conversation-row__title-viewport" ref={titleViewportRef}>
                 <span className="conversation-row__title">{conversation.title}</span>
               </span>
+              {shortcutNumber !== undefined && (
+                <Kbd className="conversation-row__shortcut">⌘ {shortcutNumber}</Kbd>
+              )}
             </SidebarMenuButton>
           )}
-          {!editing && !deleting && (
+          {!editing && !deleting && shortcutNumber === undefined && (
             <div
               className="conversation-row__actions"
               onClick={(event) => event.stopPropagation()}
@@ -244,7 +250,9 @@ function ConversationRowComponent({
               </IconMenuButton>
             </div>
           )}
-          {!editing && !deleting && isResponding && <ConversationRowStatus />}
+          {!editing && !deleting && shortcutNumber === undefined && isResponding && (
+            <ConversationRowStatus />
+          )}
           <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>

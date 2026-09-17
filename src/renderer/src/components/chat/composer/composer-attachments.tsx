@@ -126,11 +126,15 @@ function ComposerAttachments({
           >
             <PlusIcon
               aria-hidden="true"
-              className={`transition-transform motion-reduce:transition-none${open ? ' rotate-45' : ''}`}
+              className={`transition-transform duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none${open ? ' rotate-45' : ''}`}
             />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-fit min-w-36" side="top">
+        <DropdownMenuContent
+          align="start"
+          className="w-fit min-w-36 duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none"
+          side="top"
+        >
           <DropdownMenuItem onSelect={() => void pickDocuments()}>
             <FileTextIcon aria-hidden="true" />
             Attach files
