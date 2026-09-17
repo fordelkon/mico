@@ -59,6 +59,7 @@ function ChatModelSelector({
       contentClassName="w-96"
       searchLabel="Search models"
       searchPlaceholder="Search models"
+      side="top"
       trigger={
         <Button
           className="h-8 gap-1.5 px-2 text-xs"

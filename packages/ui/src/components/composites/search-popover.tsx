@@ -15,6 +15,8 @@ type SearchPopoverRenderContext = {
 type SearchPopoverProps = {
   /** Alignment of the content relative to the trigger. */
   align?: React.ComponentProps<typeof PopoverContent>['align']
+  /** Preferred side of the content relative to the trigger. */
+  side?: React.ComponentProps<typeof PopoverContent>['side']
   /** Renders results for the query; the caller owns filtering and closes after selection. */
   children: (context: SearchPopoverRenderContext) => React.ReactNode
   /** Additional classes for width, height, or other content-specific layout. */
@@ -34,6 +36,7 @@ function SearchPopover({
   contentClassName,
   searchLabel,
   searchPlaceholder,
+  side,
   trigger
 }: SearchPopoverProps): React.JSX.Element {
   const [isOpen, setIsOpen] = React.useState(false)
@@ -55,7 +58,11 @@ function SearchPopover({
   return (
     <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent align={align} className={cn('gap-0 overflow-hidden p-0', contentClassName)}>
+      <PopoverContent
+        align={align}
+        className={cn('gap-0 overflow-hidden p-0', contentClassName)}
+        side={side}
+      >
         <div className="border-b border-border/70 px-3 transition-colors hover:bg-accent/40">
           <div className="flex h-10 items-center gap-2">
             <SearchIcon aria-hidden="true" className="size-4 shrink-0 opacity-50" />
