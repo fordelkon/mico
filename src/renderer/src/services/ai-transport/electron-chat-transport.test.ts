@@ -62,6 +62,65 @@ afterEach(() => {
 })
 
 describe('ElectronChatTransport', () => {
+  it.each(['submit-message', 'regenerate-message'] as const)(
+    'preserves attached documents for %s',
+    async (trigger) => {
+      const api = new FakeChatAPI()
+      const transport = new ElectronChatTransport(api, {
+        sessionId: 'conversation-1',
+        getThinkingEffort: () => 'default'
+      })
+      const stream = await transport.sendMessages({
+        ...sendOptions,
+        trigger,
+        messages: [
+          {
+            id: 'user-1',
+            role: 'user',
+            parts: [
+              { type: 'text', text: 'Review this file.' },
+              {
+                type: 'data-document',
+                data: { type: 'document', name: 'index.ts', text: 'export {}' }
+              }
+            ]
+          }
+        ]
+      })
+
+      expect(api.startedRequests[0]?.userMessage.parts).toEqual([
+        { type: 'text', text: 'Review this file.' },
+        { type: 'document', name: 'index.ts', text: 'export {}' }
+      ])
+      expect(api.startedRequests[0]?.retry).toBe(
+        trigger === 'regenerate-message' ? true : undefined
+      )
+      await stream.cancel()
+    }
+  )
+
+  it('allows a document-only user message', async () => {
+    const api = new FakeChatAPI()
+    const transport = new ElectronChatTransport(api, {
+      sessionId: 'conversation-1',
+      getThinkingEffort: () => 'default'
+    })
+    const stream = await transport.sendMessages({
+      ...sendOptions,
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          parts: [{ type: 'data-document', data: { type: 'document', name: 'empty.ts', text: '' } }]
+        }
+      ]
+    })
+    expect(api.startedRequests[0]?.userMessage.parts).toEqual([
+      { type: 'document', name: 'empty.ts', text: '' }
+    ])
+    await stream.cancel()
+  })
+
   it('takes the selection once when sendMessages starts', async () => {
     const api = new FakeChatAPI()
     let effort: ThinkingSelection = 'low'
