@@ -1,4 +1,7 @@
 :root {
+  --list-highlight-motion-duration: 220ms;
+  --list-highlight-motion-easing: cubic-bezier(0.23, 1, 0.32, 1);
+  --list-highlight-fade-duration: 150ms;
   --chat-canvas: var(--background);
   --chat-composer: var(--surface-primary);
   --chat-border: var(--border-subtle);

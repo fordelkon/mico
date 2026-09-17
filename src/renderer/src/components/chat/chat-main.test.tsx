@@ -30,6 +30,8 @@ function createWorkspace(): ChatWorkspace {
     reasoningCapabilities: null,
     thinkingEffort: 'medium',
     selectedModelEntryId: null,
+    pendingProject: null,
+    addProjectToNewChat: vi.fn(),
     setThinkingEffort: vi.fn(),
     setSessionModelEntry: vi.fn(),
     composerFocusKey: 1,

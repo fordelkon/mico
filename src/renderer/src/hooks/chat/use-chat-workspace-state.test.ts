@@ -19,6 +19,12 @@ class FakeChatAPI implements ChatAPI {
     updatedAt: 1,
     lastActivityAt: 1
   }))
+  readonly addProjectFromDialog = vi.fn(async () => ({
+    id: 'project-1',
+    name: 'Project one',
+    rootPath: '/projects/one',
+    isDefault: false
+  }))
   readonly sessions: SessionsAPI = {
     create: (input) => this.createSession(input),
     delete: async (): Promise<void> => {},
@@ -82,7 +88,27 @@ class FakeChatAPI implements ChatAPI {
 function exposeApi(chat: FakeChatAPI): void {
   Object.defineProperty(window, 'api', {
     configurable: true,
-    value: { chat, sessions: chat.sessions }
+    value: {
+      chat,
+      sessions: chat.sessions,
+      workspaces: {
+        addFromDialog: () => chat.addProjectFromDialog(),
+        archive: async (): Promise<void> => {},
+        list: async () => [],
+        rename: async () => ({
+          id: 'project-1',
+          name: 'Project one',
+          rootPath: '/projects/one',
+          isDefault: false
+        }),
+        setDefault: async () => ({
+          id: 'project-1',
+          name: 'Project one',
+          rootPath: '/projects/one',
+          isDefault: true
+        })
+      }
+    }
   })
 }
 
@@ -201,6 +227,21 @@ describe('useChatWorkspaceState', () => {
     expect(api.createSession).toHaveBeenCalledOnce()
     expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat' })
     expect(api.startedRequests[0]?.sessionId).toBe('session-new')
+  })
+
+  it('binds a project selected in an empty composer only when its first message is sent', async () => {
+    const api = new FakeChatAPI()
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    await act(async () => result.current.addProjectToNewChat())
+    expect(result.current.pendingProject).toMatchObject({ id: 'project-1', name: 'Project one' })
+
+    act(() => result.current.sendMessage('Hello'))
+
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat', projectId: 'project-1' })
+    expect(result.current.pendingProject).toBeNull()
   })
 
   it('tracks concurrent responses independently when starting a new chat', async () => {

@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
@@ -83,6 +83,23 @@ function ThinkingEffortHarness(): React.JSX.Element {
   )
 }
 
+function WorkspaceComposerHarness({
+  canAddProject = false
+}: {
+  canAddProject?: boolean
+}): React.JSX.Element {
+  const [projectLabel, setProjectLabel] = React.useState<string | null>(null)
+
+  return (
+    <ChatComposer
+      {...props}
+      canAddProject={canAddProject}
+      onAddProject={async () => setProjectLabel('Project one')}
+      projectLabel={projectLabel}
+    />
+  )
+}
+
 function ModelSelectionHarness(): React.JSX.Element {
   const [wasRefreshed, setWasRefreshed] = React.useState(false)
 
@@ -106,6 +123,68 @@ describe('ChatComposer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(screen.getByText('A multi-line draft.')).toBeVisible()
+  })
+
+  it('offers workspace selection as an icon control only while starting a new chat', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<WorkspaceComposerHarness />)
+
+    expect(screen.queryByRole('button', { name: 'Choose workspace' })).toBeNull()
+
+    rerender(<WorkspaceComposerHarness canAddProject />)
+
+    await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
+
+    expect(screen.getByLabelText('Workspace: Project one')).toBeVisible()
+  })
+
+  it('rotates suggestions only for an unfocused blank composer in a new chat', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ChatComposer {...props} canAddProject />)
+
+      expect(screen.getByText('Ask Mico to explain a concept…')).toBeVisible()
+
+      await act(() => vi.advanceTimersByTime(4_500))
+
+      expect(screen.getByText('Plan a project step by step…')).toBeVisible()
+
+      fireEvent.focus(screen.getByRole('textbox'))
+
+      expect(screen.queryByText('Plan a project step by step…')).toBeNull()
+      expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'Ask Mico anything…')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the placeholder static when reduced motion is preferred', () => {
+    const originalMatchMedia = window.matchMedia
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (): MediaQueryList => ({
+        matches: true,
+        media: '(prefers-reduced-motion: reduce)',
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => false
+      })
+    })
+
+    try {
+      render(<ChatComposer {...props} canAddProject />)
+
+      expect(screen.queryByText('Ask Mico to explain a concept…')).toBeNull()
+      expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'Ask Mico anything…')
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: originalMatchMedia
+      })
+    }
   })
 
   it('restores a sent draft to its single-line height', async () => {

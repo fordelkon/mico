@@ -53,8 +53,10 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
       : undefined
   const composer = (
     <ChatComposer
+      canAddProject={!workspace.activeConversation}
       focusKey={workspace.composerFocusKey}
       mode={composerMode}
+      onAddProject={workspace.addProjectToNewChat}
       onModelSelected={refreshCapabilities}
       selectedModelEntryId={
         workspace.activeConversation ? workspace.selectedModelEntryId : undefined
@@ -62,6 +64,7 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
       selectSessionModel={workspace.activeConversation ? workspace.setSessionModelEntry : undefined}
       onSend={workspace.sendMessage}
       onStop={workspace.stopResponse}
+      projectLabel={workspace.pendingProject?.name ?? null}
       reasoningCapabilities={
         refreshedCapabilities === undefined
           ? workspace.reasoningCapabilities
