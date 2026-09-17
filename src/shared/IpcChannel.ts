@@ -40,6 +40,19 @@ export enum IpcChannel {
   /** Notifies the renderer that a background title generation completed. */
   Sessions_TitleUpdated = 'sessions:title-updated',
 
+  /** Opens the native directory picker and registers the chosen project. */
+  Workspaces_AddFromDialog = 'workspaces:add-from-dialog',
+  /** Archives a project without invalidating historical session snapshots. */
+  Workspaces_Archive = 'workspaces:archive',
+  /** Returns projects available to new chats. */
+  Workspaces_List = 'workspaces:list',
+  /** Changes a project's display name without changing its path. */
+  Workspaces_Rename = 'workspaces:rename',
+  /** Changes the project used by future new chats. */
+  Workspaces_SetDefault = 'workspaces:set-default',
+  /** Reveals an active workspace directory in the operating system file manager. */
+  Workspaces_Reveal = 'workspaces:reveal',
+
   /** Adds a model entry to the provider library. */
   Providers_AddModel = 'providers:add-model',
   /** Adds a custom provider to the provider library. */

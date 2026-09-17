@@ -47,6 +47,28 @@ async function createService(verbose?: (message: string) => void): Promise<{
 }
 
 describe('SessionRuntimeService', () => {
+  it('preserves the project context captured with a project session', async () => {
+    const { service } = await createService()
+    const session = service.createSession({
+      title: 'Project chat',
+      defaultProfile: profile,
+      projectId: 'project-1',
+      cwd: '/projects/one'
+    })
+
+    expect(service.loadSession(session.id)).toMatchObject({
+      projectId: 'project-1',
+      cwd: '/projects/one'
+    })
+  })
+
+  it('keeps legacy sessions unscoped', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Legacy chat', defaultProfile: profile })
+
+    expect(service.loadSession(session.id)).toMatchObject({ projectId: null, cwd: null })
+  })
+
   it('keeps a manual title when an automatic title arrives later', async () => {
     const { service } = await createService()
     const session = service.createSession({ title: 'New chat', defaultProfile: profile })

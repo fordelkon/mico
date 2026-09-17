@@ -1,9 +1,16 @@
-import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'electron'
+import {
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  type IpcMain,
+  type IpcMainInvokeEvent
+} from 'electron'
 
 import { TurnRequestIdSchema, TurnStartRequestSchema } from '@shared/ipc/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
 import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
-import { SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
+import { ProjectIdSchema, SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
 import { ThinkingSelectionSchema } from '@shared/data/schemas/chat'
 import {
   CustomProviderSchema,
@@ -26,11 +33,14 @@ import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
 import type { ProviderService } from './ai/providers/provider-service'
 import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
+import type { WorkspaceService } from './ai/workspaces/workspace-service'
 
 type IpcMainRegistrar = Pick<IpcMain, 'handle'>
 type IpcDependencies = {
   getWindow: typeof BrowserWindow.fromWebContents
   ipcMain: IpcMainRegistrar
+  openPath: (fullPath: string) => Promise<string>
+  pickDirectory: (window: BrowserWindow) => Promise<string | undefined>
 }
 
 interface IpcServices {
@@ -85,13 +95,29 @@ interface IpcServices {
     SessionRuntimeService,
     'createSession' | 'deleteSession' | 'listSessions' | 'loadSession' | 'renameSession'
   >
+  workspace: Pick<
+    WorkspaceService,
+    | 'addProject'
+    | 'archiveProject'
+    | 'getActiveProjectContext'
+    | 'getDefaultWorkspaceContext'
+    | 'getProjectContext'
+    | 'listProjects'
+    | 'renameProject'
+    | 'setDefaultProject'
+  >
 }
 
 function registerIpc(
-  { turnExecutor, mainWindow, preference, provider, session }: IpcServices,
+  { turnExecutor, mainWindow, preference, provider, session, workspace }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
-    ipcMain
+    ipcMain,
+    openPath: (fullPath) => shell.openPath(fullPath),
+    pickDirectory: async (window) => {
+      const result = await dialog.showOpenDialog(window, { properties: ['openDirectory'] })
+      return result.canceled ? undefined : result.filePaths[0]
+    }
   }
 ): void {
   const destroyedSenderIds = new Set<number>()
@@ -223,10 +249,22 @@ function registerIpc(
   })
   dependencies.ipcMain.handle(IpcChannel.Sessions_Create, (event, input) => {
     getCallingWindow(event)
-    const result = SessionTitleSchema.safeParse(input?.title)
-    if (!result.success) throw new Error('Invalid session title')
+    const title = SessionTitleSchema.safeParse(input?.title)
+    const projectId =
+      input?.projectId === undefined ? undefined : ProjectIdSchema.safeParse(input.projectId)
+    if (!title.success) throw new Error('Invalid session title')
+    if (projectId !== undefined && !projectId.success) throw new Error('Invalid session project')
 
-    return session.createSession({ title: result.data, defaultProfile: null })
+    const context = projectId?.success
+      ? workspace.getActiveProjectContext(projectId.data)
+      : workspace.getDefaultWorkspaceContext()
+
+    return session.createSession({
+      title: title.data,
+      defaultProfile: null,
+      projectId: context.projectId,
+      cwd: context.rootPath
+    })
   })
   dependencies.ipcMain.handle(IpcChannel.Sessions_Delete, (event, input) => {
     getCallingWindow(event)
@@ -264,6 +302,44 @@ function registerIpc(
     const modelEntryId = ModelEntryIdSchema.safeParse(input?.modelEntryId)
     if (!sessionId.success || !modelEntryId.success) throw new Error('Invalid session model')
     turnExecutor.updateSessionModelEntry(sessionId.data, modelEntryId.data)
+  })
+
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_List, (event) => {
+    getCallingWindow(event)
+    return workspace.listProjects()
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_AddFromDialog, async (event) => {
+    const window = getCallingWindow(event)
+    const directoryPath = await dependencies.pickDirectory(window)
+    return directoryPath ? workspace.addProject(directoryPath) : undefined
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_SetDefault, (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input)
+    if (!projectId.success) throw new Error('Invalid workspace project ID')
+    return workspace.setDefaultProject(projectId.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_Rename, (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input?.projectId)
+    const name = SessionTitleSchema.safeParse(input?.name)
+    if (!projectId.success || !name.success) throw new Error('Invalid workspace project rename')
+    return workspace.renameProject(projectId.data, name.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_Reveal, async (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input)
+    if (!projectId.success) throw new Error('Invalid workspace project ID')
+    const error = await dependencies.openPath(
+      workspace.getActiveProjectContext(projectId.data).rootPath
+    )
+    if (error) throw new Error('Unable to open workspace folder')
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_Archive, (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input)
+    if (!projectId.success) throw new Error('Invalid workspace project ID')
+    return workspace.archiveProject(projectId.data)
   })
 
   dependencies.ipcMain.handle(IpcChannel.Providers_GetLibrary, (event) => {

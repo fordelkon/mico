@@ -1,5 +1,5 @@
 type SessionMigration = {
-  id: '0001_runtime_log'
+  id: '0001_runtime_log' | '0002_session_project' | '0003_session_cwd'
   sql: string
 }
 
@@ -66,6 +66,19 @@ const sessionMigrations: readonly SessionMigration[] = [
       CREATE UNIQUE INDEX runtime_events_run_request_id
       ON runtime_events(session_id, json_extract(payload_json, '$.requestId'))
       WHERE kind = 'run_started';
+    `
+  },
+  {
+    id: '0002_session_project',
+    sql: `
+      ALTER TABLE sessions ADD COLUMN project_id TEXT;
+      CREATE INDEX sessions_project_id ON sessions(project_id);
+    `
+  },
+  {
+    id: '0003_session_cwd',
+    sql: `
+      ALTER TABLE sessions ADD COLUMN cwd TEXT;
     `
   }
 ]

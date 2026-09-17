@@ -14,6 +14,8 @@ type ExecutionProfileSnapshot = {
 type SessionSummary = {
   id: string
   title: string
+  projectId: string | null
+  cwd: string | null
   defaultProfile: ExecutionProfileSnapshot | null
   createdAt: number
   updatedAt: number
@@ -79,22 +81,39 @@ class SessionRuntimeService {
 
   createSession({
     title,
-    defaultProfile
+    defaultProfile,
+    projectId = null,
+    cwd = null
   }: {
     title: string
     defaultProfile: ExecutionProfileSnapshot | null
+    projectId?: string | null
+    cwd?: string | null
   }): SessionSummary {
+    if ((projectId === null) !== (cwd === null))
+      throw new Error('Project sessions require a current working directory.')
     const id = this.dependencies.createId()
     const now = this.dependencies.now()
     this.dependencies.database.connection
       .prepare(
-        `INSERT INTO sessions (id, title, default_execution_profile_json, created_at, updated_at, last_activity_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (id, title, project_id, cwd, default_execution_profile_json, created_at, updated_at, last_activity_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, title, defaultProfile ? canonicalJson(defaultProfile) : null, now, now, now)
+      .run(
+        id,
+        title,
+        projectId,
+        cwd,
+        defaultProfile ? canonicalJson(defaultProfile) : null,
+        now,
+        now,
+        now
+      )
     return {
       id,
       title,
+      projectId,
+      cwd,
       defaultProfile,
       createdAt: now,
       updatedAt: now,
@@ -642,6 +661,8 @@ class SessionRuntimeService {
 type SessionRow = {
   id: string
   title: string
+  project_id: string | null
+  cwd: string | null
   default_execution_profile_json: string | null
   created_at: number
   updated_at: number
@@ -659,6 +680,8 @@ function toSessionSummary(row: SessionRow): SessionSummary {
   return {
     id: row.id,
     title: row.title,
+    projectId: row.project_id,
+    cwd: row.cwd,
     defaultProfile: row.default_execution_profile_json
       ? (JSON.parse(row.default_execution_profile_json) as ExecutionProfileSnapshot)
       : null,

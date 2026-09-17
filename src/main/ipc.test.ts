@@ -62,17 +62,44 @@ function createHarness() {
     loadSession: vi.fn(),
     renameSession: vi.fn()
   }
+  const workspace = {
+    addProject: vi.fn(),
+    archiveProject: vi.fn(),
+    getActiveProjectContext: vi.fn(),
+    getDefaultWorkspaceContext: vi.fn(() => ({
+      kind: 'project' as const,
+      projectId: 'default',
+      rootPath: '/workspaces/default'
+    })),
+    getProjectContext: vi.fn(),
+    listProjects: vi.fn(),
+    renameProject: vi.fn(),
+    setDefaultProject: vi.fn()
+  }
+  const openPath = vi.fn().mockResolvedValue('')
 
   registerIpc(
-    { mainWindow, preference, turnExecutor, provider, session },
+    { mainWindow, preference, turnExecutor, provider, session, workspace },
     {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
-      getWindow: () => window
+      getWindow: () => window,
+      openPath,
+      pickDirectory: async () => undefined
     }
   )
 
-  return { turnExecutor, handlers, mainWindow, preference, provider, session, window }
+  return {
+    turnExecutor,
+    handlers,
+    mainWindow,
+    preference,
+    provider,
+    session,
+    openPath,
+    window,
+    workspace
+  }
 }
 
 function createEvent({
@@ -317,6 +344,27 @@ describe('registerIpc session profile handlers', () => {
 })
 
 describe('registerIpc session handlers', () => {
+  it('captures the selected project root when creating a session', () => {
+    const { handlers, session, workspace } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    workspace.getActiveProjectContext.mockReturnValue({
+      kind: 'project',
+      projectId: 'project-1',
+      rootPath: '/projects/one'
+    })
+
+    handlers.get(IpcChannel.Sessions_Create)?.(event, {
+      title: 'Project chat',
+      projectId: 'project-1'
+    })
+
+    expect(session.createSession).toHaveBeenCalledWith({
+      title: 'Project chat',
+      defaultProfile: null,
+      projectId: 'project-1',
+      cwd: '/projects/one'
+    })
+  })
   it('returns session summaries only to a trusted renderer', () => {
     const { handlers, mainWindow, session } = createHarness()
     const trusted = createEvent({ id: 42 })
@@ -367,7 +415,9 @@ describe('registerIpc session handlers', () => {
     ).toEqual(summary)
     expect(session.createSession).toHaveBeenCalledWith({
       title: 'Saved chat',
-      defaultProfile: null
+      defaultProfile: null,
+      projectId: 'default',
+      cwd: '/workspaces/default'
     })
     expect(session.loadSession).toHaveBeenCalledWith('session-1')
     expect(session.deleteSession).toHaveBeenCalledWith('session-1')
@@ -392,6 +442,68 @@ describe('registerIpc session handlers', () => {
     expect(session.loadSession).not.toHaveBeenCalled()
     expect(session.deleteSession).not.toHaveBeenCalled()
     expect(session.renameSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('registerIpc workspace handlers', () => {
+  it('opens only the active workspace directory for a trusted renderer', async () => {
+    const { handlers, openPath, workspace } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    workspace.getActiveProjectContext.mockReturnValue({
+      kind: 'project',
+      projectId: 'project-1',
+      rootPath: '/projects/one'
+    })
+
+    await expect(
+      handlers.get(IpcChannel.Workspaces_Reveal)?.(event, 'project-1')
+    ).resolves.toBeUndefined()
+
+    expect(workspace.getActiveProjectContext).toHaveBeenCalledWith('project-1')
+    expect(openPath).toHaveBeenCalledWith('/projects/one')
+  })
+
+  it('lists projects for a trusted renderer', () => {
+    const { handlers, workspace } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const project = { id: 'project-1', name: 'One', rootPath: '/projects/one', isDefault: false }
+    workspace.listProjects.mockReturnValue([project])
+
+    expect(handlers.get(IpcChannel.Workspaces_List)?.(event)).toEqual([project])
+  })
+
+  it('sets a validated project as the default for a trusted renderer', async () => {
+    const { handlers, workspace } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const project = { id: 'project-1', name: 'One', rootPath: '/projects/one', isDefault: false }
+    workspace.setDefaultProject.mockResolvedValue({ ...project, isDefault: true })
+
+    await expect(
+      handlers.get(IpcChannel.Workspaces_SetDefault)?.(event, 'project-1')
+    ).resolves.toEqual({ ...project, isDefault: true })
+  })
+
+  it('renames a validated project for a trusted renderer', async () => {
+    const { handlers, workspace } = createHarness()
+    const { event } = createEvent({ id: 42 })
+    const project = { id: 'project-1', name: 'One', rootPath: '/projects/one', isDefault: false }
+    workspace.renameProject.mockResolvedValue(project)
+
+    await expect(
+      handlers.get(IpcChannel.Workspaces_Rename)?.(event, {
+        projectId: 'project-1',
+        name: 'Renamed'
+      })
+    ).resolves.toEqual(project)
+  })
+
+  it('rejects an invalid project ID before archiving for a trusted renderer', () => {
+    const { handlers } = createHarness()
+    const { event } = createEvent({ id: 42 })
+
+    expect(() => handlers.get(IpcChannel.Workspaces_Archive)?.(event, '')).toThrow(
+      'Invalid workspace project ID'
+    )
   })
 })
 

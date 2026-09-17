@@ -52,6 +52,7 @@ class SessionDatabase {
       sqlite.pragma('synchronous = NORMAL')
       sqlite.pragma('foreign_keys = ON')
       sqlite.pragma('busy_timeout = 5000')
+      // This table records the schema changes already applied to the session event store.
       sqlite.exec(`
         CREATE TABLE IF NOT EXISTS session_schema_migrations (
           id TEXT PRIMARY KEY NOT NULL,
