@@ -14,6 +14,9 @@ export enum IpcChannel {
   /** Notifies the renderer that the complete resolved theme state changed. */
   Appearance_ThemeChanged = 'appearance:theme-changed',
 
+  /** Opens the native picker for supported code and text documents. */
+  Attachments_PickCodeDocuments = 'attachments:pick-code-documents',
+
   /** Cancels a turn owned by the invoking renderer. */
   Chat_AbortTurn = 'chat:abort-turn',
   /** Streams a turn lifecycle event to its owning renderer. */

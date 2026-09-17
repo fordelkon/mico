@@ -1,6 +1,7 @@
 import { ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
+import type { AttachmentsAPI } from '@shared/ipc/schemas/attachments'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
@@ -85,6 +86,10 @@ const appearance: AppearanceAPI = {
     ipcRenderer.invoke(IpcChannel.Appearance_SetThemePreferences, preferences)
 }
 
+const attachments: AttachmentsAPI = {
+  pickCodeDocuments: () => ipcRenderer.invoke(IpcChannel.Attachments_PickCodeDocuments)
+}
+
 const chat: ChatAPI = {
   abortTurn: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_AbortTurn, requestId),
   getCapabilities: () => ipcRenderer.invoke(IpcChannel.Chat_GetCapabilities),
@@ -154,7 +159,7 @@ const workspaces: WorkspacesAPI = {
   setDefault: (projectId) => ipcRenderer.invoke(IpcChannel.Workspaces_SetDefault, projectId)
 }
 
-const api = { appearance, chat, providers, sessions, windowControls, workspaces }
+const api = { appearance, attachments, chat, providers, sessions, windowControls, workspaces }
 
 export { api, type WindowApiType }
 

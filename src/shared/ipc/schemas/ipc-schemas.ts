@@ -1,4 +1,5 @@
 import type { RouteDef } from '../define'
+import { attachmentsRequestSchemas } from './attachments'
 import { appearanceRequestSchemas } from './appearance'
 import { chatIpcSchemas } from './chat'
 import { providersRequestSchemas } from './providers'
@@ -7,6 +8,7 @@ import { windowControlsRequestSchemas } from './window-controls'
 import { workspacesRequestSchemas } from './workspaces'
 
 const ipcRequestSchemas = {
+  ...attachmentsRequestSchemas,
   ...appearanceRequestSchemas,
   ...chatIpcSchemas,
   ...providersRequestSchemas,
