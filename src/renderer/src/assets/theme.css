@@ -2,6 +2,8 @@
   --list-highlight-motion-duration: 220ms;
   --list-highlight-motion-easing: cubic-bezier(0.23, 1, 0.32, 1);
   --list-highlight-fade-duration: 150ms;
+  --scrollbar-thumb: color-mix(in oklab, var(--foreground) 30%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--foreground) 46%, transparent);
   --chat-canvas: var(--background);
   --chat-composer: var(--surface-primary);
   --chat-border: var(--border-subtle);
@@ -93,6 +95,27 @@
   );
   --window-traffic-light-inactive-highlight: rgb(255 255 255 / 20%);
   --window-traffic-light-inactive-shadow: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+/* Keep native scrollbar tracks attached to the content surface instead of painting a separate rail. */
+:where(*) {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+:where(*)::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+:where(*)::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background-clip: padding-box;
+  background-color: var(--scrollbar-thumb);
+}
+
+:where(*):hover::-webkit-scrollbar-thumb,
+:where(*):focus-within::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 .dark {
