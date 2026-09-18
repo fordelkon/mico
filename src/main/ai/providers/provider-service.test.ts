@@ -39,14 +39,36 @@ async function createPersistentService(userDataPath: string) {
 }
 
 describe('ProviderService', () => {
-  it('seeds the two local providers disabled in an empty SQLite library', async () => {
+  it('resolves an enabled model entry without consulting the global selected model', async () => {
+    const service = await createService()
+    await service.saveConfiguration({
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      enabled: true
+    })
+    const first = await service.importModel({
+      provider: 'ollama',
+      modelId: 'first-model',
+      displayName: 'First model'
+    })
+    const second = await service.importModel({
+      provider: 'ollama',
+      modelId: 'second-model',
+      displayName: 'Second model'
+    })
+    await service.selectModel(first.id)
+
+    expect(service.getChatConfigurationForModelEntry(second.id)).toMatchObject({
+      provider: 'ollama',
+      modelId: 'second-model'
+    })
+  })
+
+  it('seeds only Ollama as a disabled built-in provider in an empty SQLite library', async () => {
     const service = await createService()
 
     expect(service.getLibrary()).toEqual({
-      configurations: [
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: false },
-        { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: false }
-      ],
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: false }],
       customProviders: [],
       enabledProviderIds: [],
       models: [],
@@ -79,7 +101,7 @@ describe('ProviderService', () => {
 
   it('replaces the persisted library with one snapshot', async () => {
     const service = await createService()
-    await service.addModel({ provider: 'lm-studio', modelId: 'stale-model' })
+    await service.addModel({ provider: 'ollama', modelId: 'stale-model' })
 
     await service.saveLibrary({
       configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
@@ -149,16 +171,11 @@ describe('ProviderService', () => {
         baseUrl: 'http://localhost:11434',
         enabled: true
       })
-      await initial.service.saveConfiguration({
-        provider: 'lm-studio',
-        baseUrl: 'http://localhost:1234',
-        enabled: true
-      })
       await initial.service.addModel({ provider: 'ollama', modelId: 'llama3.2' })
       await initial.service.setModelEnabled({ enabled: false, modelId: 'entry-1' })
 
       expect(initial.service.getLibrary()).toMatchObject({
-        enabledProviderIds: ['ollama', 'lm-studio']
+        enabledProviderIds: ['ollama']
       })
 
       initial.close()
@@ -166,7 +183,7 @@ describe('ProviderService', () => {
       restarted = await createPersistentService(userDataPath)
 
       expect(restarted.service.getLibrary()).toMatchObject({
-        enabledProviderIds: ['ollama', 'lm-studio']
+        enabledProviderIds: ['ollama']
       })
     } finally {
       initial?.close()

@@ -146,6 +146,25 @@ describe('ChatMessageList', () => {
     )
   })
 
+  it('does not show a pending thinking state when the current effort is off', () => {
+    const userMessage = {
+      id: 'user-1',
+      role: 'user' as const,
+      parts: [{ type: 'text' as const, text: 'What should I work on next?' }]
+    }
+
+    render(
+      <ChatMessageList
+        conversationId="conversation-1"
+        isResponding
+        isThinkingEnabled={false}
+        messages={[userMessage]}
+      />
+    )
+
+    expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull()
+  })
+
   it('shows a provider error as an alert', () => {
     render(
       <ChatMessageList

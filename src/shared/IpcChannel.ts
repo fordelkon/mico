@@ -14,6 +14,9 @@ export enum IpcChannel {
   /** Notifies the renderer that the complete resolved theme state changed. */
   Appearance_ThemeChanged = 'appearance:theme-changed',
 
+  /** Opens the native picker for supported code and text documents. */
+  Attachments_PickCodeDocuments = 'attachments:pick-code-documents',
+
   /** Cancels a turn owned by the invoking renderer. */
   Chat_AbortTurn = 'chat:abort-turn',
   /** Streams a turn lifecycle event to its owning renderer. */
@@ -33,8 +36,25 @@ export enum IpcChannel {
   Sessions_Load = 'sessions:load',
   /** Changes a session title. */
   Sessions_Rename = 'sessions:rename',
+  /** Persists the requested thinking effort for a session. */
+  Sessions_SetThinkingEffort = 'sessions:set-thinking-effort',
+  /** Persists the selected model entry for a session without changing the global selection. */
+  Sessions_SetModelEntry = 'sessions:set-model-entry',
   /** Notifies the renderer that a background title generation completed. */
   Sessions_TitleUpdated = 'sessions:title-updated',
+
+  /** Opens the native directory picker and registers the chosen project. */
+  Workspaces_AddFromDialog = 'workspaces:add-from-dialog',
+  /** Archives a project without invalidating historical session snapshots. */
+  Workspaces_Archive = 'workspaces:archive',
+  /** Returns projects available to new chats. */
+  Workspaces_List = 'workspaces:list',
+  /** Changes a project's display name without changing its path. */
+  Workspaces_Rename = 'workspaces:rename',
+  /** Changes the project used by future new chats. */
+  Workspaces_SetDefault = 'workspaces:set-default',
+  /** Reveals an active workspace directory in the operating system file manager. */
+  Workspaces_Reveal = 'workspaces:reveal',
 
   /** Adds a model entry to the provider library. */
   Providers_AddModel = 'providers:add-model',

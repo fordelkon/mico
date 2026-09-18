@@ -8,10 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { ChatModelSelector } from './chat-model-selector'
 
 const library: ProviderLibrary = {
-  configurations: [
-    { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true },
-    { provider: 'lm-studio', baseUrl: 'http://localhost:1234', enabled: false }
-  ],
+  configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
   customProviders: [
     {
       id: 'example-ai',
@@ -41,13 +38,6 @@ const library: ProviderLibrary = {
       enabled: false
     },
     {
-      id: 'lm-studio:hidden',
-      provider: 'lm-studio',
-      modelId: 'hidden',
-      displayName: 'Unavailable LM Studio model',
-      enabled: true
-    },
-    {
       id: 'example-ai:chat',
       provider: 'example-ai',
       modelId: 'example-chat',
@@ -73,7 +63,6 @@ describe('ChatModelSelector', () => {
     expect(screen.getByText('qwen3:8b')).toBeVisible()
     expect(screen.getByText('example-chat')).toBeVisible()
     expect(screen.queryByText('Disabled model')).toBeNull()
-    expect(screen.queryByText('Unavailable LM Studio model')).toBeNull()
   })
 
   it('limits the menu to eligible models matching the search query', async () => {

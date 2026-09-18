@@ -1,10 +1,18 @@
 import { createHash } from 'node:crypto'
 
-import type { ChatProvider, ChatProviderConfiguration } from '@mico/ai-providers'
+import {
+  resolveThinkingSelection,
+  type ChatProvider,
+  type ChatProviderMessage,
+  type ChatProviderConfiguration
+} from '@mico/ai-providers'
+import type { ChatDocumentPart, ChatMessage } from '@shared/data/schemas/chat'
 import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
 
 import { describeChatError } from './chat-error'
 import type { ChatProviderResolver } from './chat-provider-resolver'
+import { ToolAgentRunner } from '../tools/tool-agent-runner'
+import { ToolRegistry } from '../tools/tool-registry'
 import type {
   ExecutionProfileSnapshot,
   SessionRuntimeService
@@ -23,6 +31,8 @@ type ActiveTurn = {
 type SessionTitleUpdate = { sessionId: string; title: string }
 
 type TurnExecutorOptions = {
+  getChatConfigurationForModelEntry?: (modelEntryId: string) => ChatProviderConfiguration | null
+  getSelectedModelEntryId?: () => string | null
   getSelectedChatConfiguration?: () => ChatProviderConfiguration | null
   maxAssistantTextChars?: number
   maxAttempts?: number
@@ -30,11 +40,15 @@ type TurnExecutorOptions = {
   runtime?: Pick<
     SessionRuntimeService,
     | 'finishRun'
+    | 'getDefaultProfile'
     | 'getContextMessages'
+    | 'loadSession'
     | 'markRequestStarted'
+    | 'recordToolTrace'
     | 'renameSessionIfCurrentTitle'
     | 'retryTurn'
     | 'startTurn'
+    | 'updateDefaultProfile'
   >
 }
 
@@ -109,6 +123,8 @@ class TurnExecutor {
       maxAssistantTextChars = DEFAULT_MAX_ASSISTANT_TEXT_CHARS,
       retryDelayMs = DEFAULT_RETRY_DELAY_MS,
       runtime,
+      getChatConfigurationForModelEntry,
+      getSelectedModelEntryId,
       getSelectedChatConfiguration
     }: TurnExecutorOptions = {}
   ) {
@@ -117,14 +133,51 @@ class TurnExecutor {
     this.maxAssistantTextChars = maxAssistantTextChars
     this.retryDelayMs = retryDelayMs
     this.runtime = runtime
+    this.getChatConfigurationForModelEntry = getChatConfigurationForModelEntry
+    this.getSelectedModelEntryId = getSelectedModelEntryId
     this.getSelectedChatConfiguration = getSelectedChatConfiguration
   }
 
   private readonly runtime: TurnExecutorOptions['runtime']
+  private readonly getChatConfigurationForModelEntry: TurnExecutorOptions['getChatConfigurationForModelEntry']
+  private readonly getSelectedModelEntryId: TurnExecutorOptions['getSelectedModelEntryId']
   private readonly getSelectedChatConfiguration: TurnExecutorOptions['getSelectedChatConfiguration']
 
   getModelCapabilities(): ReturnType<ChatProvider['getModelCapabilities']> {
-    return this.resolveProvider()?.getModelCapabilities() ?? Promise.resolve(null)
+    const modelEntryId = this.getSelectedModelEntryId?.()
+    return (
+      this.resolveProvider(modelEntryId ?? undefined)?.getModelCapabilities() ??
+      Promise.resolve(null)
+    )
+  }
+
+  updateSessionThinkingEffort(
+    sessionId: string,
+    thinkingEffort: ExecutionProfileSnapshot['thinkingEffort']
+  ): void {
+    const profile = this.runtime?.getDefaultProfile(sessionId)
+    const configuration = profile?.modelEntryId
+      ? this.getChatConfigurationForModelEntry?.(profile.modelEntryId)
+      : this.getSelectedChatConfiguration?.()
+    if (!configuration || !this.runtime)
+      throw new Error('Select an enabled model in Settings before chatting.')
+    if (!profile?.modelEntryId)
+      throw new Error('Select an enabled model for this session before chatting.')
+    this.runtime.updateDefaultProfile(
+      sessionId,
+      toExecutionProfile(configuration, profile.modelEntryId, thinkingEffort)
+    )
+  }
+
+  updateSessionModelEntry(sessionId: string, modelEntryId: string): void {
+    const configuration = this.getChatConfigurationForModelEntry?.(modelEntryId)
+    if (!configuration || !this.runtime)
+      throw new Error('Select an enabled model in Settings before chatting.')
+    const thinkingEffort = this.runtime.getDefaultProfile(sessionId)?.thinkingEffort ?? 'default'
+    this.runtime.updateDefaultProfile(
+      sessionId,
+      toExecutionProfile(configuration, modelEntryId, thinkingEffort)
+    )
   }
 
   startTurn(
@@ -181,12 +234,29 @@ class TurnExecutor {
   }): Promise<void> {
     let receivedChunk = false
     try {
-      const provider = this.resolveProvider()
-      if (!provider) throw new Error('Select an enabled model in Settings before chatting.')
+      let effectiveThinkingEffort = request.thinkingEffort ?? 'default'
+      let provider: ReturnType<ChatProviderResolver>
 
       if (this.runtime) {
-        const configuration = this.getSelectedChatConfiguration?.()
+        const defaultProfile = this.runtime.getDefaultProfile(request.sessionId)
+        const selectedModelEntryId = this.getSelectedModelEntryId?.()
+        const configuration = defaultProfile
+          ? this.getChatConfigurationForModelEntry?.(defaultProfile.modelEntryId)
+          : this.getSelectedChatConfiguration?.()
         if (!configuration) throw new Error('Select an enabled model in Settings before chatting.')
+        const modelEntryId =
+          defaultProfile?.modelEntryId ?? selectedModelEntryId ?? configuration.modelId
+        provider = this.resolveProvider(modelEntryId)
+        if (!provider) throw new Error('Select an enabled model in Settings before chatting.')
+        const requestedThinkingEffort = request.thinkingEffort ?? 'default'
+        effectiveThinkingEffort = request.retry
+          ? 'default'
+          : await resolveEffectiveThinkingEffort(provider, requestedThinkingEffort)
+        if (!request.retry)
+          this.runtime.updateDefaultProfile(
+            request.sessionId,
+            toExecutionProfile(configuration, modelEntryId, requestedThinkingEffort)
+          )
         const started = request.retry
           ? this.runtime.retryTurn({
               sessionId: request.sessionId,
@@ -197,9 +267,10 @@ class TurnExecutor {
               sessionId: request.sessionId,
               requestId: request.requestId,
               userMessage: request.userMessage,
-              profile: toExecutionProfile(configuration, request.thinkingEffort ?? 'default')
+              profile: toExecutionProfile(configuration, modelEntryId, effectiveThinkingEffort)
             })
         turn.runId = started.runId
+        effectiveThinkingEffort = started.profile.thinkingEffort
         this.runtime.markRequestStarted(started.runId)
         if (started.shouldGenerateTitle) {
           this.startTitleGeneration(
@@ -210,36 +281,45 @@ class TurnExecutor {
             onTitleUpdated
           )
         }
-      }
+      } else provider = this.resolveProvider()
+      if (!provider) throw new Error('Select an enabled model in Settings before chatting.')
 
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
-          const stream = await provider.stream({
+          const cwd = this.runtime?.loadSession(request.sessionId).cwd
+          const runnerInput = {
             conversationKey: `${turn.ownerId}:${request.sessionId}`,
-            messages: turn.runId
+            provider,
+            messages: (turn.runId
               ? (this.runtime?.getContextMessages(turn.runId) ?? [request.userMessage])
-              : [request.userMessage],
-            thinkingEffort: request.thinkingEffort ?? 'default',
-            signal: turn.controller.signal
-          })
-          for await (const chunk of stream) {
-            if (!turn.controller.signal.aborted) {
+              : [request.userMessage]
+            ).map(toProviderMessage),
+            thinkingEffort: effectiveThinkingEffort,
+            signal: turn.controller.signal,
+            emit: (chunk) => {
+              if (turn.controller.signal.aborted) return
               receivedChunk = true
               if (chunk.type === 'text-delta') {
                 // Chunks append in O(delta); the full string is only materialized when read.
                 const visibleDelta = turn.assistantTextBuilder.append(chunk.delta)
-                if (visibleDelta) {
+                if (visibleDelta)
                   emit({
                     type: 'chunk',
                     requestId: request.requestId,
                     chunk: { ...chunk, delta: visibleDelta }
                   })
-                }
-              } else {
-                emit({ type: 'chunk', requestId: request.requestId, chunk })
+                return
               }
+              emit({ type: 'chunk', requestId: request.requestId, chunk })
             }
           }
+          if (cwd) Object.assign(runnerInput, { registry: ToolRegistry.forWorkspace(cwd) })
+          if (turn.runId)
+            Object.assign(runnerInput, {
+              onToolResult: (trace: Parameters<SessionRuntimeService['recordToolTrace']>[1]) =>
+                this.runtime?.recordToolTrace(turn.runId!, trace)
+            })
+          await new ToolAgentRunner().run(runnerInput)
 
           if (!turn.controller.signal.aborted) {
             if (turn.runId) {
@@ -453,10 +533,31 @@ class CappedTextBuilder {
   }
 }
 
+function formatDocument(part: ChatDocumentPart): string {
+  const name = part.name
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+  return `<document name="${name}">\n${part.text}\n</document>`
+}
+
+function toProviderMessage(message: ChatMessage): ChatProviderMessage {
+  return {
+    ...message,
+    // Tool traces are renderer-only persistence projections, never provider conversation context.
+    parts: message.parts
+      .filter((part) => part.type !== 'tool-trace')
+      .map((part) =>
+        part.type === 'document' ? { type: 'text', text: formatDocument(part) } : part
+      )
+  }
+}
+
 function getMessageText(message: TurnStartRequest['userMessage']): string {
   return message.parts
-    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-    .map((part) => part.text)
+    .filter((part) => part.type === 'text' || part.type === 'document')
+    .map((part) => (part.type === 'document' ? formatDocument(part) : part.text))
     .join('\n')
     .trim()
 }
@@ -477,17 +578,30 @@ function normalizeGeneratedTitle(value: string): string | null {
 
 function toExecutionProfile(
   configuration: ChatProviderConfiguration,
+  modelEntryId: string,
   thinkingEffort: ExecutionProfileSnapshot['thinkingEffort']
 ): ExecutionProfileSnapshot {
   const safeConfiguration = { ...configuration }
   if ('apiKey' in safeConfiguration) delete safeConfiguration.apiKey
   return {
+    modelEntryId,
     providerId: configuration.provider,
     modelId: configuration.modelId,
     thinkingEffort,
     configurationDigest: createHash('sha256')
       .update(JSON.stringify(safeConfiguration))
       .digest('hex')
+  }
+}
+
+async function resolveEffectiveThinkingEffort(
+  provider: ChatProvider,
+  requestedThinkingEffort: ExecutionProfileSnapshot['thinkingEffort']
+): Promise<ExecutionProfileSnapshot['thinkingEffort']> {
+  try {
+    return resolveThinkingSelection(requestedThinkingEffort, await provider.getModelCapabilities())
+  } catch {
+    return 'default'
   }
 }
 

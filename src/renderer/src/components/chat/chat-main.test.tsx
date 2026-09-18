@@ -29,7 +29,15 @@ function createWorkspace(): ChatWorkspace {
     respondingConversationIds: new Set(['conversation-1']),
     reasoningCapabilities: null,
     thinkingEffort: 'medium',
+    selectedModelEntryId: null,
+    pendingProject: null,
+    activeProject: null,
+    projects: [],
+    refreshProjects: vi.fn(),
+    addProjectToNewChat: vi.fn(),
+    selectProjectForNewChat: vi.fn(),
     setThinkingEffort: vi.fn(),
+    setSessionModelEntry: vi.fn(),
     composerFocusKey: 1,
     startNewChat: vi.fn(),
     selectConversation: vi.fn(),
@@ -80,15 +88,29 @@ describe('ChatMain', () => {
     expect(screen.getByRole('button', { name: 'Stop response' })).toBeVisible()
   })
 
-  it('persists a model selected from the composer', async () => {
+  it('persists a model selected from the composer on the active session', async () => {
     const user = userEvent.setup()
+    const workspace = createWorkspace()
 
-    render(<ChatMain workspace={createWorkspace()} />)
+    render(<ChatMain workspace={workspace} />)
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: 'Select model' }))
     await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeVisible())
+    await waitFor(() => expect(workspace.setSessionModelEntry).toHaveBeenCalledWith('ollama:qwen3'))
+  })
+
+  it('turns off thinking when a newly selected model has no reasoning capabilities', async () => {
+    const user = userEvent.setup()
+    const workspace = createWorkspace()
+
+    render(<ChatMain workspace={workspace} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Select model' }))
+    await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
+
+    await waitFor(() => expect(workspace.setThinkingEffort).toHaveBeenCalledWith('none'))
   })
 })

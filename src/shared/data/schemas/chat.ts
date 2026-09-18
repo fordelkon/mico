@@ -5,15 +5,26 @@ import type { ProviderMetadata } from 'ai'
 import { defineSchema } from '../define'
 
 type ChatTextPart = { type: 'text'; text: string }
+type ChatDocumentPart = { type: 'document'; name: string; text: string }
 type ChatReasoningPart = {
   type: 'reasoning'
   text: string
   providerMetadata?: ProviderMetadata
 }
+type ChatToolTraceInput = { command?: string; editCount?: number; path?: string }
+type ChatToolTracePartBase = {
+  type: 'tool-trace'
+  toolCallId: string
+  toolName: string
+  input: ChatToolTraceInput
+}
+type ChatToolTracePart =
+  | (ChatToolTracePartBase & { state: 'output-available'; output: string })
+  | (ChatToolTracePartBase & { state: 'output-error'; errorText: string })
 type ChatMessageMetadata = { completionState?: 'complete' | 'stopped' }
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant'
-  parts: Array<ChatTextPart | ChatReasoningPart>
+  parts: Array<ChatTextPart | ChatDocumentPart | ChatReasoningPart | ChatToolTracePart>
   metadata?: ChatMessageMetadata
   providerMetadata?: ProviderMetadata
 }
@@ -32,6 +43,55 @@ const ChatMessageRoleSchema = defineSchema(z.enum(['system', 'user', 'assistant'
 const ChatTextPartSchema = defineSchema(
   z.object({ type: z.literal('text'), text: z.string().trim().min(1) })
 )
+const CodeDocumentExtensions = [
+  '.c',
+  '.cc',
+  '.cpp',
+  '.cs',
+  '.css',
+  '.go',
+  '.h',
+  '.hpp',
+  '.html',
+  '.java',
+  '.js',
+  '.json',
+  '.jsx',
+  '.md',
+  '.py',
+  '.rs',
+  '.sh',
+  '.sql',
+  '.toml',
+  '.ts',
+  '.tsx',
+  '.txt',
+  '.xml',
+  '.yaml',
+  '.yml'
+] as const
+const CodeDocumentMaxNameLength = 200
+const CodeDocumentMaxTextBytes = 256 * 1024
+const CodeDocumentsMaxTextBytes = 1024 * 1024
+const textEncoder = new TextEncoder()
+const ChatDocumentPartSchema: z.ZodType<ChatDocumentPart> = defineSchema(
+  z.object({
+    type: z.literal('document'),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(CodeDocumentMaxNameLength)
+      .refine((name) => CodeDocumentExtensions.some((extension) => name.endsWith(extension)), {
+        message: 'Document name must use a supported code or text extension.'
+      }),
+    text: z
+      .string()
+      .refine((text) => textEncoder.encode(text).byteLength <= CodeDocumentMaxTextBytes, {
+        message: 'Document text must not exceed 256 KiB.'
+      })
+  })
+)
 // Keep the exported schema's declaration on the public `ai` types instead of
 // allowing Zod inference to expose pnpm's private @ai-sdk/provider path.
 const ChatReasoningPartSchema: z.ZodType<ChatReasoningPart> = defineSchema(
@@ -41,9 +101,57 @@ const ChatReasoningPartSchema: z.ZodType<ChatReasoningPart> = defineSchema(
     providerMetadata: z.custom<ProviderMetadata>().optional()
   })
 )
+const ChatToolTraceInputSchema: z.ZodType<ChatToolTraceInput> = defineSchema(
+  z.object({
+    command: z.string().trim().min(1).max(240).optional(),
+    editCount: z.number().int().positive().max(100).optional(),
+    path: z.string().trim().min(1).max(4_096).optional()
+  })
+)
+const ChatToolTracePartSchema: z.ZodType<ChatToolTracePart> = defineSchema(
+  z.union([
+    z.object({
+      type: z.literal('tool-trace'),
+      toolCallId: z.string().trim().min(1).max(200),
+      toolName: z.string().trim().min(1).max(64),
+      input: ChatToolTraceInputSchema,
+      state: z.literal('output-available'),
+      output: z.string().trim().min(1).max(500)
+    }),
+    z.object({
+      type: z.literal('tool-trace'),
+      toolCallId: z.string().trim().min(1).max(200),
+      toolName: z.string().trim().min(1).max(64),
+      input: ChatToolTraceInputSchema,
+      state: z.literal('output-error'),
+      errorText: z.string().trim().min(1).max(500)
+    })
+  ])
+)
+const ChatMessagePartsSchema = defineSchema(
+  z
+    .array(
+      z.union([
+        ChatTextPartSchema,
+        ChatDocumentPartSchema,
+        ChatReasoningPartSchema,
+        ChatToolTracePartSchema
+      ])
+    )
+    .min(1)
+    .refine(
+      (parts) =>
+        parts.reduce(
+          (total, part) =>
+            total + (part.type === 'document' ? textEncoder.encode(part.text).byteLength : 0),
+          0
+        ) <= CodeDocumentsMaxTextBytes,
+      { message: 'Attached documents must not exceed 1 MiB in total.' }
+    )
+)
 const ChatMessageObjectSchema = z.object({
   role: ChatMessageRoleSchema,
-  parts: z.array(z.union([ChatTextPartSchema, ChatReasoningPartSchema])).min(1),
+  parts: ChatMessagePartsSchema,
   metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional(),
   providerMetadata: z.custom<ProviderMetadata>().optional()
 })
@@ -63,10 +171,25 @@ export {
   ChatMessageRoleSchema,
   ChatMessageSchema,
   ChatTextPartSchema,
+  ChatDocumentPartSchema,
   ChatReasoningPartSchema,
+  ChatToolTraceInputSchema,
+  ChatToolTracePartSchema,
   ChatUserMessageSchema,
   ModelReasoningCapabilitiesSchema,
   ThinkingSelectionSchema,
+  CodeDocumentExtensions,
+  CodeDocumentMaxNameLength,
+  CodeDocumentMaxTextBytes,
+  CodeDocumentsMaxTextBytes,
   chatDataSchemas
 }
-export type { ChatMessage, ChatUserMessage, ModelReasoningCapabilities, ThinkingSelection }
+export type {
+  ChatDocumentPart,
+  ChatMessage,
+  ChatUserMessage,
+  ChatToolTraceInput,
+  ChatToolTracePart,
+  ModelReasoningCapabilities,
+  ThinkingSelection
+}

@@ -10,6 +10,7 @@ function toLatestUserMessage(messages: MicoUIMessage[]): ChatUserMessage {
 
   const parts: ChatUserMessage['parts'] = []
   for (const part of message.parts) {
+    if (part.type === 'data-document') parts.push(part.data)
     if (part.type === 'text' && part.text.trim()) parts.push({ type: 'text', text: part.text })
     if (part.type === 'reasoning' && part.text) {
       const reasoningPart: ChatUserMessage['parts'][number] = {

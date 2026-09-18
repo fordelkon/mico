@@ -31,27 +31,6 @@ function createFetch(response: Response): RecordingFetch {
 }
 
 describe('discoverModels', () => {
-  it('lists LM Studio native model keys', async () => {
-    const client = createFetch(
-      jsonResponse({
-        models: [
-          { key: ' qwen3-8b ', display_name: 'Qwen3 8B' },
-          { key: 'qwen3-8b', display_name: 'Duplicate' },
-          { key: 42 }
-        ]
-      })
-    )
-
-    await expect(
-      discoverModels(
-        { provider: 'lm-studio', baseUrl: 'http://localhost:1234/' },
-        { fetch: client.fetch }
-      )
-    ).resolves.toEqual([{ modelId: 'qwen3-8b', displayName: 'qwen3-8b' }])
-
-    expect(client.request().url).toBe('http://localhost:1234/api/v1/models')
-  })
-
   it('lists Ollama models and ignores malformed rows', async () => {
     const client = createFetch(
       jsonResponse({ models: [{ name: 'llama3.2:latest' }, {}, { name: ' ' }] })
@@ -103,6 +82,23 @@ describe('discoverModels', () => {
     expect(client.request().url).toBe('https://example.com/v1/models')
     expect(client.request().headers.get('x-api-key')).toBe('anthropic-key')
     expect(client.request().headers.get('anthropic-version')).toBe('2023-06-01')
+  })
+
+  it('preserves an explicitly versioned Anthropic-compatible API root', async () => {
+    const client = createFetch(jsonResponse({ data: [{ id: 'claude-sonnet' }] }))
+
+    await expect(
+      discoverModels(
+        {
+          provider: 'anthropic-compatible',
+          baseUrl: 'https://gateway.example.com/proxy/v2',
+          apiKey: 'anthropic-key'
+        },
+        { fetch: client.fetch }
+      )
+    ).resolves.toEqual([{ modelId: 'claude-sonnet', displayName: 'claude-sonnet' }])
+
+    expect(client.request().url).toBe('https://gateway.example.com/proxy/v2/models')
   })
 
   it('retries Anthropic-compatible discovery with bearer authentication after x-api-key is rejected', async () => {

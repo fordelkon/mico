@@ -21,9 +21,6 @@ function ProviderIcon({
   customIcon?: CustomProvider['icon']
   providerId: string
 }): React.JSX.Element {
-  if (providerId === 'lm-studio') {
-    return <img alt="" aria-hidden="true" className={className} src={lmStudioIcon} />
-  }
   if (providerId === 'ollama') {
     return (
       <>
@@ -44,6 +41,8 @@ function ProviderIcon({
   }
 
   switch (customIcon) {
+    case 'lmstudio':
+      return <img alt="" aria-hidden="true" className={className} src={lmStudioIcon} />
     case 'cloud':
       return <CloudIcon aria-hidden="true" className={className} />
     case 'server':

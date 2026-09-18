@@ -1,10 +1,12 @@
 import { ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
+import type { AttachmentsAPI } from '@shared/ipc/schemas/attachments'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
+import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { IpcChannel } from '@shared/IpcChannel'
 
 const windowControls: WindowControlsAPI = {
@@ -84,6 +86,10 @@ const appearance: AppearanceAPI = {
     ipcRenderer.invoke(IpcChannel.Appearance_SetThemePreferences, preferences)
 }
 
+const attachments: AttachmentsAPI = {
+  pickCodeDocuments: () => ipcRenderer.invoke(IpcChannel.Attachments_PickCodeDocuments)
+}
+
 const chat: ChatAPI = {
   abortTurn: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_AbortTurn, requestId),
   getCapabilities: () => ipcRenderer.invoke(IpcChannel.Chat_GetCapabilities),
@@ -131,6 +137,8 @@ const sessions: SessionsAPI = {
   list: () => ipcRenderer.invoke(IpcChannel.Sessions_List),
   load: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Load, sessionId),
   rename: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Rename, input),
+  setThinkingEffort: (input) => ipcRenderer.invoke(IpcChannel.Sessions_SetThinkingEffort, input),
+  setModelEntry: (input) => ipcRenderer.invoke(IpcChannel.Sessions_SetModelEntry, input),
   onTitleUpdated: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,
@@ -142,7 +150,16 @@ const sessions: SessionsAPI = {
   }
 }
 
-const api = { appearance, chat, providers, sessions, windowControls }
+const workspaces: WorkspacesAPI = {
+  addFromDialog: () => ipcRenderer.invoke(IpcChannel.Workspaces_AddFromDialog),
+  archive: (projectId) => ipcRenderer.invoke(IpcChannel.Workspaces_Archive, projectId),
+  list: () => ipcRenderer.invoke(IpcChannel.Workspaces_List),
+  rename: (input) => ipcRenderer.invoke(IpcChannel.Workspaces_Rename, input),
+  reveal: (projectId) => ipcRenderer.invoke(IpcChannel.Workspaces_Reveal, projectId),
+  setDefault: (projectId) => ipcRenderer.invoke(IpcChannel.Workspaces_SetDefault, projectId)
+}
+
+const api = { appearance, attachments, chat, providers, sessions, windowControls, workspaces }
 
 export { api, type WindowApiType }
 

@@ -6,6 +6,254 @@ async function collect(stream: AsyncIterable<unknown>) {
   return chunks
 }
 describe('Anthropic-compatible provider', () => {
+  it('appends Messages directly to an explicitly versioned API root', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://gateway.example.com/proxy/v2',
+        apiKey: 'key',
+        modelId: 'claude'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello.' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(fetch.mock.calls[0]?.[0]).toBe('https://gateway.example.com/proxy/v2/messages')
+  })
+
+  it('maps and streams a tool use through the normalized tool contract', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'event: content_block_start\ndata: {"index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"read","input":{}}}\n\nevent: content_block_delta\ndata: {"index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":"}}\n\nevent: content_block_delta\ndata: {"index":1,"delta":{"type":"input_json_delta","partial_json":"\\"a.ts\\"}"}}\n\nevent: content_block_stop\ndata: {"index":1}\n\nevent: message_stop\ndata: {}\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        modelId: 'claude'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    const chunks = await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+        tools: [
+          {
+            name: 'read',
+            description: 'Read a file.',
+            inputSchema: { type: 'object', properties: { path: { type: 'string' } } }
+          }
+        ],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(
+      await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
+    ).toMatchObject({
+      tools: [{ name: 'read', input_schema: { type: 'object' } }]
+    })
+    expect(chunks).toEqual([
+      { type: 'tool-input-start', toolCallId: 'toolu_1', toolName: 'read' },
+      { type: 'tool-input-delta', toolCallId: 'toolu_1', inputTextDelta: '{"path":' },
+      { type: 'tool-input-delta', toolCallId: 'toolu_1', inputTextDelta: '"a.ts"}' },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'toolu_1',
+        toolName: 'read',
+        input: { path: 'a.ts' }
+      }
+    ])
+  })
+
+  it('replays tool calls and results as Anthropic content blocks', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        modelId: 'claude'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [
+          {
+            role: 'assistant',
+            parts: [
+              {
+                type: 'tool-call',
+                toolCallId: 'toolu_1',
+                toolName: 'read',
+                argumentsJson: '{"path":"a.ts"}'
+              },
+              { type: 'text', text: 'Reading now.' }
+            ]
+          },
+          {
+            role: 'tool',
+            parts: [
+              {
+                type: 'tool-result',
+                toolCallId: 'toolu_1',
+                toolName: 'read',
+                output: 'not found',
+                isError: true
+              }
+            ]
+          }
+        ],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(
+      await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
+    ).toMatchObject({
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'read',
+              input: { path: 'a.ts' }
+            },
+            { type: 'text', text: 'Reading now.' }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_1', content: 'not found', is_error: true }
+          ]
+        }
+      ]
+    })
+  })
+
+  it('marks malformed completed input JSON as a tool input error', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'event: content_block_start\ndata: {"index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read","input":{}}}\n\nevent: content_block_delta\ndata: {"index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}\n\nevent: content_block_stop\ndata: {"index":0}\n\nevent: message_stop\ndata: {}\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        modelId: 'claude'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).resolves.toContainEqual({
+      type: 'tool-input-error',
+      toolCallId: 'toolu_1',
+      toolName: 'read',
+      input: '{',
+      errorText: 'The Anthropic-compatible provider returned invalid tool arguments.'
+    })
+  })
+
+  it('rejects a completed tool block with no input value or deltas', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'event: content_block_start\ndata: {"index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read"}}\n\nevent: content_block_stop\ndata: {"index":0}\n\nevent: message_stop\ndata: {}\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        modelId: 'claude'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).rejects.toThrow('incomplete tool call')
+  })
+
+  it('rejects a tool call truncated by a natural stream EOF', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'event: content_block_start\ndata: {"index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read","input":{}}}\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        modelId: 'claude'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await expect(
+      collect(
+        await provider.stream({
+          conversationKey: 'x',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
+          thinkingEffort: 'none',
+          signal: new AbortController().signal
+        })
+      )
+    ).rejects.toThrow('incomplete tool call')
+  })
+
   it('finishes normally when a compatible endpoint terminates the stream with [DONE]', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

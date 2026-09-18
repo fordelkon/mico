@@ -14,7 +14,7 @@ import { LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
-import { thinkingOrbStates, type ThinkingOrbState } from './thinking-block'
+import { thinkingOrbStates, type ThinkingOrbState } from './agent-activity'
 
 // A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
 const STREAMING_UPDATE_THROTTLE_MS = 50
@@ -41,6 +41,7 @@ function ThinkingOrbStateScope({
 type ChatMessageListProps = {
   conversationId: string
   errorMessage?: string
+  isThinkingEnabled?: boolean
   messages: MicoUIMessage[]
   isResponding: boolean
   onRetry?: () => void
@@ -92,6 +93,7 @@ function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Elemen
 function ChatMessageList({
   conversationId,
   errorMessage,
+  isThinkingEnabled = true,
   messages,
   isResponding,
   onRetry,
@@ -101,7 +103,9 @@ function ChatMessageList({
   const hasEmptyAssistantMessage =
     isResponding && latestMessage?.role === 'assistant' && latestMessage.parts.length === 0
   const showPendingThinking =
-    isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
+    isThinkingEnabled &&
+    isResponding &&
+    (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
   const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
 
   return (

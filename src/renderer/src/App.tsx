@@ -18,9 +18,11 @@ function AppContent(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
   const { commitProviderDrafts } = useProviderLibraryActions()
   const [activePage, setActivePage] = React.useState<'chat' | 'settings'>('chat')
-  const [settingsPage, setSettingsPage] = React.useState<'providers' | 'appearance'>('providers')
+  const [settingsPage, setSettingsPage] = React.useState<'providers' | 'appearance' | 'workspaces'>(
+    'providers'
+  )
 
-  const { startNewChat, selectConversation, activeConversation } = workspace
+  const { startNewChat, selectConversation, activeConversation, refreshProjects } = workspace
   const handleNewChat = React.useCallback((): void => {
     setActivePage('chat')
     startNewChat()
@@ -35,11 +37,12 @@ function AppContent(): React.JSX.Element {
   const handleBackFromSettings = React.useCallback(async (): Promise<void> => {
     // The outgoing settings view remains visible until its draft reaches the snapshot boundary.
     await commitProviderDrafts()
+    await refreshProjects().catch(() => undefined)
     transitionSettingsPage(() => setActivePage('chat'))
-  }, [commitProviderDrafts])
+  }, [commitProviderDrafts, refreshProjects])
 
   const handleSelectSettingsPage = React.useCallback(
-    (page: 'providers' | 'appearance'): void => {
+    (page: 'providers' | 'appearance' | 'workspaces'): void => {
       if (page === settingsPage) return
 
       transitionSettingsPage(() => setSettingsPage(page))

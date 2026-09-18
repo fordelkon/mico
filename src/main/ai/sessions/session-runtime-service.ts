@@ -1,9 +1,18 @@
 import { createHash } from 'node:crypto'
+import * as z from 'zod'
 
-import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
+import {
+  ChatDocumentPartSchema,
+  ChatMessageRoleSchema,
+  type ChatMessage,
+  type ChatToolTraceInput,
+  type ChatToolTracePart,
+  type ThinkingSelection
+} from '@shared/data/schemas/chat'
 import { SessionDatabase } from '../../data/session-database'
 
 type ExecutionProfileSnapshot = {
+  modelEntryId: string
   providerId: string
   modelId: string
   thinkingEffort: ThinkingSelection
@@ -13,6 +22,8 @@ type ExecutionProfileSnapshot = {
 type SessionSummary = {
   id: string
   title: string
+  projectId: string | null
+  cwd: string | null
   defaultProfile: ExecutionProfileSnapshot | null
   createdAt: number
   updatedAt: number
@@ -21,11 +32,15 @@ type SessionSummary = {
 
 type PersistedSession = SessionSummary & { messages: ChatMessage[] }
 
-type VisibleMessage = {
-  role: ChatMessage['role']
-  parts: Array<{ type: 'text'; text: string }>
-  metadata?: ChatMessage['metadata']
-}
+const VisibleMessageSchema = z.object({
+  role: ChatMessageRoleSchema,
+  parts: z.array(
+    z.union([z.object({ type: z.literal('text'), text: z.string() }), ChatDocumentPartSchema])
+  ),
+  metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional()
+})
+const MessagePayloadSchema = z.object({ message: VisibleMessageSchema })
+type VisibleMessage = z.infer<typeof VisibleMessageSchema>
 type RuntimeEventPayloads = {
   run_started: {
     attempt: number
@@ -35,6 +50,8 @@ type RuntimeEventPayloads = {
   user_message_recorded: { message: VisibleMessage }
   model_request_started: Record<string, never>
   assistant_output_finalized: { message: VisibleMessage }
+  tool_trace_recorded: { trace: StoredToolTrace }
+  tool_trace_summary_recorded: { summary: ToolTraceSummary }
   run_failed: { code: string; message: string }
   run_cancelled: Record<string, never>
   run_completed: Record<string, never>
@@ -42,7 +59,36 @@ type RuntimeEventPayloads = {
 type RuntimeEventKind = keyof RuntimeEventPayloads
 type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string
 type JsonObject = { [key: string]: JsonValue }
-type StartedRun = { runId: string; turnId: string; shouldGenerateTitle: boolean }
+type RecordedToolTrace = {
+  toolCallId: string
+  toolName: string
+  input: JsonObject
+  isError: boolean
+  output: string
+  startedAt: number
+  finishedAt: number
+}
+type StoredToolTrace = {
+  toolCallId: string
+  toolName: string
+  input: ChatToolTraceInput
+  status: 'completed' | 'failed'
+  summary: string
+  startedAt: number
+  finishedAt: number
+}
+type ToolTraceSummary = {
+  total: number
+  succeeded: number
+  failed: number
+  summary: string
+}
+type StartedRun = {
+  runId: string
+  turnId: string
+  shouldGenerateTitle: boolean
+  profile: ExecutionProfileSnapshot
+}
 type StartTurnInput = {
   sessionId: string
   requestId: string
@@ -73,22 +119,39 @@ class SessionRuntimeService {
 
   createSession({
     title,
-    defaultProfile
+    defaultProfile,
+    projectId = null,
+    cwd = null
   }: {
     title: string
     defaultProfile: ExecutionProfileSnapshot | null
+    projectId?: string | null
+    cwd?: string | null
   }): SessionSummary {
+    if ((projectId === null) !== (cwd === null))
+      throw new Error('Project sessions require a current working directory.')
     const id = this.dependencies.createId()
     const now = this.dependencies.now()
     this.dependencies.database.connection
       .prepare(
-        `INSERT INTO sessions (id, title, default_execution_profile_json, created_at, updated_at, last_activity_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (id, title, project_id, cwd, default_execution_profile_json, created_at, updated_at, last_activity_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, title, defaultProfile ? canonicalJson(defaultProfile) : null, now, now, now)
+      .run(
+        id,
+        title,
+        projectId,
+        cwd,
+        defaultProfile ? canonicalJson(defaultProfile) : null,
+        now,
+        now,
+        now
+      )
     return {
       id,
       title,
+      projectId,
+      cwd,
       defaultProfile,
       createdAt: now,
       updatedAt: now,
@@ -111,19 +174,59 @@ class SessionRuntimeService {
     // SAFETY: the selected columns are fixed by this query.
     const rows = this.dependencies.database.connection
       .prepare(
-        `SELECT runtime_events.payload_json, runtime_events.payload_digest
+        `SELECT runtime_events.run_id, runtime_events.kind, runtime_events.payload_json, runtime_events.payload_digest
          FROM runtime_events
          JOIN runs ON runs.id = runtime_events.run_id
          JOIN turns ON turns.id = runs.turn_id
-         WHERE turns.session_id = ? AND runtime_events.kind IN ('user_message_recorded', 'assistant_output_finalized')
+         WHERE turns.session_id = ? AND runtime_events.kind IN (
+           'user_message_recorded',
+           'assistant_output_finalized',
+           'tool_trace_recorded',
+           'tool_trace_summary_recorded'
+         )
          ORDER BY turns.ordinal, runs.attempt, runtime_events.session_sequence`
       )
-      .all(sessionId) as Array<{ payload_json: string; payload_digest: string }>
+      .all(sessionId) as LoadEventRow[]
     for (const row of rows) this.assertPayloadDigest(row)
+    const tracesByRun = new Map<string, ChatToolTracePart[]>()
+    for (const row of rows) {
+      if (row.kind !== 'tool_trace_recorded') continue
+      const trace = parseToolTracePayload(row.payload_json).trace
+      const current = tracesByRun.get(row.run_id) ?? []
+      current.push(toToolTracePart(trace))
+      tracesByRun.set(row.run_id, current)
+    }
+    for (const row of rows) {
+      if (row.kind === 'tool_trace_summary_recorded') parseToolTraceSummaryPayload(row.payload_json)
+    }
     return {
       ...toSessionSummary(session),
-      messages: rows.map(({ payload_json }) => parseMessagePayload(payload_json).message)
+      messages: rows.flatMap((row) => {
+        if (row.kind === 'tool_trace_recorded' || row.kind === 'tool_trace_summary_recorded')
+          return []
+        const message = parseMessagePayload(row.payload_json).message
+        if (row.kind !== 'assistant_output_finalized') return [message]
+        return [{ ...message, parts: [...(tracesByRun.get(row.run_id) ?? []), ...message.parts] }]
+      })
     }
+  }
+
+  recordToolTrace(runId: string, trace: RecordedToolTrace): void {
+    this.dependencies.database.transaction(() => {
+      const run = this.getRunRow(runId)
+      if (run.status !== 'running' || this.findTerminalEvent(runId)) return
+      const existing = this.dependencies.database.connection
+        .prepare(
+          "SELECT id FROM runtime_events WHERE run_id = ? AND kind = 'tool_trace_recorded' AND json_extract(payload_json, '$.trace.toolCallId') = ?"
+        )
+        .get(runId, trace.toolCallId)
+      if (existing) return
+      this.appendEvent(run, 'tool_trace_recorded', { trace: toStoredToolTrace(trace) })
+    })
+  }
+
+  getDefaultProfile(sessionId: string): ExecutionProfileSnapshot | null {
+    return toSessionSummary(this.findSession(sessionId)).defaultProfile
   }
 
   getContextMessages(runId: string): ChatMessage[] {
@@ -209,6 +312,20 @@ class SessionRuntimeService {
     const result = this.dependencies.database.connection
       .prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?')
       .run(title, now, sessionId)
+    if (!result.changes) throw new Error('Session does not exist.')
+    return toSessionSummary(this.findSession(sessionId))
+  }
+
+  updateDefaultProfile(
+    sessionId: string,
+    defaultProfile: ExecutionProfileSnapshot
+  ): SessionSummary {
+    const now = this.dependencies.now()
+    const result = this.dependencies.database.connection
+      .prepare(
+        'UPDATE sessions SET default_execution_profile_json = ?, updated_at = ? WHERE id = ?'
+      )
+      .run(canonicalJson(defaultProfile), now, sessionId)
     if (!result.changes) throw new Error('Session does not exist.')
     return toSessionSummary(this.findSession(sessionId))
   }
@@ -450,6 +567,7 @@ class SessionRuntimeService {
       if (run.status !== 'running')
         throw new Error('Run already has a contradictory terminal state.')
       beforeEvent(run)
+      this.appendToolTraceSummary(run)
       this.appendEvent(run, event, failure ?? {})
       this.dependencies.database.connection
         .prepare('UPDATE runs SET status = ?, finished_at = ?, failure_json = ? WHERE id = ?')
@@ -485,6 +603,29 @@ class SessionRuntimeService {
         this.dependencies.now(),
         run.session_id
       )
+  }
+
+  private appendToolTraceSummary(run: Pick<RunRow, 'id' | 'session_id'>): void {
+    // SAFETY: this fixed query selects only the two declared runtime_events columns.
+    const rows = this.dependencies.database.connection
+      .prepare(
+        "SELECT payload_json, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'tool_trace_recorded' ORDER BY session_sequence"
+      )
+      .all(run.id) as Array<{ payload_json: string; payload_digest: string }>
+    const traces = rows.map((row) => {
+      this.assertPayloadDigest(row)
+      return parseToolTracePayload(row.payload_json).trace
+    })
+    const succeeded = traces.filter((trace) => trace.status === 'completed').length
+    const failed = traces.length - succeeded
+    const names = [...new Set(traces.map((trace) => toolNameLabel(trace.toolName)))]
+    const summary =
+      traces.length === 0
+        ? 'No tools used.'
+        : `${names.join(', ')} · ${succeeded} completed${failed ? `, ${failed} failed` : ''}.`
+    this.appendEvent(run, 'tool_trace_summary_recorded', {
+      summary: { total: traces.length, succeeded, failed, summary }
+    })
   }
 
   private findRunByRequestId(sessionId: string, requestId: string): RunRow | undefined {
@@ -553,7 +694,8 @@ class SessionRuntimeService {
     return {
       runId: run.id,
       turnId: run.turn_id,
-      shouldGenerateTitle: this.shouldGenerateTitle(run)
+      shouldGenerateTitle: this.shouldGenerateTitle(run),
+      profile: this.getExecutionProfile(run.id)
     }
   }
 
@@ -617,6 +759,8 @@ class SessionRuntimeService {
 type SessionRow = {
   id: string
   title: string
+  project_id: string | null
+  cwd: string | null
   default_execution_profile_json: string | null
   created_at: number
   updated_at: number
@@ -629,11 +773,49 @@ type RunRow = {
   attempt: number
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 }
+type LoadEventRow = {
+  run_id: string
+  kind:
+    | 'assistant_output_finalized'
+    | 'tool_trace_recorded'
+    | 'tool_trace_summary_recorded'
+    | 'user_message_recorded'
+  payload_json: string
+  payload_digest: string
+}
+const StoredToolTraceSchema: z.ZodType<StoredToolTrace> = z.object({
+  toolCallId: z.string().trim().min(1).max(200),
+  toolName: z.string().trim().min(1).max(64),
+  input: z.object({
+    command: z.string().trim().min(1).max(240).optional(),
+    editCount: z.number().int().positive().max(100).optional(),
+    path: z.string().trim().min(1).max(4_096).optional()
+  }),
+  status: z.enum(['completed', 'failed']),
+  summary: z.string().trim().min(1).max(500),
+  startedAt: z.number().int().nonnegative(),
+  finishedAt: z.number().int().nonnegative()
+})
+const ToolTracePayloadSchema = z.object({ trace: StoredToolTraceSchema })
+const ToolTraceSummarySchema: z.ZodType<ToolTraceSummary> = z.object({
+  total: z.number().int().nonnegative(),
+  succeeded: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  summary: z.string().trim().min(1).max(500)
+})
+const ToolTraceSummaryPayloadSchema = z.object({ summary: ToolTraceSummarySchema })
+const ToolTraceSourceInputSchema = z.object({
+  command: z.string().optional(),
+  edits: z.array(z.unknown()).max(100).optional(),
+  path: z.string().optional()
+})
 function toSessionSummary(row: SessionRow): SessionSummary {
   // SAFETY: default profiles are serialized by canonicalJson from an ExecutionProfileSnapshot.
   return {
     id: row.id,
     title: row.title,
+    projectId: row.project_id,
+    cwd: row.cwd,
     defaultProfile: row.default_execution_profile_json
       ? (JSON.parse(row.default_execution_profile_json) as ExecutionProfileSnapshot)
       : null,
@@ -645,14 +827,94 @@ function toSessionSummary(row: SessionRow): SessionSummary {
 function visibleMessage(message: ChatMessage): VisibleMessage {
   const visible: VisibleMessage = {
     role: message.role,
-    parts: message.parts.filter((part) => part.type === 'text')
+    parts: message.parts.filter((part) => part.type === 'text' || part.type === 'document')
   }
   if (message.metadata) visible.metadata = message.metadata
-  return visible
+  return VisibleMessageSchema.parse(visible)
 }
 function parseMessagePayload(value: string): { message: VisibleMessage } {
-  // SAFETY: these payloads are written by appendEvent with a visible message.
-  return JSON.parse(value) as { message: VisibleMessage }
+  return MessagePayloadSchema.parse(JSON.parse(value))
+}
+function parseToolTracePayload(value: string): { trace: StoredToolTrace } {
+  return ToolTracePayloadSchema.parse(JSON.parse(value))
+}
+function parseToolTraceSummaryPayload(value: string): { summary: ToolTraceSummary } {
+  return ToolTraceSummaryPayloadSchema.parse(JSON.parse(value))
+}
+function toStoredToolTrace(trace: RecordedToolTrace): StoredToolTrace {
+  const toolName = trace.toolName.trim().slice(0, 64) || 'tool'
+  const input = toToolTraceInput(trace.input)
+  const status = trace.isError ? 'failed' : 'completed'
+  const startedAt = Math.max(0, Math.trunc(trace.startedAt))
+  const finishedAt = Math.max(startedAt, Math.trunc(trace.finishedAt))
+  return {
+    toolCallId: trace.toolCallId.trim().slice(0, 200) || 'unknown-call',
+    toolName,
+    input,
+    status,
+    summary: toolTraceSummary(toolName, input, status, trace.output),
+    startedAt,
+    finishedAt
+  }
+}
+function toToolTraceInput(input: JsonObject): ChatToolTraceInput {
+  const parsed = ToolTraceSourceInputSchema.safeParse(input)
+  if (!parsed.success) return {}
+  const traceInput: ChatToolTraceInput = {}
+  if (parsed.data.path?.trim()) traceInput.path = parsed.data.path.trim().slice(0, 4_096)
+  if (parsed.data.command?.trim())
+    traceInput.command = parsed.data.command.trim().split(/\r?\n/, 1)[0]!.slice(0, 240)
+  if (parsed.data.edits?.length) traceInput.editCount = parsed.data.edits.length
+  return traceInput
+}
+function toolTraceSummary(
+  toolName: string,
+  input: ChatToolTraceInput,
+  status: StoredToolTrace['status'],
+  output: string
+): string {
+  if (status === 'failed') return 'Tool execution failed.'
+  switch (toolName) {
+    case 'read': {
+      const lineCount = output
+        .split('\n')
+        .filter((line) => line.trim() && !line.startsWith('[More content available.')).length
+      return `Read ${lineCount} ${lineCount === 1 ? 'line' : 'lines'}.`
+    }
+    case 'write':
+      return input.path ? `Wrote ${input.path}.` : 'Wrote file.'
+    case 'edit':
+      return input.path
+        ? `Edited ${input.path}${input.editCount ? ` · ${input.editCount} changes` : ''}.`
+        : 'Edited file.'
+    case 'bash':
+      return 'Command completed.'
+    default:
+      return `${toolNameLabel(toolName)} completed.`
+  }
+}
+function toolNameLabel(toolName: string): string {
+  return { bash: 'Run', edit: 'Edit', read: 'Read', write: 'Write' }[toolName] ?? toolName
+}
+function toToolTracePart(trace: StoredToolTrace): ChatToolTracePart {
+  if (trace.status === 'failed') {
+    return {
+      type: 'tool-trace',
+      toolCallId: trace.toolCallId,
+      toolName: trace.toolName,
+      input: trace.input,
+      state: 'output-error',
+      errorText: trace.summary
+    }
+  }
+  return {
+    type: 'tool-trace',
+    toolCallId: trace.toolCallId,
+    toolName: trace.toolName,
+    input: trace.input,
+    state: 'output-available',
+    output: trace.summary
+  }
 }
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')

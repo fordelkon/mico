@@ -107,6 +107,12 @@
   transition: opacity var(--app-sidebar-motion-duration) var(--app-sidebar-motion-easing);
 }
 
+.conversation-row__shortcut {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+}
+
 .conversation-row[data-responding="true"] .conversation-row__status {
   opacity: 1;
 }

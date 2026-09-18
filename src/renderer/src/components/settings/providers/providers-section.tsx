@@ -11,7 +11,6 @@ import {
   Button,
   IconTooltipButton,
   Input,
-  RadioSelect,
   Textarea,
   Toggle
 } from '@mico/ui'
@@ -23,6 +22,7 @@ import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
 
 import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
+import { GlidingRadioSelect } from './gliding-radio-select'
 import { ProviderModelsSection } from './provider-models-section'
 import { ProviderTestMenu, type ProviderTestState } from './provider-test-menu'
 import type { ProviderId } from './providers-sidebar'
@@ -94,11 +94,11 @@ function ProvidersSection({
     null
   )
   const customProvider = library.customProviders.find(({ id }) => id === providerId)
-  const builtInProviderId = providerId === 'ollama' ? 'ollama' : 'lm-studio'
-  const providerLabel = customProvider?.name ?? (providerId === 'ollama' ? 'Ollama' : 'LM Studio')
+  const builtInProviderId = 'ollama'
+  const providerLabel = customProvider?.name ?? 'Ollama'
   const configuration = library.configurations[providerId] ?? {
     apiKey: '',
-    baseUrl: 'http://localhost:1234',
+    baseUrl: 'http://localhost:11434',
     enabled: false
   }
   const models = library.models.filter((model) => model.providerId === providerId)
@@ -120,15 +120,10 @@ function ProvidersSection({
   const customProviderConfiguration = customProviderValues
     ? toCustomProviderConfiguration(customProviderValues)
     : undefined
-  const providerConfiguration: ProviderConnection =
-    customProviderConfiguration ??
-    (builtInProviderId === 'lm-studio' && configuration.apiKey.trim()
-      ? {
-          provider: builtInProviderId,
-          baseUrl: configuration.baseUrl,
-          apiKey: configuration.apiKey
-        }
-      : { provider: builtInProviderId, baseUrl: configuration.baseUrl })
+  const providerConfiguration: ProviderConnection = customProviderConfiguration ?? {
+    provider: builtInProviderId,
+    baseUrl: configuration.baseUrl
+  }
   const testModel = async (modelId: string): Promise<void> => {
     setIsTestingModel(true)
     setStatus(null)
@@ -227,9 +222,7 @@ function ProvidersSection({
             <p className="mt-1 text-sm text-text-secondary">
               {customProvider
                 ? `Use the configured ${customProvider.apiFormat} endpoint.`
-                : providerId === 'ollama'
-                  ? 'Run open-source LLMs locally with Ollama.'
-                  : 'Run LLMs locally with LM Studio.'}
+                : 'Run open-source LLMs locally with Ollama.'}
             </p>
             {status ? (
               <p
@@ -307,24 +300,18 @@ function ProvidersSection({
                 Getting Started:
               </h3>
               <p className="text-sm text-text-secondary">
-                {providerId === 'ollama'
-                  ? 'Make sure Ollama is installed and running locally.'
-                  : 'Make sure LM Studio is installed and running locally.'}
+                Make sure Ollama is installed and running locally.
               </p>
               <div className="pt-1 text-sm text-text-secondary">
                 <p>
                   Install:{' '}
                   <a
                     className="text-brand underline-offset-2 hover:underline focus-visible:underline"
-                    href={
-                      providerId === 'ollama'
-                        ? 'https://ollama.com/download'
-                        : 'https://lmstudio.ai'
-                    }
+                    href="https://ollama.com/download"
                     rel="noreferrer"
                     target="_blank"
                   >
-                    {providerId === 'ollama' ? 'ollama.com/download' : 'lmstudio.ai'}
+                    ollama.com/download
                   </a>
                 </p>
                 {providerId === 'ollama' ? (
@@ -391,7 +378,7 @@ function ProvidersSection({
                 value={customProviderValues?.baseUrl ?? configuration.baseUrl}
               />
             </label>
-            {providerId === 'lm-studio' || customProvider ? (
+            {customProvider ? (
               <label className="flex flex-col gap-2 text-sm" htmlFor={`${providerId}-api-key`}>
                 <span>API Key (Optional)</span>
                 <div className="flex gap-2">
@@ -438,7 +425,7 @@ function ProvidersSection({
               </h3>
               <fieldset aria-label="API format" className="space-y-1">
                 <legend className="text-sm">API format</legend>
-                <RadioSelect
+                <GlidingRadioSelect
                   aria-label="API format"
                   onValueChange={(apiFormat) => {
                     if (

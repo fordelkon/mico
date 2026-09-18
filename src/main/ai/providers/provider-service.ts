@@ -474,6 +474,12 @@ class ProviderService {
   getSelectedChatConfiguration(): ChatProviderConfiguration | null {
     const library = this.getLibrary()
     const model = library.models.find(({ id }) => id === library.selectedModelId)
+    return model ? this.getChatConfigurationForModelEntry(model.id) : null
+  }
+
+  getChatConfigurationForModelEntry(modelEntryId: string): ChatProviderConfiguration | null {
+    const library = this.getLibrary()
+    const model = library.models.find(({ id }) => id === modelEntryId)
     if (!model?.enabled) return null
 
     const configuration = library.configurations.find(
@@ -493,16 +499,6 @@ class ProviderService {
 function toConfiguration(row: typeof providers.$inferSelect): ProviderConfiguration {
   const headers = parseHeaders(row.headers)
   switch (row.id) {
-    case 'lm-studio': {
-      const configuration: Extract<ProviderConfiguration, { provider: 'lm-studio' }> = {
-        provider: 'lm-studio' as const,
-        baseUrl: row.baseUrl,
-        enabled: row.enabled
-      }
-      if (row.apiKey) configuration.apiKey = row.apiKey
-      if (Object.keys(headers).length) configuration.headers = headers
-      return configuration
-    }
     case 'ollama': {
       const configuration: Extract<ProviderConfiguration, { provider: 'ollama' }> = {
         provider: 'ollama' as const,

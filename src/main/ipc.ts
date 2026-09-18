@@ -1,9 +1,27 @@
-import { BrowserWindow, ipcMain, type IpcMain, type IpcMainInvokeEvent } from 'electron'
+import {
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  type IpcMain,
+  type IpcMainInvokeEvent
+} from 'electron'
+import { open, stat as statFile } from 'node:fs/promises'
+import { basename, extname } from 'node:path'
 
 import { TurnRequestIdSchema, TurnStartRequestSchema } from '@shared/ipc/schemas/chat'
+import {
+  ChatDocumentPartSchema,
+  CodeDocumentExtensions,
+  CodeDocumentMaxNameLength,
+  CodeDocumentMaxTextBytes,
+  CodeDocumentsMaxTextBytes
+} from '@shared/data/schemas/chat'
+import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
 import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
-import { SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
+import { ProjectIdSchema, SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
+import { ThinkingSelectionSchema } from '@shared/data/schemas/chat'
 import {
   CustomProviderSchema,
   CustomProviderIdSchema,
@@ -25,17 +43,56 @@ import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
 import type { ProviderService } from './ai/providers/provider-service'
 import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
+import type { WorkspaceService } from './ai/workspaces/workspace-service'
 
 type IpcMainRegistrar = Pick<IpcMain, 'handle'>
+type IpcFileHandle = Pick<Awaited<ReturnType<typeof open>>, 'close' | 'read'>
 type IpcDependencies = {
   getWindow: typeof BrowserWindow.fromWebContents
   ipcMain: IpcMainRegistrar
+  openPath: (fullPath: string) => Promise<string>
+  pickDirectory: (window: BrowserWindow) => Promise<string | undefined>
+  pickCodeDocuments: (window: BrowserWindow) => Promise<{ canceled: boolean; filePaths: string[] }>
+  openFile: (filePath: string) => Promise<IpcFileHandle>
+  stat: (filePath: string) => Promise<{ size: number }>
+}
+
+const maxDocumentReadBytes = CodeDocumentMaxTextBytes + 1
+
+async function readBoundedFile(
+  openFile: IpcDependencies['openFile'],
+  filePath: string,
+  maxBytes: number
+): Promise<Uint8Array> {
+  const handle = await openFile(filePath)
+  try {
+    const bytes = new Uint8Array(maxBytes)
+    let totalBytesRead = 0
+    while (totalBytesRead < maxBytes) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        totalBytesRead,
+        maxBytes - totalBytesRead,
+        totalBytesRead
+      )
+      if (bytesRead === 0) return bytes.subarray(0, totalBytesRead)
+      totalBytesRead += bytesRead
+    }
+    return bytes
+  } finally {
+    await handle.close()
+  }
 }
 
 interface IpcServices {
   turnExecutor: Pick<
     TurnExecutor,
-    'abortAllTurns' | 'abortTurn' | 'getModelCapabilities' | 'startTurn'
+    | 'abortAllTurns'
+    | 'abortTurn'
+    | 'getModelCapabilities'
+    | 'startTurn'
+    | 'updateSessionModelEntry'
+    | 'updateSessionThinkingEffort'
   >
   mainWindow: Pick<
     MainWindowService,
@@ -79,13 +136,33 @@ interface IpcServices {
     SessionRuntimeService,
     'createSession' | 'deleteSession' | 'listSessions' | 'loadSession' | 'renameSession'
   >
+  workspace: Pick<
+    WorkspaceService,
+    | 'addProject'
+    | 'archiveProject'
+    | 'getActiveProjectContext'
+    | 'getDefaultWorkspaceContext'
+    | 'getProjectContext'
+    | 'listProjects'
+    | 'renameProject'
+    | 'setDefaultProject'
+  >
 }
 
 function registerIpc(
-  { turnExecutor, mainWindow, preference, provider, session }: IpcServices,
+  { turnExecutor, mainWindow, preference, provider, session, workspace }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
-    ipcMain
+    ipcMain,
+    openPath: (fullPath) => shell.openPath(fullPath),
+    pickDirectory: async (window) => {
+      const result = await dialog.showOpenDialog(window, { properties: ['openDirectory'] })
+      return result.canceled ? undefined : result.filePaths[0]
+    },
+    pickCodeDocuments: (window) =>
+      dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] }),
+    openFile: (filePath) => open(filePath, 'r'),
+    stat: statFile
   }
 ): void {
   const destroyedSenderIds = new Set<number>()
@@ -158,6 +235,79 @@ function registerIpc(
     return preference.setThemePreferences(result.data)
   })
 
+  dependencies.ipcMain.handle(IpcChannel.Attachments_PickCodeDocuments, async (event) => {
+    const window = getCallingWindow(event)
+    let selection: { canceled: boolean; filePaths: string[] }
+    try {
+      selection = await dependencies.pickCodeDocuments(window)
+    } catch {
+      throw new Error('Unable to open the document picker. Please try again.')
+    }
+    if (selection.canceled) return []
+
+    const documents: ChatDocumentPart[] = []
+    let totalBytes = 0
+    for (const filePath of selection.filePaths) {
+      const name = basename(filePath)
+      // SAFETY: `includes` compares an extension string against this readonly allowlist.
+      if (
+        !CodeDocumentExtensions.includes(extname(name) as (typeof CodeDocumentExtensions)[number])
+      ) {
+        throw new Error('Only code and text documents can be attached.')
+      }
+      if (name.length > CodeDocumentMaxNameLength) {
+        throw new Error(`"${name}" is too long. Shorten or rename it and try again.`)
+      }
+
+      let fileSize: number
+      try {
+        fileSize = (await dependencies.stat(filePath)).size
+      } catch {
+        throw new Error(
+          `Unable to inspect "${name}". Check that the file still exists and try again.`
+        )
+      }
+      if (fileSize > CodeDocumentMaxTextBytes) {
+        throw new Error(`"${name}" is larger than 256 KiB. Choose a smaller file and try again.`)
+      }
+      if (totalBytes + fileSize > CodeDocumentsMaxTextBytes) {
+        throw new Error(
+          'Selected documents exceed the 1 MiB total limit. Choose fewer or smaller files and try again.'
+        )
+      }
+
+      let bytes: Uint8Array
+      try {
+        bytes = await readBoundedFile(dependencies.openFile, filePath, maxDocumentReadBytes)
+      } catch {
+        throw new Error(
+          `Unable to read "${name}". Check that the file is accessible and try again.`
+        )
+      }
+      if (bytes.byteLength > CodeDocumentMaxTextBytes) {
+        throw new Error(`"${name}" is larger than 256 KiB. Choose a smaller file and try again.`)
+      }
+      if (totalBytes + bytes.byteLength > CodeDocumentsMaxTextBytes) {
+        throw new Error(
+          'Selected documents exceed the 1 MiB total limit. Choose fewer or smaller files and try again.'
+        )
+      }
+
+      let text: string
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      } catch {
+        throw new Error(
+          `"${name}" is not valid UTF-8 text. Choose a UTF-8 encoded file and try again.`
+        )
+      }
+      documents.push(ChatDocumentPartSchema.parse({ type: 'document', name, text }))
+      totalBytes += bytes.byteLength
+    }
+
+    return documents
+  })
+
   dependencies.ipcMain.handle(IpcChannel.Chat_StartTurn, (event, input) => {
     getCallingWindow(event)
     const result = TurnStartRequestSchema.safeParse(input)
@@ -217,10 +367,22 @@ function registerIpc(
   })
   dependencies.ipcMain.handle(IpcChannel.Sessions_Create, (event, input) => {
     getCallingWindow(event)
-    const result = SessionTitleSchema.safeParse(input?.title)
-    if (!result.success) throw new Error('Invalid session title')
+    const title = SessionTitleSchema.safeParse(input?.title)
+    const projectId =
+      input?.projectId === undefined ? undefined : ProjectIdSchema.safeParse(input.projectId)
+    if (!title.success) throw new Error('Invalid session title')
+    if (projectId !== undefined && !projectId.success) throw new Error('Invalid session project')
 
-    return session.createSession({ title: result.data, defaultProfile: null })
+    const context = projectId?.success
+      ? workspace.getActiveProjectContext(projectId.data)
+      : workspace.getDefaultWorkspaceContext()
+
+    return session.createSession({
+      title: title.data,
+      defaultProfile: null,
+      projectId: context.projectId,
+      cwd: context.rootPath
+    })
   })
   dependencies.ipcMain.handle(IpcChannel.Sessions_Delete, (event, input) => {
     getCallingWindow(event)
@@ -243,6 +405,59 @@ function registerIpc(
     if (!sessionId.success || !title.success) throw new Error('Invalid session rename')
 
     return session.renameSession(sessionId.data, title.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_SetThinkingEffort, (event, input) => {
+    getCallingWindow(event)
+    const sessionId = SessionIdSchema.safeParse(input?.sessionId)
+    const thinkingEffort = ThinkingSelectionSchema.safeParse(input?.thinkingEffort)
+    if (!sessionId.success || !thinkingEffort.success)
+      throw new Error('Invalid session thinking effort')
+    turnExecutor.updateSessionThinkingEffort(sessionId.data, thinkingEffort.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Sessions_SetModelEntry, (event, input) => {
+    getCallingWindow(event)
+    const sessionId = SessionIdSchema.safeParse(input?.sessionId)
+    const modelEntryId = ModelEntryIdSchema.safeParse(input?.modelEntryId)
+    if (!sessionId.success || !modelEntryId.success) throw new Error('Invalid session model')
+    turnExecutor.updateSessionModelEntry(sessionId.data, modelEntryId.data)
+  })
+
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_List, (event) => {
+    getCallingWindow(event)
+    return workspace.listProjects()
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_AddFromDialog, async (event) => {
+    const window = getCallingWindow(event)
+    const directoryPath = await dependencies.pickDirectory(window)
+    return directoryPath ? workspace.addProject(directoryPath) : undefined
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_SetDefault, (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input)
+    if (!projectId.success) throw new Error('Invalid workspace project ID')
+    return workspace.setDefaultProject(projectId.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_Rename, (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input?.projectId)
+    const name = SessionTitleSchema.safeParse(input?.name)
+    if (!projectId.success || !name.success) throw new Error('Invalid workspace project rename')
+    return workspace.renameProject(projectId.data, name.data)
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_Reveal, async (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input)
+    if (!projectId.success) throw new Error('Invalid workspace project ID')
+    const error = await dependencies.openPath(
+      workspace.getActiveProjectContext(projectId.data).rootPath
+    )
+    if (error) throw new Error('Unable to open workspace folder')
+  })
+  dependencies.ipcMain.handle(IpcChannel.Workspaces_Archive, (event, input) => {
+    getCallingWindow(event)
+    const projectId = ProjectIdSchema.safeParse(input)
+    if (!projectId.success) throw new Error('Invalid workspace project ID')
+    return workspace.archiveProject(projectId.data)
   })
 
   dependencies.ipcMain.handle(IpcChannel.Providers_GetLibrary, (event) => {

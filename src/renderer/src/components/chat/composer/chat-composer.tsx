@@ -1,62 +1,132 @@
-import {
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  IconMenuButton,
-  IconTooltipButton,
-  IconSwap,
-  Textarea
-} from '@mico/ui'
-import { ArrowUpIcon, BrainIcon, SquareIcon } from 'lucide-react'
+import { IconTooltipButton, IconSwap, Textarea } from '@mico/ui'
+import { ArrowUpIcon, SquareIcon } from 'lucide-react'
 import * as React from 'react'
 
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
+import type {
+  ChatDocumentPart,
+  ModelReasoningCapabilities,
+  ThinkingSelection
+} from '@shared/data/schemas/chat'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 
 import { ChatModelSelector } from './chat-model-selector'
+import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
+import { ProjectSelector } from './project-selector'
+import { ThinkingSelector } from './thinking-selector'
 import { useComposerModelSelection } from './use-composer-model-selection'
 
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
 type ChatComposerProps = {
+  canAddProject?: boolean
   focusKey: number
   mode: ChatComposerMode
   onModelSelected: () => Promise<void>
-  onSend: (content: string) => void
+  onAddProject?: () => Promise<void>
+  onProjectSelected?: (project: WorkspaceProject) => void
+  onProjectsRefresh?: () => Promise<void>
+  projectId?: string | null
+  projectLabel?: string | null
+  projectPath?: string | null
+  projects?: WorkspaceProject[]
+  selectedModelEntryId?: string | null
+  selectSessionModel?: (modelEntryId: string) => Promise<void>
+  onSend: (content: { text: string; documents: ChatDocumentPart[] }) => Promise<boolean>
   onStop: () => void
   reasoningCapabilities: ModelReasoningCapabilities | null
   thinkingEffort: ThinkingSelection
   onThinkingEffortChange: (selection: ThinkingSelection) => void
 }
 
-const thinkingEffortLabels = {
-  none: 'Off',
-  auto: 'On',
-  minimal: 'Minimal',
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  xhigh: 'Extra high',
-  max: 'Max'
-} satisfies Record<Exclude<ThinkingSelection, 'default'>, string>
+const rotatingPlaceholders = [
+  'Ask Mico to explain a concept…',
+  'Plan a project step by step…',
+  'Brainstorm your next idea…'
+]
 
 function ChatComposer({
+  canAddProject = false,
   focusKey,
   mode,
   onModelSelected,
+  onAddProject,
+  onProjectSelected,
+  onProjectsRefresh,
+  projectId,
+  projectLabel,
+  projectPath,
+  projects = [],
+  selectedModelEntryId,
+  selectSessionModel,
   onSend,
   onStop,
   reasoningCapabilities,
   thinkingEffort,
   onThinkingEffortChange
 }: ChatComposerProps): React.JSX.Element {
-  const { hasSelectedModel, library, selectionError, selectModel } = useComposerModelSelection({
-    onModelSelected
-  })
+  const { currentModelId, hasSelectedModel, library, selectionError, selectModel } =
+    useComposerModelSelection({ onModelSelected, selectedModelEntryId, selectSessionModel })
   const [draft, setDraft] = React.useState('')
+  const [documents, setDocuments] = React.useState<ChatDocumentPart[]>([])
+  const [isSending, setIsSending] = React.useState(false)
+  const [sendError, setSendError] = React.useState<string | null>(null)
+  const [isFocused, setIsFocused] = React.useState(false)
+  const [placeholderIndex, setPlaceholderIndex] = React.useState(0)
+  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const mountedRef = React.useRef(false)
   const previousFocusKeyRef = React.useRef(focusKey)
   const previousModeRef = React.useRef(mode)
-  const isDisabled = mode === 'disabled'
+  const isDisabled = mode === 'disabled' || isSending
+  const showRotatingPlaceholder =
+    canAddProject && mode === 'send' && !draft && !isFocused && !prefersReducedMotion
+
+  React.useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const updatePreference = (): void => setPrefersReducedMotion(mediaQuery.matches)
+
+    mediaQuery.addEventListener('change', updatePreference)
+    return () => mediaQuery.removeEventListener('change', updatePreference)
+  }, [])
+
+  React.useEffect(() => {
+    if (!showRotatingPlaceholder) return
+
+    const interval = window.setInterval(() => {
+      setPlaceholderIndex((current) => (current + 1) % rotatingPlaceholders.length)
+    }, 4_500)
+
+    return () => window.clearInterval(interval)
+  }, [showRotatingPlaceholder])
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target
+      const isEditableTarget =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
+
+      if (
+        mode !== 'send' ||
+        isSending ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.key.length !== 1 ||
+        isEditableTarget
+      )
+        return
+
+      textareaRef.current?.focus()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isSending, mode])
 
   // Restore typing readiness after a conversation becomes available for input.
   React.useEffect(() => {
@@ -81,17 +151,31 @@ function ChatComposer({
     textarea.style.height = `${textarea.scrollHeight}px`
   }, [draft])
 
-  const submit = (): void => {
-    if (mode !== 'send' || !hasSelectedModel || !draft.trim()) return
+  const submit = async (): Promise<void> => {
+    if (mode !== 'send' || isSending || !hasSelectedModel || (!draft.trim() && !documents.length))
+      return
 
-    onSend(draft)
-    setDraft('')
+    setIsSending(true)
+    setSendError(null)
+    try {
+      if (await onSend({ text: draft, documents })) {
+        setDraft('')
+        setDocuments([])
+      }
+    } catch (cause) {
+      const detail = cause instanceof Error ? ` ${cause.message}` : ''
+      setSendError(
+        `Could not send this message.${detail} Your draft and attachments are kept. Try again.`
+      )
+    } finally {
+      setIsSending(false)
+    }
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      submit()
+      void submit()
     }
   }
 
@@ -100,57 +184,80 @@ function ChatComposer({
       className="chat-composer shrink-0 px-4 pb-5 pt-3 sm:px-6"
       onSubmit={(event) => {
         event.preventDefault()
-        submit()
+        void submit()
       }}
     >
       <div className="chat-composer__surface mx-auto flex w-full max-w-[50rem] flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
-        <Textarea
-          className="min-h-16 max-h-40 resize-none border-0 px-2 py-2.5 text-[15px] leading-6 shadow-none transition-[height] duration-200 ease-out motion-reduce:transition-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
-          ref={textareaRef}
-          disabled={isDisabled}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Message Mico Today"
-          value={draft}
+        <ComposerAttachmentList
+          disabled={mode !== 'send' || isSending}
+          documents={documents}
+          onDocumentsChange={setDocuments}
         />
-        <div className="flex min-h-8 items-center justify-between gap-4 px-0.5">
+        <div className="relative">
+          <Textarea
+            className="min-h-16 max-h-40 resize-none border-0 px-2 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
+            ref={textareaRef}
+            disabled={isDisabled}
+            onBlur={() => setIsFocused(false)}
+            onChange={(event) => setDraft(event.target.value)}
+            onFocus={() => setIsFocused(true)}
+            onKeyDown={handleKeyDown}
+            placeholder={showRotatingPlaceholder ? '' : 'Ask Mico anything…'}
+            value={draft}
+          />
+          {showRotatingPlaceholder ? (
+            <span
+              aria-hidden="true"
+              className="chat-composer__suggestion pointer-events-none absolute left-2 top-2.5 max-w-[calc(100%-1rem)] truncate text-[15px] leading-6 text-muted-foreground/80 select-none"
+              key={placeholderIndex}
+            >
+              {rotatingPlaceholders[placeholderIndex]}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex min-h-8 select-none items-center justify-between gap-4 px-0.5">
           <div className="flex min-w-0 items-center gap-1.5">
+            <ComposerAttachments
+              disabled={mode !== 'send' || isSending}
+              documents={documents}
+              onDocumentsChange={setDocuments}
+            />
             <div className="flex flex-col gap-1">
-              <ChatModelSelector library={library} onSelect={selectModel} />
+              <ChatModelSelector
+                library={library}
+                onSelect={selectModel}
+                selectedModelId={currentModelId}
+              />
               {selectionError ? (
                 <p className="px-2 text-xs text-destructive">{selectionError}</p>
               ) : null}
             </div>
             {reasoningCapabilities ? (
-              <IconMenuButton
-                className="size-8"
+              <ThinkingSelector
                 disabled={mode !== 'send'}
-                icon={<BrainIcon aria-hidden="true" />}
-                label="Thinking effort"
-                type="button"
-                variant="secondary"
-              >
-                <DropdownMenuRadioGroup
-                  value={thinkingEffort}
-                  // SAFETY: Every selectable item is rendered with a canonical thinking-effort value.
-                  onValueChange={(selection) =>
-                    onThinkingEffortChange(selection as ThinkingSelection)
-                  }
-                >
-                  {reasoningCapabilities.selectableEfforts.map((selection) => (
-                    <DropdownMenuRadioItem key={selection} value={selection}>
-                      {thinkingEffortLabels[selection]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </IconMenuButton>
+                onValueChange={onThinkingEffortChange}
+                reasoningCapabilities={reasoningCapabilities}
+                value={thinkingEffort}
+              />
             ) : null}
+            <ProjectSelector
+              canAddProject={canAddProject}
+              onAddProject={onAddProject}
+              onProjectSelected={onProjectSelected}
+              onProjectsRefresh={onProjectsRefresh}
+              projectId={projectId}
+              projectLabel={projectLabel}
+              projectPath={projectPath}
+              projects={projects}
+            />
           </div>
           <div className="flex shrink-0 items-center">
             <IconTooltipButton
-              className="size-8"
+              className="size-9"
               disabled={
-                mode === 'disabled' || (mode === 'send' && (!hasSelectedModel || !draft.trim()))
+                isSending ||
+                mode === 'disabled' ||
+                (mode === 'send' && (!hasSelectedModel || (!draft.trim() && !documents.length)))
               }
               icon={
                 <IconSwap
@@ -168,10 +275,16 @@ function ChatComposer({
               }
               type={mode === 'stop' ? 'button' : 'submit'}
               variant={mode === 'stop' ? 'secondary' : 'default'}
+              size="icon-lg"
               onClick={mode === 'stop' ? onStop : undefined}
             />
           </div>
         </div>
+        {sendError ? (
+          <p className="px-2 text-xs text-destructive" role="alert">
+            {sendError}
+          </p>
+        ) : null}
       </div>
     </form>
   )

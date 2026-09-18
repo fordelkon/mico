@@ -1,12 +1,15 @@
 import * as z from 'zod'
 
 import { ChatMessageSchema, ThinkingSelectionSchema } from './chat'
+import { ModelEntryIdSchema } from './provider'
 import { defineSchema } from '../define'
 
 const SessionIdSchema = defineSchema(z.string().trim().min(1))
+const ProjectIdSchema = defineSchema(z.string().trim().min(1))
 const SessionTitleSchema = defineSchema(z.string().trim().min(1).max(200))
 const ExecutionProfileSnapshotSchema = defineSchema(
   z.object({
+    modelEntryId: ModelEntryIdSchema,
     providerId: z.string().trim().min(1),
     modelId: z.string().trim().min(1),
     thinkingEffort: ThinkingSelectionSchema,
@@ -17,6 +20,8 @@ const SessionSummarySchema = defineSchema(
   z.object({
     id: SessionIdSchema,
     title: SessionTitleSchema,
+    projectId: ProjectIdSchema.nullable().optional(),
+    cwd: z.string().trim().min(1).nullable().optional(),
     defaultProfile: ExecutionProfileSnapshotSchema.nullable(),
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),
@@ -34,6 +39,7 @@ type PersistedSession = z.infer<typeof PersistedSessionSchema>
 export {
   ExecutionProfileSnapshotSchema,
   PersistedSessionSchema,
+  ProjectIdSchema,
   SessionIdSchema,
   SessionSummarySchema,
   SessionTitleSchema

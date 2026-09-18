@@ -16,10 +16,12 @@ import {
   DropdownMenuSeparator,
   IconMenuButton,
   Input,
+  Kbd,
   SidebarMenuButton,
   SidebarMenuItem,
   Spinner
 } from '@mico/ui'
+import type { GlidingHighlightItemProps } from '@renderer/hooks/use-gliding-highlight'
 import type { Conversation } from '@renderer/types/chat'
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
@@ -37,6 +39,8 @@ type ConversationRowProps = {
   onDeleteConversation: (conversationId: string) => void
   onRenameConversation: (conversationId: string, title: string) => void
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
+  shortcutNumber?: number
+  glidingHighlightItemProps?: GlidingHighlightItemProps<HTMLLIElement>
 }
 
 function ConversationRowStatus(): React.JSX.Element {
@@ -65,7 +69,9 @@ function ConversationRowComponent({
   selected,
   onDeleteConversation,
   onRenameConversation,
-  onSelectConversation
+  onSelectConversation,
+  shortcutNumber,
+  glidingHighlightItemProps
 }: ConversationRowProps): React.JSX.Element {
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
@@ -166,6 +172,7 @@ function ConversationRowComponent({
           className="conversation-row mx-1.5 my-px"
           data-deleting={deleting || undefined}
           data-responding={isResponding || undefined}
+          {...glidingHighlightItemProps}
           onAnimationEnd={handleDeleteAnimationEnd}
         >
           {editing ? (
@@ -211,9 +218,12 @@ function ConversationRowComponent({
               <span className="conversation-row__title-viewport" ref={titleViewportRef}>
                 <span className="conversation-row__title">{conversation.title}</span>
               </span>
+              {shortcutNumber !== undefined && (
+                <Kbd className="conversation-row__shortcut">⌘ {shortcutNumber}</Kbd>
+              )}
             </SidebarMenuButton>
           )}
-          {!editing && !deleting && (
+          {!editing && !deleting && shortcutNumber === undefined && (
             <div
               className="conversation-row__actions"
               onClick={(event) => event.stopPropagation()}
@@ -240,7 +250,9 @@ function ConversationRowComponent({
               </IconMenuButton>
             </div>
           )}
-          {!editing && !deleting && isResponding && <ConversationRowStatus />}
+          {!editing && !deleting && shortcutNumber === undefined && isResponding && (
+            <ConversationRowStatus />
+          )}
           <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>

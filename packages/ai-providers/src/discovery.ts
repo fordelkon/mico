@@ -1,6 +1,7 @@
 import * as z from 'zod'
 
 import { createAnthropicHeaders } from './anthropic-auth'
+import { getNativeApiUrl, getVersionedSiblingApiUrl } from './url'
 import type {
   DiscoveredModel,
   DiscoverableProviderId,
@@ -17,11 +18,6 @@ const ModelStringSchema = z
   .pipe(z.string().min(1))
   .optional()
   .catch(undefined)
-const LMStudioModelsSchema = z
-  .object({
-    models: z.array(z.object({ key: ModelStringSchema, display_name: ModelStringSchema })).catch([])
-  })
-  .transform(({ models }) => models.map(({ key }) => ({ modelId: key })))
 const OllamaModelsSchema = z
   .object({ models: z.array(z.object({ name: ModelStringSchema })).catch([]) })
   .transform(({ models }) => models.map(({ name }) => ({ modelId: name })))
@@ -37,19 +33,11 @@ function getOpenAIModelsUrl(
   baseUrl: string,
   requestPath: 'responses' | 'chat/completions'
 ): string {
-  const url = new URL(baseUrl)
-  const path = url.pathname.replace(/\/+$/, '')
-  const root = path.endsWith(`/${requestPath}`) ? path.slice(0, -requestPath.length - 1) : path
-  url.pathname = /\/v\d+$/.test(root) ? `${root}/models` : `${root}/v1/models`
-  return url.toString()
+  return getVersionedSiblingApiUrl(baseUrl, requestPath, 'models')
 }
 
 function getAnthropicModelsUrl(baseUrl: string): string {
-  const url = new URL(baseUrl)
-  const path = url.pathname.replace(/\/+$/, '')
-  const root = path.endsWith('/messages') ? path.slice(0, -'/messages'.length) : path
-  url.pathname = root.endsWith('/v1') ? `${root}/models` : `${root}/v1/models`
-  return url.toString()
+  return getVersionedSiblingApiUrl(baseUrl, 'messages', 'models')
 }
 
 function getHeaders(
@@ -69,14 +57,9 @@ function getHeaders(
 
 function getRequest(input: ModelDiscoveryInput): ModelDiscoveryRequest {
   switch (input.provider) {
-    case 'lm-studio':
-      return {
-        url: new URL('/api/v1/models', input.baseUrl).toString(),
-        headers: getHeaders(input.provider, input.apiKey, input.headers)
-      }
     case 'ollama':
       return {
-        url: new URL('/api/tags', input.baseUrl).toString(),
+        url: getNativeApiUrl(input.baseUrl, 'api/tags'),
         headers: getHeaders(input.provider, input.apiKey, input.headers)
       }
     case 'openai-responses':
@@ -112,24 +95,20 @@ async function parseModels(
 ): Promise<DiscoveredModel[]> {
   const payload = await response.json()
   const parsed =
-    provider === 'lm-studio'
-      ? LMStudioModelsSchema.safeParse(payload)
-      : provider === 'ollama'
-        ? OllamaModelsSchema.safeParse(payload)
-        : OpenAIModelsSchema.safeParse(payload)
+    provider === 'ollama'
+      ? OllamaModelsSchema.safeParse(payload)
+      : OpenAIModelsSchema.safeParse(payload)
   return normalizeModels(parsed.success ? parsed.data : [])
 }
 
 function getProviderName(provider: DiscoverableProviderId): string {
-  return provider === 'lm-studio'
-    ? 'LM Studio'
-    : provider === 'ollama'
-      ? 'Ollama'
-      : provider === 'openai-responses'
-        ? 'OpenAI Responses'
-        : provider === 'openai-compatible'
-          ? 'OpenAI-compatible'
-          : 'Anthropic-compatible'
+  return provider === 'ollama'
+    ? 'Ollama'
+    : provider === 'openai-responses'
+      ? 'OpenAI Responses'
+      : provider === 'openai-compatible'
+        ? 'OpenAI-compatible'
+        : 'Anthropic-compatible'
 }
 
 async function discoverModels(

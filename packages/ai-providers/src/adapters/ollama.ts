@@ -6,6 +6,8 @@ import type {
   ChatProviderConfiguration,
   ChatProviderDependencies,
   ChatProviderMessage,
+  ChatProviderTool,
+  JsonObject,
   ProviderPerformanceMetrics,
   ThinkingSelection
 } from '../contracts'
@@ -13,41 +15,106 @@ import { parseNdjson } from '../streaming/ndjson'
 import { createReasoningChunkEmitter } from '../streaming/parts'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
 import { getOptimisticThinkingCapabilities } from '../thinking-preferences'
+import { getNativeApiUrl } from '../url'
 
 type OllamaConfiguration = Extract<ChatProviderConfiguration, { provider: 'ollama' }>
-type OllamaMessage = { role: ChatProviderMessage['role']; content: string; thinking?: string }
+type OllamaMessage = {
+  role: ChatProviderMessage['role']
+  content: string
+  thinking?: string
+  tool_calls?: Array<{
+    id?: string
+    type: 'function'
+    function: { name: string; arguments: JsonObject }
+  }>
+  tool_name?: string
+}
 type OllamaRequest = {
   model: string
   messages: OllamaMessage[]
   stream: true
   think?: boolean | string
+  tools?: Array<{
+    type: 'function'
+    function: {
+      name: string
+      description: string
+      parameters: ChatProviderTool['inputSchema']
+    }
+  }>
 }
 const ChunkSchema = z.object({
-  message: z.object({ content: z.string().optional(), thinking: z.string().optional() }).optional(),
+  message: z
+    .object({
+      content: z.string().optional(),
+      thinking: z.string().optional(),
+      tool_calls: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            function: z.object({
+              name: z.string(),
+              arguments: z.json()
+            })
+          })
+        )
+        .optional()
+    })
+    .optional(),
   done: z.boolean().optional(),
   eval_count: z.number().nonnegative().optional(),
   eval_duration: z.number().positive().optional(),
   error: z.string().optional()
 })
+const ModelDetailsSchema = z.object({ capabilities: z.array(z.string()) })
+const ToolArgumentsSchema = z.record(z.string(), z.json())
 function getUrl(baseUrl: string): string {
-  return new URL('/api/chat', baseUrl).toString()
+  return getNativeApiUrl(baseUrl, 'api/chat')
+}
+function getModelDetailsUrl(baseUrl: string): string {
+  return getNativeApiUrl(baseUrl, 'api/show')
 }
 function toMessages(messages: ChatProviderMessage[]) {
-  return messages.map((message) => {
+  return messages.flatMap((message): OllamaMessage[] => {
+    if (message.role === 'tool')
+      return message.parts.flatMap((part) =>
+        part.type === 'tool-result'
+          ? [{ role: 'tool', content: part.output, tool_name: part.toolName }]
+          : []
+      )
     const result: OllamaMessage = {
       role: message.role,
-      content: message.parts
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('\n')
+      content: message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n')
     }
     const thinking = message.parts
-      .filter((part) => part.type === 'reasoning')
-      .map((part) => part.text)
+      .flatMap((part) => (part.type === 'reasoning' ? [part.text] : []))
       .join('\n')
     if (message.role === 'assistant' && thinking) result.thinking = thinking
-    return result
+    if (message.role === 'assistant') {
+      const calls = message.parts.flatMap((part) =>
+        part.type === 'tool-call'
+          ? [
+              {
+                id: part.toolCallId,
+                type: 'function' as const,
+                function: {
+                  name: part.toolName,
+                  arguments: ToolArgumentsSchema.parse(JSON.parse(part.argumentsJson))
+                }
+              }
+            ]
+          : []
+      )
+      if (calls.length) result.tool_calls = calls
+    }
+    return [result]
   })
+}
+function toTools(tools: readonly ChatProviderTool[]) {
+  return tools.map((tool) => ({
+    type: 'function' as const,
+    function: { name: tool.name, description: tool.description, parameters: tool.inputSchema }
+  }))
 }
 function toThink(selection: ThinkingSelection): boolean | string | undefined {
   // Ollama accepts false to disable thinking and uses max for its highest
@@ -62,16 +129,30 @@ function createOllamaProvider(
   dependencies: ChatProviderDependencies
 ): ChatProvider {
   return {
-    // Ollama does not expose per-model reasoning capabilities, so it follows the
-    // same stable, optimistic five-level UI contract as compatible endpoints.
-    getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
-    stream: async ({ messages, thinkingEffort, signal, onPerformanceMetrics }) => {
+    getModelCapabilities: async () => {
+      const response = await dependencies.fetch(getModelDetailsUrl(configuration.baseUrl), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: configuration.modelId })
+      })
+      if (!response.ok)
+        throw new Error(
+          `Ollama model capabilities request failed (${response.status} ${response.statusText}).`
+        )
+      const details = ModelDetailsSchema.safeParse(await response.json())
+      if (!details.success) throw new Error('Ollama returned invalid model capabilities.')
+      return details.data.capabilities.includes('thinking')
+        ? getOptimisticThinkingCapabilities()
+        : null
+    },
+    stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
       const think = toThink(thinkingEffort)
       const body: OllamaRequest = {
         model: configuration.modelId,
         messages: toMessages(messages),
         stream: true
       }
+      if (tools?.length) body.tools = toTools(tools)
       if (think !== undefined) body.think = think
       const response = await dependencies.fetch(getUrl(configuration.baseUrl), {
         method: 'POST',
@@ -96,6 +177,26 @@ function createOllamaProvider(
           if (parsed.data.message?.content) {
             yield* reasoning.finish()
             yield* text.emitDelta(parsed.data.message.content)
+          }
+          for (const call of parsed.data.message?.tool_calls ?? []) {
+            const toolCallId = call.id ?? dependencies.createId()
+            yield { type: 'tool-input-start', toolCallId, toolName: call.function.name }
+            const argumentsResult = ToolArgumentsSchema.safeParse(call.function.arguments)
+            if (argumentsResult.success)
+              yield {
+                type: 'tool-input-available',
+                toolCallId,
+                toolName: call.function.name,
+                input: argumentsResult.data
+              }
+            else
+              yield {
+                type: 'tool-input-error',
+                toolCallId,
+                toolName: call.function.name,
+                input: call.function.arguments,
+                errorText: 'The Ollama provider returned invalid tool arguments.'
+              }
           }
           if (parsed.data.done) {
             if (parsed.data.eval_count !== undefined) {

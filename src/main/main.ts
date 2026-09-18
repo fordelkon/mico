@@ -10,12 +10,14 @@ import { MainWindowService } from './services/main-window-service'
 import { PreferenceService } from './services/preference-service'
 import { ProviderService } from './ai/providers/provider-service'
 import { SessionRuntimeService } from './ai/sessions/session-runtime-service'
+import { WorkspaceService } from './ai/workspaces/workspace-service'
 import { SessionDatabase } from './data/session-database'
 import { TrayService } from './services/tray-service'
 
 const preferenceService = new PreferenceService()
 const providerService = new ProviderService()
 const sessionDatabase = new SessionDatabase()
+const workspaceService = new WorkspaceService()
 const pendingProviderDraftFlushes = new Map<number, () => void>()
 ipcMain.on(IpcChannel.Providers_DraftFlushed, (event) => {
   pendingProviderDraftFlushes.get(event.sender.id)?.()
@@ -86,14 +88,19 @@ if (gotTheLock) {
     await preferenceService.initialize()
     await providerService.initialize()
     await sessionDatabase.initialize()
+    await workspaceService.initialize()
     sessionRuntimeService = new SessionRuntimeService({ database: sessionDatabase })
     sessionRuntimeService.recoverInterruptedRuns()
     turnExecutor = new TurnExecutor(
       createChatProviderResolver({
         createChatProvider,
-        getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration()
+        getChatConfigurationForModelEntry: (modelEntryId) =>
+          providerService.getChatConfigurationForModelEntry(modelEntryId)
       }),
       {
+        getChatConfigurationForModelEntry: (modelEntryId) =>
+          providerService.getChatConfigurationForModelEntry(modelEntryId),
+        getSelectedModelEntryId: () => providerService.getLibrary().selectedModelId,
         getSelectedChatConfiguration: () => providerService.getSelectedChatConfiguration(),
         runtime: sessionRuntimeService
       }
@@ -105,7 +112,8 @@ if (gotTheLock) {
       mainWindow: mainWindowService,
       preference: preferenceService,
       provider: providerService,
-      session: sessionRuntimeService
+      session: sessionRuntimeService,
+      workspace: workspaceService
     })
 
     app.on('activate', () => {

@@ -1,11 +1,11 @@
 import type { ChatProvider, ChatProviderConfiguration, ChatProviderDependencies } from './contracts'
-import { createLMStudioProvider } from './adapters/lm-studio'
 import { createOpenAIResponsesProvider } from './adapters/openai-responses'
 import { createOpenAICompatibleProvider } from './adapters/openai-compatible'
 import { createAnthropicCompatibleProvider } from './adapters/anthropic-compatible'
 import { createOllamaProvider } from './adapters/ollama'
 import { discoverModels } from './discovery'
 import { testChatProvider } from './testing'
+export { resolveThinkingSelection } from './reasoning'
 
 const defaultDependencies: ChatProviderDependencies = {
   fetch,
@@ -17,8 +17,6 @@ function createChatProvider(
   dependencies: ChatProviderDependencies = defaultDependencies
 ): ChatProvider {
   switch (configuration.provider) {
-    case 'lm-studio':
-      return createLMStudioProvider(configuration, dependencies)
     case 'openai-responses':
       return createOpenAIResponsesProvider(configuration, dependencies)
     case 'openai-compatible':
@@ -37,8 +35,14 @@ export type {
   ChatProviderDependencies,
   ChatProviderMessage,
   ChatProviderStreamInput,
+  ChatProviderTool,
+  ChatProviderToolCall,
+  ChatProviderToolCallPart,
+  ChatProviderToolResultPart,
   DiscoveredModel,
   DiscoverableProviderId,
+  JsonObject,
+  JsonValue,
   LocalProviderId,
   ModelDiscoveryDependencies,
   ModelDiscoveryInput,
