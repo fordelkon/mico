@@ -79,6 +79,30 @@ function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
     metadata: message.metadata,
     parts: message.parts.flatMap<MicoUIMessage['parts'][number]>((part) => {
       if (part.type === 'document') return [{ type: 'data-document', data: part }]
+      if (part.type === 'tool-trace') {
+        if (part.state === 'output-error') {
+          return [
+            {
+              type: 'dynamic-tool',
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              input: part.input,
+              state: 'output-error',
+              errorText: part.errorText
+            }
+          ]
+        }
+        return [
+          {
+            type: 'dynamic-tool',
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: part.input,
+            state: 'output-available',
+            output: part.output
+          }
+        ]
+      }
       return part.type === 'text' ? [{ type: 'text', text: part.text, state: 'done' }] : []
     })
   }))

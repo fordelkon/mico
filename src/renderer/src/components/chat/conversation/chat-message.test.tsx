@@ -206,4 +206,74 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('answer-content')).toHaveTextContent('The answer.')
     expect(screen.getByTestId('answer-content')).not.toHaveTextContent('Inspecting the request.')
   })
+
+  it('keeps tool traces between consecutive reasoning parts', () => {
+    render(
+      <ChatMessage
+        isStreaming={false}
+        message={{
+          id: 'assistant-tools',
+          role: 'assistant',
+          parts: [
+            { type: 'reasoning', text: 'Inspecting the request.' },
+            {
+              type: 'dynamic-tool',
+              toolCallId: 'call-1',
+              toolName: 'read',
+              state: 'output-available',
+              input: { path: 'src/index.ts' },
+              output: 'export {}'
+            },
+            { type: 'reasoning', text: 'Preparing the answer.' },
+            { type: 'text', text: 'Done.' }
+          ]
+        }}
+      />
+    )
+
+    const transcript = screen.getByText('Done.').closest('[data-slot="message-content"]')
+    if (!transcript) throw new Error('Message content is missing.')
+    expect(transcript.textContent).toMatch(
+      /Inspecting the request\.[\s\S]*Read[\s\S]*src\/index\.ts[\s\S]*Preparing the answer\.[\s\S]*Done\./
+    )
+  })
+
+  it('compacts a completed tool when the next reasoning activity arrives', () => {
+    const tool = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'call-sequence',
+      toolName: 'bash',
+      input: { command: 'printf sequence' }
+    }
+    const { rerender } = render(
+      <ChatMessage
+        isStreaming
+        message={{
+          id: 'assistant-sequence',
+          role: 'assistant',
+          parts: [{ ...tool, state: 'input-available' }]
+        }}
+      />
+    )
+
+    rerender(
+      <ChatMessage
+        isStreaming
+        message={{
+          id: 'assistant-sequence',
+          role: 'assistant',
+          parts: [
+            { ...tool, state: 'output-available', output: 'sequence' },
+            { type: 'reasoning', text: 'Checking the next step.' }
+          ]
+        }}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: 'Run printf sequenceCompleted' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.getAllByTestId('agent-activity-event')).toHaveLength(2)
+  })
 })

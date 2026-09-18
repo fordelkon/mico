@@ -11,6 +11,8 @@ import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shar
 
 import { describeChatError } from './chat-error'
 import type { ChatProviderResolver } from './chat-provider-resolver'
+import { ToolAgentRunner } from '../tools/tool-agent-runner'
+import { ToolRegistry } from '../tools/tool-registry'
 import type {
   ExecutionProfileSnapshot,
   SessionRuntimeService
@@ -40,7 +42,9 @@ type TurnExecutorOptions = {
     | 'finishRun'
     | 'getDefaultProfile'
     | 'getContextMessages'
+    | 'loadSession'
     | 'markRequestStarted'
+    | 'recordToolTrace'
     | 'renameSessionIfCurrentTitle'
     | 'retryTurn'
     | 'startTurn'
@@ -282,33 +286,40 @@ class TurnExecutor {
 
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
-          const stream = await provider.stream({
+          const cwd = this.runtime?.loadSession(request.sessionId).cwd
+          const runnerInput = {
             conversationKey: `${turn.ownerId}:${request.sessionId}`,
+            provider,
             messages: (turn.runId
               ? (this.runtime?.getContextMessages(turn.runId) ?? [request.userMessage])
               : [request.userMessage]
             ).map(toProviderMessage),
             thinkingEffort: effectiveThinkingEffort,
-            signal: turn.controller.signal
-          })
-          for await (const chunk of stream) {
-            if (!turn.controller.signal.aborted) {
+            signal: turn.controller.signal,
+            emit: (chunk) => {
+              if (turn.controller.signal.aborted) return
               receivedChunk = true
               if (chunk.type === 'text-delta') {
                 // Chunks append in O(delta); the full string is only materialized when read.
                 const visibleDelta = turn.assistantTextBuilder.append(chunk.delta)
-                if (visibleDelta) {
+                if (visibleDelta)
                   emit({
                     type: 'chunk',
                     requestId: request.requestId,
                     chunk: { ...chunk, delta: visibleDelta }
                   })
-                }
-              } else {
-                emit({ type: 'chunk', requestId: request.requestId, chunk })
+                return
               }
+              emit({ type: 'chunk', requestId: request.requestId, chunk })
             }
           }
+          if (cwd) Object.assign(runnerInput, { registry: ToolRegistry.forWorkspace(cwd) })
+          if (turn.runId)
+            Object.assign(runnerInput, {
+              onToolResult: (trace: Parameters<SessionRuntimeService['recordToolTrace']>[1]) =>
+                this.runtime?.recordToolTrace(turn.runId!, trace)
+            })
+          await new ToolAgentRunner().run(runnerInput)
 
           if (!turn.controller.signal.aborted) {
             if (turn.runId) {
@@ -534,9 +545,12 @@ function formatDocument(part: ChatDocumentPart): string {
 function toProviderMessage(message: ChatMessage): ChatProviderMessage {
   return {
     ...message,
-    parts: message.parts.map((part) =>
-      part.type === 'document' ? { type: 'text', text: formatDocument(part) } : part
-    )
+    // Tool traces are renderer-only persistence projections, never provider conversation context.
+    parts: message.parts
+      .filter((part) => part.type !== 'tool-trace')
+      .map((part) =>
+        part.type === 'document' ? { type: 'text', text: formatDocument(part) } : part
+      )
   }
 }
 

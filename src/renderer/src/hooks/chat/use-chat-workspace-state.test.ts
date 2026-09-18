@@ -289,6 +289,53 @@ describe('useChatWorkspaceState', () => {
     })
   })
 
+  it('hydrates persisted tool traces into completed tool chips', async () => {
+    const api = new FakeChatAPI()
+    api.sessions.load = async () => ({
+      id: 'session-1',
+      title: 'Saved chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 2,
+      lastActivityAt: 2,
+      messages: [
+        { role: 'user' as const, parts: [{ type: 'text' as const, text: 'Read the file' }] },
+        {
+          role: 'assistant' as const,
+          parts: [
+            {
+              type: 'tool-trace' as const,
+              toolCallId: 'call-1',
+              toolName: 'read',
+              input: { path: 'package.json' },
+              state: 'output-available' as const,
+              output: 'Read 1 line.'
+            },
+            { type: 'text' as const, text: 'Done' }
+          ]
+        }
+      ]
+    })
+    exposeApi(api)
+    const { result } = renderHook(() => useChatWorkspaceState())
+
+    act(() => result.current.selectConversation('session-1'))
+
+    await waitFor(() =>
+      expect(result.current.activeChat?.messages.at(-1)?.parts).toMatchObject([
+        {
+          type: 'dynamic-tool',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          input: { path: 'package.json' },
+          state: 'output-available',
+          output: 'Read 1 line.'
+        },
+        { type: 'text', text: 'Done' }
+      ])
+    )
+  })
+
   it('keeps streamed transcript updates out of workspace renders', async () => {
     vi.useFakeTimers()
     const api = new FakeChatAPI()

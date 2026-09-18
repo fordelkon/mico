@@ -11,10 +11,20 @@ type ChatReasoningPart = {
   text: string
   providerMetadata?: ProviderMetadata
 }
+type ChatToolTraceInput = { command?: string; editCount?: number; path?: string }
+type ChatToolTracePartBase = {
+  type: 'tool-trace'
+  toolCallId: string
+  toolName: string
+  input: ChatToolTraceInput
+}
+type ChatToolTracePart =
+  | (ChatToolTracePartBase & { state: 'output-available'; output: string })
+  | (ChatToolTracePartBase & { state: 'output-error'; errorText: string })
 type ChatMessageMetadata = { completionState?: 'complete' | 'stopped' }
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant'
-  parts: Array<ChatTextPart | ChatDocumentPart | ChatReasoningPart>
+  parts: Array<ChatTextPart | ChatDocumentPart | ChatReasoningPart | ChatToolTracePart>
   metadata?: ChatMessageMetadata
   providerMetadata?: ProviderMetadata
 }
@@ -91,9 +101,43 @@ const ChatReasoningPartSchema: z.ZodType<ChatReasoningPart> = defineSchema(
     providerMetadata: z.custom<ProviderMetadata>().optional()
   })
 )
+const ChatToolTraceInputSchema: z.ZodType<ChatToolTraceInput> = defineSchema(
+  z.object({
+    command: z.string().trim().min(1).max(240).optional(),
+    editCount: z.number().int().positive().max(100).optional(),
+    path: z.string().trim().min(1).max(4_096).optional()
+  })
+)
+const ChatToolTracePartSchema: z.ZodType<ChatToolTracePart> = defineSchema(
+  z.union([
+    z.object({
+      type: z.literal('tool-trace'),
+      toolCallId: z.string().trim().min(1).max(200),
+      toolName: z.string().trim().min(1).max(64),
+      input: ChatToolTraceInputSchema,
+      state: z.literal('output-available'),
+      output: z.string().trim().min(1).max(500)
+    }),
+    z.object({
+      type: z.literal('tool-trace'),
+      toolCallId: z.string().trim().min(1).max(200),
+      toolName: z.string().trim().min(1).max(64),
+      input: ChatToolTraceInputSchema,
+      state: z.literal('output-error'),
+      errorText: z.string().trim().min(1).max(500)
+    })
+  ])
+)
 const ChatMessagePartsSchema = defineSchema(
   z
-    .array(z.union([ChatTextPartSchema, ChatDocumentPartSchema, ChatReasoningPartSchema]))
+    .array(
+      z.union([
+        ChatTextPartSchema,
+        ChatDocumentPartSchema,
+        ChatReasoningPartSchema,
+        ChatToolTracePartSchema
+      ])
+    )
     .min(1)
     .refine(
       (parts) =>
@@ -129,6 +173,8 @@ export {
   ChatTextPartSchema,
   ChatDocumentPartSchema,
   ChatReasoningPartSchema,
+  ChatToolTraceInputSchema,
+  ChatToolTracePartSchema,
   ChatUserMessageSchema,
   ModelReasoningCapabilitiesSchema,
   ThinkingSelectionSchema,
@@ -142,6 +188,8 @@ export type {
   ChatDocumentPart,
   ChatMessage,
   ChatUserMessage,
+  ChatToolTraceInput,
+  ChatToolTracePart,
   ModelReasoningCapabilities,
   ThinkingSelection
 }

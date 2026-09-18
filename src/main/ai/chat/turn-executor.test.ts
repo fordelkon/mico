@@ -839,6 +839,58 @@ describe('TurnExecutor', () => {
       expect.objectContaining({ conversationKey: '42:session-1', thinkingEffort: 'high' })
     )
   })
+
+  it('persists a completed tool trace with its assistant response', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({
+      title: 'Project chat',
+      defaultProfile: null,
+      projectId: 'project-1',
+      cwd: process.cwd()
+    })
+    let agentRequests = 0
+    const provider = createProvider(async (input) => {
+      if (input.conversationKey.startsWith('title:')) return streamFrom([])
+      agentRequests += 1
+      return agentRequests === 1
+        ? streamFrom([
+            // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
+            {
+              type: 'tool-input-available',
+              toolCallId: 'call-1',
+              toolName: 'read',
+              input: { path: 'package.json', limit: 1 }
+            } as UIMessageChunk
+          ])
+        : streamFrom([{ type: 'text-delta', id: 'answer', delta: 'Done' }])
+    })
+    const recorded = collectEvents()
+    const service = new TurnExecutor(() => provider, {
+      runtime,
+      getSelectedChatConfiguration: () => configuration
+    })
+
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+
+    expect(runtime.loadSession(session.id).messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-trace',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          input: { path: 'package.json' },
+          state: 'output-available',
+          output: 'Read 1 line.'
+        },
+        { type: 'text', text: 'Done' }
+      ]
+    })
+  })
 })
 
 function createProvider(

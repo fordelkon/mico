@@ -17,7 +17,7 @@ import { CheckIcon, CopyIcon, FileTextIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMarkdown } from '../markdown/chat-markdown'
-import { ThinkingBlock, type ThinkingOrbState } from './thinking-block'
+import { ThinkingBlock, ToolTrace, type ThinkingOrbState } from './agent-activity'
 
 type ChatMessageProps = {
   message: MicoUIMessage
@@ -26,6 +26,13 @@ type ChatMessageProps = {
 }
 
 const textEncoder = new TextEncoder()
+
+function isFollowedByActivity(parts: MicoUIMessage['parts'], index: number): boolean {
+  return parts.slice(index + 1).some((part) => {
+    if (part.type === 'dynamic-tool') return true
+    return (part.type === 'reasoning' || part.type === 'text') && Boolean(part.text)
+  })
+}
 
 function ChatMessageComponent({
   message,
@@ -37,9 +44,6 @@ function ChatMessageComponent({
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('')
-  const reasoningParts = message.parts.filter(
-    (part): part is Extract<typeof part, { type: 'reasoning' }> => part.type === 'reasoning'
-  )
   const isUser = message.role === 'user'
   const documents = message.parts
     .filter((part) => part.type === 'data-document')
@@ -91,23 +95,54 @@ function ChatMessageComponent({
             ))}
           </AttachmentGroup>
         ) : null}
-        {!isUser &&
-          (reasoningParts.length > 0
-            ? reasoningParts.map((part, index) => (
-                <ThinkingBlock
-                  id={`${message.id}-${index}`}
-                  isAnswerStreaming={isStreaming && Boolean(text)}
-                  isStreaming={isStreaming}
-                  key={`${message.id}-${index}`}
-                  orbState={thinkingOrbState}
-                  text={part.text}
-                />
-              ))
-            : isStreaming &&
-              !text && (
-                <ThinkingBlock id={message.id} isStreaming orbState={thinkingOrbState} text="" />
-              ))}
-        {text || !documents.length ? (
+        {!isUser
+          ? message.parts.map((part, index) => {
+              const key = `${message.id}-${index}`
+              if (part.type === 'reasoning')
+                return (
+                  <div
+                    className="agent-activity__event"
+                    data-testid="agent-activity-event"
+                    key={key}
+                  >
+                    <ThinkingBlock
+                      id={key}
+                      isAnswerStreaming={isStreaming && Boolean(text)}
+                      isStreaming={isStreaming}
+                      orbState={thinkingOrbState}
+                      text={part.text}
+                    />
+                  </div>
+                )
+              if (part.type === 'dynamic-tool')
+                return (
+                  <div
+                    className="agent-activity__event"
+                    data-testid="agent-activity-event"
+                    key={key}
+                  >
+                    <ToolTrace
+                      part={part}
+                      isFollowedByActivity={isFollowedByActivity(message.parts, index)}
+                    />
+                  </div>
+                )
+              if (part.type !== 'text') return null
+              return (
+                <div className="agent-activity__event" data-testid="agent-activity-event" key={key}>
+                  <Bubble align="start" variant="ghost">
+                    <BubbleContent className="w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7">
+                      <ChatMarkdown isStreaming={isStreaming} text={part.text} />
+                    </BubbleContent>
+                  </Bubble>
+                </div>
+              )
+            })
+          : null}
+        {!isUser && isStreaming && !message.parts.length ? (
+          <ThinkingBlock id={message.id} isStreaming orbState={thinkingOrbState} text="" />
+        ) : null}
+        {isUser && (text || !documents.length) ? (
           <Bubble
             align={isUser ? 'end' : 'start'}
             variant={isUser ? 'secondary' : 'ghost'}

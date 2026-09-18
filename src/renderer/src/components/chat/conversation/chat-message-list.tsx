@@ -14,7 +14,7 @@ import { LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
-import { thinkingOrbStates, type ThinkingOrbState } from './thinking-block'
+import { thinkingOrbStates, type ThinkingOrbState } from './agent-activity'
 
 // A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
 const STREAMING_UPDATE_THROTTLE_MS = 50

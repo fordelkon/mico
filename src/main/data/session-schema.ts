@@ -80,6 +80,8 @@ const runtimeEvents = sqliteTable(
         'user_message_recorded',
         'model_request_started',
         'assistant_output_finalized',
+        'tool_trace_recorded',
+        'tool_trace_summary_recorded',
         'run_failed',
         'run_cancelled',
         'run_completed'
