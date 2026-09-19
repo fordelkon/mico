@@ -6,6 +6,7 @@ import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
 import type { ChatMessage } from '@shared/data/schemas/chat'
+import type { ChatProviderMessage } from '@mico/ai-providers'
 import { SessionDatabase } from '../../data/session-database'
 import { sessionMigrations } from '../../data/session-migrations'
 import { SessionRuntimeService, type ExecutionProfileSnapshot } from './session-runtime-service'
@@ -52,7 +53,146 @@ async function createService(verbose?: (message: string) => void): Promise<{
 }
 
 describe('SessionRuntimeService', () => {
-  it('preserves documents through reload, retry, and later context while omitting reasoning', async () => {
+  it('replays reasoning from tool-use steps after reopening a session', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const run = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    service.recordAgentStep(run.runId, {
+      index: 1,
+      assistant: {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'Inspect the requested file first.' },
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            argumentsJson: '{"path":"package.json"}'
+          }
+        ]
+      },
+      toolResults: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          output: '{"name":"mico"}',
+          isError: false
+        }
+      ]
+    })
+    service.recordToolTrace(run.runId, {
+      toolCallId: 'call-1',
+      toolName: 'read',
+      input: { path: 'package.json' },
+      isError: false,
+      output: '{"name":"mico"}',
+      startedAt: 1,
+      finishedAt: 2
+    })
+    service.finishRun(run.runId, { status: 'completed', assistant: assistantMessage })
+
+    expect(service.loadSession(session.id).messages).toEqual([
+      userMessage,
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'Inspect the requested file first.' },
+          {
+            type: 'tool-trace',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            input: { path: 'package.json' },
+            state: 'output-available',
+            output: 'Read 1 line.'
+          },
+          { type: 'text', text: 'first answer' }
+        ]
+      }
+    ])
+  })
+
+  it('does not append failed-attempt replay events after a successful retry', async () => {
+    const { service } = await createService()
+    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+    const first = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-1',
+      userMessage,
+      profile
+    })
+    const assistant: Extract<ChatProviderMessage, { role: 'assistant' }> = {
+      role: 'assistant',
+      parts: [
+        {
+          type: 'reasoning',
+          text: 'Inspect first.',
+          providerMetadata: { anthropic: { signature: 'signature' } }
+        },
+        {
+          type: 'tool-call',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          argumentsJson: '{"path":"a.txt"}'
+        }
+      ]
+    }
+    service.recordAgentStep(first.runId, {
+      index: 1,
+      assistant,
+      toolResults: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          output: 'contents',
+          isError: false
+        }
+      ]
+    })
+    service.finishRun(first.runId, {
+      status: 'failed',
+      failure: { code: 'provider_error', message: 'Offline' }
+    })
+
+    const retry = service.retryTurn({ sessionId: session.id, requestId: 'retry-1', userMessage })
+    expect(service.getReplayMessages(retry.runId)).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'first prompt' }] },
+      assistant,
+      {
+        role: 'tool',
+        parts: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            output: 'contents',
+            isError: false
+          }
+        ]
+      }
+    ])
+
+    service.finishRun(retry.runId, { status: 'completed', assistant: assistantMessage })
+    const next = service.startTurn({
+      sessionId: session.id,
+      requestId: 'request-2',
+      userMessage,
+      profile
+    })
+    expect(service.getReplayMessages(next.runId)).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'first prompt' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: 'first answer' }] },
+      { role: 'user', parts: [{ type: 'text', text: 'first prompt' }] }
+    ])
+  })
+
+  it('preserves documents and reasoning through reload, retry, and later context', async () => {
     const { database, service } = await createService()
     const session = service.createSession({ title: 'Session', defaultProfile: profile })
     const attachedMessage: ChatMessage = {
@@ -67,6 +207,7 @@ describe('SessionRuntimeService', () => {
       role: 'user',
       parts: [
         { type: 'text', text: 'Review this file.' },
+        { type: 'reasoning', text: 'Private reasoning' },
         { type: 'document', name: 'index.ts', text: '  export {}\n' }
       ]
     }
@@ -98,7 +239,15 @@ describe('SessionRuntimeService', () => {
       requestId: 'retry-1',
       userMessage: attachedMessage
     })
-    expect(reloaded.getContextMessages(retried.runId)).toEqual([expectedMessage])
+    expect(reloaded.getReplayMessages(retried.runId)).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: 'Review this file.' },
+          { type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' }
+        ]
+      }
+    ])
     reloaded.finishRun(retried.runId, { status: 'completed', assistant: assistantMessage })
     const next = reloaded.startTurn({
       sessionId: session.id,
@@ -106,8 +255,14 @@ describe('SessionRuntimeService', () => {
       userMessage,
       profile
     })
-    expect(reloaded.getContextMessages(next.runId)).toEqual([
-      expectedMessage,
+    expect(reloaded.getReplayMessages(next.runId)).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: 'Review this file.' },
+          { type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' }
+        ]
+      },
       assistantMessage,
       userMessage
     ])
@@ -321,7 +476,7 @@ describe('SessionRuntimeService', () => {
       profile
     })
 
-    expect(service.getContextMessages(secondRun.runId)).toEqual([
+    expect(service.getReplayMessages(secondRun.runId)).toEqual([
       userMessage,
       assistantMessage,
       { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] }
@@ -347,7 +502,7 @@ describe('SessionRuntimeService', () => {
     expect(JSON.parse(row.payload_json)).toEqual({ attempt: 1, profile, requestId: 'request-1' })
   })
 
-  it('loads the provider context with one database query', async () => {
+  it('rebuilds provider history from the accepted run and current prompt', async () => {
     const queries: string[] = []
     const { service } = await createService((query) => queries.push(query))
     const session = service.createSession({ title: 'Session', defaultProfile: profile })
@@ -364,16 +519,13 @@ describe('SessionRuntimeService', () => {
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
       profile
     })
-    queries.length = 0
-
-    const messages = service.getContextMessages(secondRun.runId)
+    const messages = service.getReplayMessages(secondRun.runId)
 
     expect(messages).toEqual([
       userMessage,
       assistantMessage,
       { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] }
     ])
-    expect(queries).toHaveLength(1)
   })
 
   it('rejects context payloads whose digest no longer matches the event', async () => {
@@ -396,7 +548,7 @@ describe('SessionRuntimeService', () => {
         run.runId
       )
 
-    expect(() => service.getContextMessages(run.runId)).toThrow(/digest/i)
+    expect(() => service.getReplayMessages(run.runId)).toThrow(/digest/i)
   })
 
   it('rejects a second active run in one session while allowing another session to start', async () => {
@@ -491,7 +643,7 @@ describe('SessionRuntimeService', () => {
     })
     service.finishRun(second.runId, { status: 'completed', assistant: assistantMessage })
 
-    expect(service.getContextMessages(first.runId)).toEqual([userMessage])
+    expect(service.getReplayMessages(first.runId)).toEqual([userMessage])
     expect(
       service.startTurn({
         sessionId: session.id,
@@ -588,7 +740,7 @@ describe('SessionRuntimeService', () => {
     ).toHaveLength(1)
   })
 
-  it('excludes reasoning parts from the persisted visible transcript', async () => {
+  it('preserves reasoning parts in the persisted visible transcript', async () => {
     const { service } = await createService()
     const session = service.createSession({ title: 'Session', defaultProfile: profile })
     const run = service.startTurn({
@@ -608,7 +760,16 @@ describe('SessionRuntimeService', () => {
       }
     })
 
-    expect(service.loadSession(session.id).messages).toEqual([userMessage, assistantMessage])
+    expect(service.loadSession(session.id).messages).toEqual([
+      userMessage,
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'private chain of thought' },
+          { type: 'text', text: 'first answer' }
+        ]
+      }
+    ])
   })
 
   it('permanently deletes a completed session and its runtime records', async () => {
@@ -686,7 +847,7 @@ describe('SessionRuntimeService', () => {
     })
 
     expect(service.loadSession(session.id).messages).toEqual([userMessage, nextMessage])
-    expect(service.getContextMessages(next.runId)).toEqual([userMessage, nextMessage])
+    expect(service.getReplayMessages(next.runId)).toEqual([userMessage, nextMessage])
   })
 
   it('retries a failed run as the next attempt of its original turn without another user event', async () => {
@@ -721,7 +882,7 @@ describe('SessionRuntimeService', () => {
         .all()
     ).toHaveLength(1)
     expect(retried.turnId).toBe(failed.turnId)
-    expect(service.getContextMessages(retried.runId)).toEqual([userMessage])
+    expect(service.getReplayMessages(retried.runId)).toEqual([userMessage])
   })
 
   it('makes retry request IDs idempotent and rejects changed retry input', async () => {
@@ -844,7 +1005,7 @@ describe('SessionRuntimeService', () => {
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'fourth prompt' }] },
       profile
     })
-    expect(service.getContextMessages(fourth.runId)).toEqual([
+    expect(service.getReplayMessages(fourth.runId)).toEqual([
       userMessage,
       assistantMessage,
       thirdUserMessage,

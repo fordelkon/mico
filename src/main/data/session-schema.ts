@@ -82,6 +82,7 @@ const runtimeEvents = sqliteTable(
         'assistant_output_finalized',
         'tool_trace_recorded',
         'tool_trace_summary_recorded',
+        'agent_step_recorded',
         'run_failed',
         'run_cancelled',
         'run_completed'

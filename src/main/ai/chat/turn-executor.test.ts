@@ -377,7 +377,7 @@ describe('TurnExecutor', () => {
     await finished.promise
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
-      { role: 'assistant', parts: [{ type: 'text', text: 'abcde…' }] }
+      { role: 'assistant', parts: [{ type: 'text', text: 'abcde\u2026' }] }
     ])
     expect(events).toEqual([
       {
@@ -388,7 +388,7 @@ describe('TurnExecutor', () => {
       {
         type: 'chunk',
         requestId: 'request-1',
-        chunk: { type: 'text-delta', id: 'part-1', delta: 'e…' }
+        chunk: { type: 'text-delta', id: 'part-1', delta: 'e\u2026' }
       },
       { type: 'finish', requestId: 'request-1' }
     ])
@@ -421,7 +421,7 @@ describe('TurnExecutor', () => {
     await finished.promise
     expect(runtime.loadSession(session.id).messages.at(-1)).toEqual({
       role: 'assistant',
-      parts: [{ type: 'text', text: 'abcde…' }]
+      parts: [{ type: 'text', text: 'abcde\u2026' }]
     })
     expect(events).toEqual([
       {
@@ -594,12 +594,11 @@ describe('TurnExecutor', () => {
         configurationDigest: 'saved-configuration'
       }
     })
-    expect(runtime.getContextMessages(next.runId)).toEqual([
+    expect(runtime.getReplayMessages(next.runId)).toEqual([
       request.userMessage,
       {
         role: 'assistant',
-        parts: [{ type: 'text', text: 'Partial' }],
-        metadata: { completionState: 'stopped' }
+        parts: [{ type: 'text', text: 'Partial' }]
       },
       { role: 'user', parts: [{ type: 'text', text: 'Continue' }] }
     ])
@@ -888,6 +887,85 @@ describe('TurnExecutor', () => {
           output: 'Read 1 line.'
         },
         { type: 'text', text: 'Done' }
+      ]
+    })
+  })
+
+  it('adds workspace instructions before the first project-agent request', async () => {
+    const { runtime } = await createRuntime()
+    const cwd = process.cwd()
+    const session = runtime.createSession({
+      title: 'Project chat',
+      defaultProfile: null,
+      projectId: 'project-1',
+      cwd
+    })
+    const calls: Parameters<ChatProvider['stream']>[0][] = []
+    const provider = createProvider(async (input) => {
+      calls.push(input)
+      return streamFrom([])
+    })
+    const recorded = collectEvents()
+    const service = new TurnExecutor(() => provider, {
+      runtime,
+      getSelectedChatConfiguration: () => configuration
+    })
+
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+
+    expect(
+      calls.find(({ conversationKey }) => conversationKey === `window-1:${session.id}`)?.messages[0]
+    ).toEqual({
+      role: 'system',
+      parts: [
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining(cwd)
+        })
+      ]
+    })
+  })
+
+  it('persists streamed reasoning with the final assistant transcript', async () => {
+    const { runtime } = await createRuntime()
+    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
+    // SAFETY: this fixture conforms to the documented reasoning-delta UI chunk.
+    const reasoningDelta = {
+      type: 'reasoning-delta',
+      id: 'reasoning-1',
+      delta: 'Visible thought.'
+    } as UIMessageChunk
+    const provider = createProvider(async () =>
+      streamFrom([
+        // SAFETY: this fixture conforms to the documented reasoning-start UI chunk.
+        { type: 'reasoning-start', id: 'reasoning-1' } as UIMessageChunk,
+        reasoningDelta,
+        // SAFETY: this fixture conforms to the documented reasoning-end UI chunk.
+        { type: 'reasoning-end', id: 'reasoning-1' } as UIMessageChunk,
+        { type: 'text-delta', id: 'answer', delta: 'Done.' }
+      ])
+    )
+    const recorded = collectEvents()
+    const service = new TurnExecutor(() => provider, {
+      runtime,
+      getSelectedChatConfiguration: () => configuration
+    })
+
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+
+    expect(runtime.loadSession(session.id).messages.at(-1)).toEqual({
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'Visible thought.' },
+        { type: 'text', text: 'Done.' }
       ]
     })
   })

@@ -1,5 +1,10 @@
 type SessionMigration = {
-  id: '0001_runtime_log' | '0002_session_project' | '0003_session_cwd' | '0004_tool_trace_events'
+  id:
+    | '0001_runtime_log'
+    | '0002_session_project'
+    | '0003_session_cwd'
+    | '0004_tool_trace_events'
+    | '0005_agent_replay_events'
   sql: string
 }
 
@@ -121,6 +126,34 @@ const sessionMigrations: readonly SessionMigration[] = [
       CREATE UNIQUE INDEX runtime_events_run_request_id
       ON runtime_events(session_id, json_extract(payload_json, '$.requestId'))
       WHERE kind = 'run_started';
+    `
+  },
+  {
+    id: '0005_agent_replay_events',
+    sql: `
+      CREATE TABLE runtime_events_next (
+        id TEXT PRIMARY KEY NOT NULL,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        session_sequence INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN (
+          'run_started', 'user_message_recorded', 'model_request_started',
+          'assistant_output_finalized', 'tool_trace_recorded', 'tool_trace_summary_recorded',
+          'agent_step_recorded',
+          'run_failed', 'run_cancelled', 'run_completed'
+        )),
+        payload_json TEXT NOT NULL,
+        payload_digest TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(session_id, session_sequence)
+      );
+      INSERT INTO runtime_events_next (id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at)
+        SELECT id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at FROM runtime_events;
+      DROP TABLE runtime_events;
+      ALTER TABLE runtime_events_next RENAME TO runtime_events;
+      CREATE INDEX runtime_events_run_id ON runtime_events(run_id);
+      CREATE INDEX runtime_events_session_id ON runtime_events(session_id, session_sequence);
+      CREATE UNIQUE INDEX runtime_events_run_request_id ON runtime_events(session_id, json_extract(payload_json, '$.requestId')) WHERE kind = 'run_started';
     `
   }
 ]

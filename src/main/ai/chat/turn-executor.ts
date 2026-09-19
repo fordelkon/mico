@@ -12,6 +12,7 @@ import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shar
 import { describeChatError } from './chat-error'
 import type { ChatProviderResolver } from './chat-provider-resolver'
 import { ToolAgentRunner } from '../tools/tool-agent-runner'
+import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
 import { ToolRegistry } from '../tools/tool-registry'
 import type {
   ExecutionProfileSnapshot,
@@ -41,10 +42,11 @@ type TurnExecutorOptions = {
     SessionRuntimeService,
     | 'finishRun'
     | 'getDefaultProfile'
-    | 'getContextMessages'
+    | 'getReplayMessages'
     | 'loadSession'
     | 'markRequestStarted'
     | 'recordToolTrace'
+    | 'recordAgentStep'
     | 'renameSessionIfCurrentTitle'
     | 'retryTurn'
     | 'startTurn'
@@ -287,13 +289,20 @@ class TurnExecutor {
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
           const cwd = this.runtime?.loadSession(request.sessionId).cwd
+          const messages = turn.runId
+            ? (this.runtime?.getReplayMessages(turn.runId) ?? [
+                toProviderMessage(request.userMessage)
+              ])
+            : [toProviderMessage(request.userMessage)]
+          if (cwd)
+            messages.unshift({
+              role: 'system',
+              parts: [{ type: 'text', text: createProjectAgentInstructions(cwd) }]
+            })
           const runnerInput = {
             conversationKey: `${turn.ownerId}:${request.sessionId}`,
             provider,
-            messages: (turn.runId
-              ? (this.runtime?.getContextMessages(turn.runId) ?? [request.userMessage])
-              : [request.userMessage]
-            ).map(toProviderMessage),
+            messages,
             thinkingEffort: effectiveThinkingEffort,
             signal: turn.controller.signal,
             emit: (chunk) => {
@@ -316,18 +325,32 @@ class TurnExecutor {
           if (cwd) Object.assign(runnerInput, { registry: ToolRegistry.forWorkspace(cwd) })
           if (turn.runId)
             Object.assign(runnerInput, {
+              onStep: (step: Parameters<SessionRuntimeService['recordAgentStep']>[1]) =>
+                this.runtime?.recordAgentStep(turn.runId!, step),
               onToolResult: (trace: Parameters<SessionRuntimeService['recordToolTrace']>[1]) =>
                 this.runtime?.recordToolTrace(turn.runId!, trace)
             })
-          await new ToolAgentRunner().run(runnerInput)
+          const result = await new ToolAgentRunner().run(runnerInput)
 
           if (!turn.controller.signal.aborted) {
             if (turn.runId) {
+              let includedText = false
+              const displayParts: ChatMessage['parts'] = []
+              for (const part of result.finalAssistant.parts) {
+                if (part.type === 'reasoning')
+                  displayParts.push({ type: 'reasoning', text: part.text })
+                else if (part.type === 'text' && !includedText) {
+                  includedText = true
+                  displayParts.push({ type: 'text', text: turn.assistantTextBuilder.toString() })
+                }
+              }
+              if (!displayParts.length)
+                displayParts.push({ type: 'text', text: turn.assistantTextBuilder.toString() })
               this.runtime?.finishRun(turn.runId, {
                 status: 'completed',
                 assistant: {
                   role: 'assistant',
-                  parts: [{ type: 'text', text: turn.assistantTextBuilder.toString() }]
+                  parts: displayParts
                 }
               })
             }

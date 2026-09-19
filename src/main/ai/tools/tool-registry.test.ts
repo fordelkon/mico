@@ -67,4 +67,28 @@ describe('ToolRegistry', () => {
     })
     expect(result.output).toContain('ENOENT')
   })
+
+  it('does not overlap an exclusive command with a following write', async () => {
+    const registry = await createRegistry()
+    const results = await registry.executeBatch(
+      [
+        {
+          toolCallId: 'call-command',
+          toolName: 'bash',
+          input: {
+            command:
+              "node -e \"const fs=require('node:fs'); if (fs.existsSync('created.txt')) process.exit(1)\""
+          }
+        },
+        {
+          toolCallId: 'call-write',
+          toolName: 'write',
+          input: { path: 'created.txt', content: 'created after command' }
+        }
+      ],
+      new AbortController().signal
+    )
+
+    expect(results.map((result) => result.isError)).toEqual([false, false])
+  })
 })

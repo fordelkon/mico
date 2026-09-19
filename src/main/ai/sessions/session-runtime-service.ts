@@ -1,46 +1,46 @@
 import { createHash } from 'node:crypto'
 import * as z from 'zod'
 
+import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
+
 import {
   ChatDocumentPartSchema,
   ChatMessageRoleSchema,
+  ChatReasoningPartSchema,
   type ChatMessage,
   type ChatToolTraceInput,
-  type ChatToolTracePart,
-  type ThinkingSelection
+  type ChatToolTracePart
 } from '@shared/data/schemas/chat'
+import { toolLabel } from '@shared/ai/tool-presentation'
+import type {
+  ExecutionProfileSnapshot,
+  PersistedSession,
+  SessionSummary
+} from '@shared/data/schemas/session'
 import { SessionDatabase } from '../../data/session-database'
+import type { ToolExecutionTrace } from '../tools/tool-contract'
 
-type ExecutionProfileSnapshot = {
-  modelEntryId: string
-  providerId: string
-  modelId: string
-  thinkingEffort: ThinkingSelection
-  configurationDigest: string
+type VisibleMessage = {
+  role: ChatMessage['role']
+  parts: Array<
+    | { type: 'text'; text: string }
+    | { type: 'document'; name: string; text: string }
+    | { type: 'reasoning'; text: string }
+  >
+  metadata?: { completionState?: 'complete' | 'stopped' }
 }
-
-type SessionSummary = {
-  id: string
-  title: string
-  projectId: string | null
-  cwd: string | null
-  defaultProfile: ExecutionProfileSnapshot | null
-  createdAt: number
-  updatedAt: number
-  lastActivityAt: number
-}
-
-type PersistedSession = SessionSummary & { messages: ChatMessage[] }
-
-const VisibleMessageSchema = z.object({
+const VisibleMessageSchema: z.ZodType<VisibleMessage> = z.object({
   role: ChatMessageRoleSchema,
   parts: z.array(
-    z.union([z.object({ type: z.literal('text'), text: z.string() }), ChatDocumentPartSchema])
+    z.union([
+      z.object({ type: z.literal('text'), text: z.string() }),
+      ChatDocumentPartSchema,
+      ChatReasoningPartSchema
+    ])
   ),
   metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional()
 })
 const MessagePayloadSchema = z.object({ message: VisibleMessageSchema })
-type VisibleMessage = z.infer<typeof VisibleMessageSchema>
 type RuntimeEventPayloads = {
   run_started: {
     attempt: number
@@ -52,6 +52,7 @@ type RuntimeEventPayloads = {
   assistant_output_finalized: { message: VisibleMessage }
   tool_trace_recorded: { trace: StoredToolTrace }
   tool_trace_summary_recorded: { summary: ToolTraceSummary }
+  agent_step_recorded: { step: AgentStep }
   run_failed: { code: string; message: string }
   run_cancelled: Record<string, never>
   run_completed: Record<string, never>
@@ -59,15 +60,6 @@ type RuntimeEventPayloads = {
 type RuntimeEventKind = keyof RuntimeEventPayloads
 type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string
 type JsonObject = { [key: string]: JsonValue }
-type RecordedToolTrace = {
-  toolCallId: string
-  toolName: string
-  input: JsonObject
-  isError: boolean
-  output: string
-  startedAt: number
-  finishedAt: number
-}
 type StoredToolTrace = {
   toolCallId: string
   toolName: string
@@ -82,6 +74,11 @@ type ToolTraceSummary = {
   succeeded: number
   failed: number
   summary: string
+}
+type AgentStep = {
+  index: number
+  assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
+  toolResults: ChatProviderToolResultPart[]
 }
 type StartedRun = {
   runId: string
@@ -181,6 +178,7 @@ class SessionRuntimeService {
          WHERE turns.session_id = ? AND runtime_events.kind IN (
            'user_message_recorded',
            'assistant_output_finalized',
+           'agent_step_recorded',
            'tool_trace_recorded',
            'tool_trace_summary_recorded'
          )
@@ -188,13 +186,24 @@ class SessionRuntimeService {
       )
       .all(sessionId) as LoadEventRow[]
     for (const row of rows) this.assertPayloadDigest(row)
-    const tracesByRun = new Map<string, ChatToolTracePart[]>()
+    const activityPartsByRun = new Map<string, ChatMessage['parts']>()
     for (const row of rows) {
-      if (row.kind !== 'tool_trace_recorded') continue
-      const trace = parseToolTracePayload(row.payload_json).trace
-      const current = tracesByRun.get(row.run_id) ?? []
-      current.push(toToolTracePart(trace))
-      tracesByRun.set(row.run_id, current)
+      const current = activityPartsByRun.get(row.run_id) ?? []
+      if (row.kind === 'agent_step_recorded') {
+        const assistant = parseAgentStepPayload(row.payload_json).step.assistant
+        // Only tool-use rounds precede another model response. The terminal round's reasoning is
+        // already preserved in assistant_output_finalized, so replaying it here would duplicate it.
+        if (assistant.parts.some((part) => part.type === 'tool-call')) {
+          current.push(
+            ...assistant.parts.flatMap((part) =>
+              part.type === 'reasoning' ? [{ type: 'reasoning' as const, text: part.text }] : []
+            )
+          )
+        }
+      } else if (row.kind === 'tool_trace_recorded') {
+        current.push(toToolTracePart(parseToolTracePayload(row.payload_json).trace))
+      }
+      if (current.length) activityPartsByRun.set(row.run_id, current)
     }
     for (const row of rows) {
       if (row.kind === 'tool_trace_summary_recorded') parseToolTraceSummaryPayload(row.payload_json)
@@ -202,16 +211,25 @@ class SessionRuntimeService {
     return {
       ...toSessionSummary(session),
       messages: rows.flatMap((row) => {
-        if (row.kind === 'tool_trace_recorded' || row.kind === 'tool_trace_summary_recorded')
+        if (
+          row.kind === 'agent_step_recorded' ||
+          row.kind === 'tool_trace_recorded' ||
+          row.kind === 'tool_trace_summary_recorded'
+        )
           return []
         const message = parseMessagePayload(row.payload_json).message
         if (row.kind !== 'assistant_output_finalized') return [message]
-        return [{ ...message, parts: [...(tracesByRun.get(row.run_id) ?? []), ...message.parts] }]
+        return [
+          {
+            ...message,
+            parts: [...(activityPartsByRun.get(row.run_id) ?? []), ...message.parts]
+          }
+        ]
       })
     }
   }
 
-  recordToolTrace(runId: string, trace: RecordedToolTrace): void {
+  recordToolTrace(runId: string, trace: ToolExecutionTrace): void {
     this.dependencies.database.transaction(() => {
       const run = this.getRunRow(runId)
       if (run.status !== 'running' || this.findTerminalEvent(runId)) return
@@ -225,86 +243,92 @@ class SessionRuntimeService {
     })
   }
 
+  recordAgentStep(runId: string, step: AgentStep): void {
+    const stored = sanitizeAgentStep(step)
+    this.dependencies.database.transaction(() => {
+      const run = this.getRunRow(runId)
+      if (run.status !== 'running' || this.findTerminalEvent(runId)) return
+      if (this.agentEventExists(runId, stored.index)) return
+      this.appendEvent(run, 'agent_step_recorded', { step: stored })
+    })
+  }
+
   getDefaultProfile(sessionId: string): ExecutionProfileSnapshot | null {
     return toSessionSummary(this.findSession(sessionId)).defaultProfile
   }
 
-  getContextMessages(runId: string): ChatMessage[] {
-    // A terminal event accepts one attempt into model history. Ordering accepted attempts by the
-    // terminal event's session sequence preserves retries at the point they actually succeeded,
-    // while the current turn's user message is always projected last.
-    // SAFETY: the CTE selects only schema-owned event payload and digest columns.
-    const rows = this.dependencies.database.connection
+  getReplayMessages(runId: string): ChatProviderMessage[] {
+    const run = this.getRunRow(runId)
+    // SAFETY: this fixed query returns only accepted-run identity columns. An accepted run joins
+    // history where its terminal event occurred, not where its user turn was created, preserving
+    // the actual conversation order after a late retry.
+    const priorRuns = this.dependencies.database.connection
       .prepare(
         `WITH current_run AS (
-           SELECT runs.id, runs.session_id, runs.turn_id,
-                  started.session_sequence AS started_sequence
+           SELECT runs.session_id, started.session_sequence AS started_sequence
            FROM runs
            JOIN runtime_events AS started
              ON started.run_id = runs.id AND started.kind = 'run_started'
            WHERE runs.id = ?
-         ), accepted_messages AS (
-           SELECT terminal.session_sequence AS group_sequence,
-                  0 AS item_order,
-                  user_event.payload_json,
-                  user_event.payload_digest
-           FROM current_run
-           JOIN runs AS accepted_run
-             ON accepted_run.session_id = current_run.session_id
-            AND accepted_run.id <> current_run.id
-           JOIN runtime_events AS terminal
-             ON terminal.run_id = accepted_run.id
-            AND terminal.kind IN ('run_completed', 'run_cancelled')
-            AND terminal.session_sequence < current_run.started_sequence
-           JOIN runs AS user_run ON user_run.turn_id = accepted_run.turn_id
-           JOIN runtime_events AS user_event
-             ON user_event.run_id = user_run.id
-            AND user_event.kind = 'user_message_recorded'
-
-           UNION ALL
-
-           SELECT terminal.session_sequence AS group_sequence,
-                  1 AS item_order,
-                  assistant_event.payload_json,
-                  assistant_event.payload_digest
-           FROM current_run
-           JOIN runs AS accepted_run
-             ON accepted_run.session_id = current_run.session_id
-            AND accepted_run.id <> current_run.id
-           JOIN runtime_events AS terminal
-             ON terminal.run_id = accepted_run.id
-            AND terminal.kind IN ('run_completed', 'run_cancelled')
-            AND terminal.session_sequence < current_run.started_sequence
-           JOIN runtime_events AS assistant_event
-             ON assistant_event.run_id = accepted_run.id
-            AND assistant_event.kind = 'assistant_output_finalized'
-         ), current_message AS (
-           SELECT 9223372036854775807 AS group_sequence,
-                  0 AS item_order,
-                  user_event.payload_json,
-                  user_event.payload_digest
-           FROM current_run
-           JOIN runs AS user_run ON user_run.turn_id = current_run.turn_id
-           JOIN runtime_events AS user_event
-             ON user_event.run_id = user_run.id
-            AND user_event.kind = 'user_message_recorded'
          )
-         SELECT payload_json, payload_digest
-         FROM (
-           SELECT * FROM accepted_messages
-           UNION ALL
-           SELECT * FROM current_message
-         )
-         ORDER BY group_sequence, item_order`
+         SELECT accepted_run.id, accepted_run.turn_id
+         FROM current_run
+         JOIN runs AS accepted_run
+           ON accepted_run.session_id = current_run.session_id
+          AND accepted_run.id <> ?
+         JOIN runtime_events AS terminal
+           ON terminal.run_id = accepted_run.id
+          AND terminal.kind IN ('run_completed', 'run_cancelled')
+          AND terminal.session_sequence < current_run.started_sequence
+         ORDER BY terminal.session_sequence`
+      )
+      .all(runId, runId) as Array<{ id: string; turn_id: string }>
+    const messages: ChatProviderMessage[] = []
+    for (const prior of priorRuns) {
+      messages.push(toProviderContextMessage(this.getTurnUserMessage(prior.turn_id)))
+      const events = this.getRunReplayEvents(prior.id)
+      if (events.length) messages.push(...events)
+      else {
+        // SAFETY: the fixed query selects the two declared runtime-event columns.
+        const finalized = this.dependencies.database.connection
+          .prepare(
+            "SELECT payload_json, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'assistant_output_finalized'"
+          )
+          .get(prior.id) as { payload_json: string; payload_digest: string } | undefined
+        if (finalized) {
+          this.assertPayloadDigest(finalized)
+          messages.push(
+            toProviderContextMessage(parseMessagePayload(finalized.payload_json).message)
+          )
+        }
+      }
+    }
+    messages.push(toProviderContextMessage(this.getTurnUserMessage(run.turn_id)))
+    // SAFETY: the fixed query selects only the declared run identity column.
+    const retryRuns = this.dependencies.database.connection
+      .prepare('SELECT id FROM runs WHERE turn_id = ? AND attempt < ? ORDER BY attempt')
+      .all(run.turn_id, run.attempt) as Array<{ id: string }>
+    for (const retry of retryRuns) messages.push(...this.getRunReplayEvents(retry.id))
+    return messages
+  }
+
+  private getRunReplayEvents(runId: string): ChatProviderMessage[] {
+    // SAFETY: the fixed query selects only declared replay-event columns.
+    const rows = this.dependencies.database.connection
+      .prepare(
+        "SELECT payload_json, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'agent_step_recorded' ORDER BY session_sequence"
       )
       .all(runId) as Array<{
       payload_json: string
       payload_digest: string
     }>
-    if (!rows.length) throw new Error('Run does not exist.')
-    if (rows.some(({ payload_json, payload_digest }) => digest(payload_json) !== payload_digest))
-      throw new Error('Runtime event payload digest does not match its stored value.')
-    return rows.map(({ payload_json }) => parseMessagePayload(payload_json).message)
+    const messages: ChatProviderMessage[] = []
+    for (const row of rows) {
+      this.assertPayloadDigest(row)
+      const step = parseAgentStepPayload(row.payload_json).step
+      messages.push(toReplayAssistant(step.assistant), { role: 'tool', parts: step.toolResults })
+    }
+    return messages
   }
 
   renameSession(sessionId: string, title: string): SessionSummary {
@@ -580,7 +604,7 @@ class SessionRuntimeService {
     kind: Kind,
     payload: RuntimeEventPayloads[Kind]
   ): void {
-    const payloadJson = canonicalJson(payload)
+    const payloadJson = canonicalJson(toJsonValue(payload))
     // appendEvent is only called inside an IMMEDIATE transaction, so sequence allocation and the
     // insert are atomic even though the next value is derived from the existing session log.
     this.dependencies.database.connection
@@ -618,7 +642,7 @@ class SessionRuntimeService {
     })
     const succeeded = traces.filter((trace) => trace.status === 'completed').length
     const failed = traces.length - succeeded
-    const names = [...new Set(traces.map((trace) => toolNameLabel(trace.toolName)))]
+    const names = [...new Set(traces.map((trace) => toolLabel(trace.toolName)))]
     const summary =
       traces.length === 0
         ? 'No tools used.'
@@ -635,6 +659,16 @@ class SessionRuntimeService {
         "SELECT runs.* FROM runtime_events JOIN runs ON runs.id = runtime_events.run_id WHERE runtime_events.session_id = ? AND runtime_events.kind = 'run_started' AND json_extract(runtime_events.payload_json, '$.requestId') = ?"
       )
       .get(sessionId, requestId) as RunRow | undefined
+  }
+
+  private agentEventExists(runId: string, index: number): boolean {
+    return Boolean(
+      this.dependencies.database.connection
+        .prepare(
+          "SELECT id FROM runtime_events WHERE run_id = ? AND kind = 'agent_step_recorded' AND json_extract(payload_json, '$.step.index') = ?"
+        )
+        .get(runId, index)
+    )
   }
 
   private assertStartTurnReplay(run: RunRow, input: StartTurnInput): void {
@@ -756,6 +790,7 @@ class SessionRuntimeService {
   }
 }
 
+/** Complete `sessions` table row selected by `findSession` and session-list queries. */
 type SessionRow = {
   id: string
   title: string
@@ -766,6 +801,7 @@ type SessionRow = {
   updated_at: number
   last_activity_at: number
 }
+/** Complete `runs` table row; runtime methods need its persistence identity and lifecycle state. */
 type RunRow = {
   id: string
   session_id: string
@@ -773,16 +809,30 @@ type RunRow = {
   attempt: number
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 }
+/**
+ * Narrow projection used only by `loadSession`.
+ *
+ * It deliberately excludes table columns that cannot affect the renderer
+ * transcript, while retaining `run_id` to attach sanitized tool traces to
+ * their finalized assistant message.
+ */
 type LoadEventRow = {
   run_id: string
   kind:
     | 'assistant_output_finalized'
+    | 'agent_step_recorded'
     | 'tool_trace_recorded'
     | 'tool_trace_summary_recorded'
     | 'user_message_recorded'
   payload_json: string
   payload_digest: string
 }
+/**
+ * Narrow projection used only by `getReplayMessages`.
+ *
+ * Unlike `LoadEventRow`, replay needs `turn_id` to distinguish retry events
+ * from accepted earlier turns; it never needs `run_id` or UI-trace fields.
+ */
 const StoredToolTraceSchema: z.ZodType<StoredToolTrace> = z.object({
   toolCallId: z.string().trim().min(1).max(200),
   toolName: z.string().trim().min(1).max(64),
@@ -804,6 +854,13 @@ const ToolTraceSummarySchema: z.ZodType<ToolTraceSummary> = z.object({
   summary: z.string().trim().min(1).max(500)
 })
 const ToolTraceSummaryPayloadSchema = z.object({ summary: ToolTraceSummarySchema })
+const AgentStepPayloadSchema: z.ZodType<{ step: AgentStep }> = z.object({
+  step: z.object({
+    index: z.number().int().positive(),
+    assistant: z.custom<Extract<ChatProviderMessage, { role: 'assistant' }>>(),
+    toolResults: z.array(z.custom<ChatProviderToolResultPart>()).min(1)
+  })
+})
 const ToolTraceSourceInputSchema = z.object({
   command: z.string().optional(),
   edits: z.array(z.unknown()).max(100).optional(),
@@ -825,9 +882,15 @@ function toSessionSummary(row: SessionRow): SessionSummary {
   }
 }
 function visibleMessage(message: ChatMessage): VisibleMessage {
+  const parts: VisibleMessage['parts'] = []
+  for (const part of message.parts) {
+    if (part.type === 'text') parts.push({ type: 'text', text: part.text })
+    else if (part.type === 'document') parts.push(part)
+    else if (part.type === 'reasoning') parts.push({ type: 'reasoning', text: part.text })
+  }
   const visible: VisibleMessage = {
     role: message.role,
-    parts: message.parts.filter((part) => part.type === 'text' || part.type === 'document')
+    parts
   }
   if (message.metadata) visible.metadata = message.metadata
   return VisibleMessageSchema.parse(visible)
@@ -841,7 +904,41 @@ function parseToolTracePayload(value: string): { trace: StoredToolTrace } {
 function parseToolTraceSummaryPayload(value: string): { summary: ToolTraceSummary } {
   return ToolTraceSummaryPayloadSchema.parse(JSON.parse(value))
 }
-function toStoredToolTrace(trace: RecordedToolTrace): StoredToolTrace {
+function parseAgentStepPayload(value: string): { step: AgentStep } {
+  return AgentStepPayloadSchema.parse(JSON.parse(value))
+}
+function sanitizeAgentStep(step: AgentStep): AgentStep {
+  if (!Number.isInteger(step.index) || step.index < 1 || step.assistant.role !== 'assistant')
+    throw new Error('Invalid agent step.')
+  return AgentStepPayloadSchema.parse({ step: JSON.parse(JSON.stringify(step)) }).step
+}
+function toReplayAssistant(
+  assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
+): Extract<ChatProviderMessage, { role: 'assistant' }> {
+  return {
+    ...assistant,
+    parts: assistant.parts.filter(
+      (part) => part.type !== 'reasoning' || Boolean(part.providerMetadata)
+    )
+  }
+}
+function toProviderContextMessage(message: ChatMessage): ChatProviderMessage {
+  return {
+    role: message.role,
+    parts: message.parts.flatMap((part) => {
+      if (part.type === 'text') return [{ type: 'text' as const, text: part.text }]
+      if (part.type === 'document')
+        return [
+          {
+            type: 'text' as const,
+            text: `<document name="${part.name}">\n${part.text}\n</document>`
+          }
+        ]
+      return []
+    })
+  }
+}
+function toStoredToolTrace(trace: ToolExecutionTrace): StoredToolTrace {
   const toolName = trace.toolName.trim().slice(0, 64) || 'tool'
   const input = toToolTraceInput(trace.input)
   const status = trace.isError ? 'failed' : 'completed'
@@ -890,11 +987,8 @@ function toolTraceSummary(
     case 'bash':
       return 'Command completed.'
     default:
-      return `${toolNameLabel(toolName)} completed.`
+      return `${toolLabel(toolName)} completed.`
   }
-}
-function toolNameLabel(toolName: string): string {
-  return { bash: 'Run', edit: 'Edit', read: 'Read', write: 'Write' }[toolName] ?? toolName
 }
 function toToolTracePart(trace: StoredToolTrace): ChatToolTracePart {
   if (trace.status === 'failed') {
@@ -918,6 +1012,9 @@ function toToolTracePart(trace: StoredToolTrace): ChatToolTracePart {
 }
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
+}
+function toJsonValue(value: RuntimeEventPayloads[RuntimeEventKind]): JsonValue {
+  return z.json().parse(JSON.parse(JSON.stringify(value)))
 }
 function canonicalJson(value: JsonValue): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`

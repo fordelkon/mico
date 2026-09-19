@@ -50,6 +50,34 @@ class ToolRegistry {
     }
   }
 
+  async executeBatch(
+    calls: readonly ToolCall[],
+    signal: AbortSignal
+  ): Promise<ChatProviderToolResultPart[]> {
+    const results: ChatProviderToolResultPart[] = []
+    let parallel: Array<Promise<void>> = []
+
+    const drainParallel = async (): Promise<void> => {
+      await Promise.all(parallel)
+      parallel = []
+    }
+
+    for (const [index, call] of calls.entries()) {
+      signal.throwIfAborted()
+      const run = async (): Promise<void> => {
+        results[index] = await this.execute(call, signal)
+      }
+      if (this.#tools.get(call.toolName)?.executionMode === 'parallel-safe') {
+        parallel.push(run())
+        continue
+      }
+      await drainParallel()
+      await run()
+    }
+    await drainParallel()
+    return results
+  }
+
   private errorResult(call: ToolCall, output: string): ChatProviderToolResultPart {
     return {
       toolCallId: call.toolCallId,

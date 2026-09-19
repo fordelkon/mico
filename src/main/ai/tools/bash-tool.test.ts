@@ -11,7 +11,11 @@ describe('bash tool', () => {
 
   afterEach(async () => {
     await Promise.all(
-      temporaryPaths.splice(0).map((path) => rm(path, { force: true, recursive: true }))
+      temporaryPaths
+        .splice(0)
+        // Windows taskkill is asynchronous. Retry the workspace removal until its
+        // descendant process has released the cwd rather than racing cleanup.
+        .map((path) => rm(path, { force: true, maxRetries: 5, recursive: true, retryDelay: 50 }))
     )
   })
 
@@ -23,7 +27,7 @@ describe('bash tool', () => {
 
   it('starts commands in the session cwd', async () => {
     const context = await createContext()
-    const command = process.platform === 'win32' ? 'cd' : 'pwd'
+    const command = 'node -e "console.log(process.cwd())"'
 
     const result = await createBashTool().execute({ command }, context)
 
@@ -32,7 +36,7 @@ describe('bash tool', () => {
 
   it('reports a non-zero exit as a tool failure', async () => {
     const context = await createContext()
-    const command = process.platform === 'win32' ? 'exit /b 7' : 'exit 7'
+    const command = 'node -e "process.exit(7)"'
 
     await expect(createBashTool().execute({ command }, context)).rejects.toThrow(
       'Command exited with code 7'
@@ -43,7 +47,7 @@ describe('bash tool', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'mico-bash-tool-'))
     temporaryPaths.push(cwd)
     const controller = new AbortController()
-    const command = process.platform === 'win32' ? 'ping -n 30 127.0.0.1 > nul' : 'sleep 30'
+    const command = 'node -e "setTimeout(() => {}, 30000)"'
 
     const pending = createBashTool().execute({ command }, { cwd, signal: controller.signal })
     controller.abort()

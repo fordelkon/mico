@@ -11,20 +11,34 @@ const DEFAULT_BASH_TIMEOUT_SECONDS = 30
 
 type ToolExecutionContext = { cwd: string; signal: AbortSignal }
 type ToolExecutionResult = { output: string }
+/** Complete fact emitted once a tool call has settled. */
+type ToolExecutionTrace = {
+  toolCallId: string
+  toolName: string
+  input: ToolInput
+  isError: boolean
+  output: string
+  startedAt: number
+  finishedAt: number
+}
+type ToolExecutionMode = 'parallel-safe' | 'exclusive'
 type ToolInput = JsonObject
 type AgentTool<Input> = {
   definition: ChatProviderTool
   inputSchema: z.ZodType<Input>
+  executionMode?: ToolExecutionMode
   execute: (input: Input, context: ToolExecutionContext) => Promise<ToolExecutionResult>
 }
 type RegisteredAgentTool = {
   definition: ChatProviderTool
+  executionMode: ToolExecutionMode
   execute: (input: ToolInput, context: ToolExecutionContext) => Promise<ToolExecutionResult>
 }
 
 function registerTool<Input>(tool: AgentTool<Input>): RegisteredAgentTool {
   return {
     definition: tool.definition,
+    executionMode: tool.executionMode ?? 'exclusive',
     async execute(input, context) {
       const parsed = tool.inputSchema.safeParse(input)
       if (!parsed.success) throw new Error('Invalid tool input.')
@@ -43,7 +57,9 @@ export {
   type AgentTool,
   type RegisteredAgentTool,
   type ToolExecutionContext,
+  type ToolExecutionMode,
   type ToolExecutionResult,
+  type ToolExecutionTrace,
   type ToolInput,
   registerTool
 }

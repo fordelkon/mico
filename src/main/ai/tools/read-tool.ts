@@ -33,6 +33,7 @@ function createReadTool(): AgentTool<ReadInput> {
         additionalProperties: false
       }
     },
+    executionMode: 'parallel-safe',
     inputSchema: ReadInputSchema,
     async execute({ path, offset = 1, limit = MAX_READ_LINES }, context) {
       context.signal.throwIfAborted()
