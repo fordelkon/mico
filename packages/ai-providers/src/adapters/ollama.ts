@@ -1,4 +1,3 @@
-import type { UIMessageChunk } from 'ai'
 import * as z from 'zod'
 
 import type {
@@ -9,8 +8,10 @@ import type {
   ChatProviderTool,
   JsonObject,
   ProviderPerformanceMetrics,
+  ProviderStreamPart,
   ThinkingSelection
 } from '../contracts'
+import { providerFinish } from '../contracts'
 import { parseNdjson } from '../streaming/ndjson'
 import { createReasoningChunkEmitter } from '../streaming/parts'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
@@ -62,6 +63,7 @@ const ChunkSchema = z.object({
     })
     .optional(),
   done: z.boolean().optional(),
+  done_reason: z.string().optional(),
   eval_count: z.number().nonnegative().optional(),
   eval_duration: z.number().positive().optional(),
   error: z.string().optional()
@@ -164,9 +166,10 @@ function createOllamaProvider(
         throw new Error(`Ollama request failed (${response.status} ${response.statusText}).`)
       if (!response.body) throw new Error('Ollama returned an empty streaming response.')
       const stream = response.body
-      return (async function* (): AsyncIterable<UIMessageChunk> {
+      return (async function* (): AsyncIterable<ProviderStreamPart> {
         const text = createTextChunkEmitter(dependencies.createId)
         const reasoning = createReasoningChunkEmitter(dependencies.createId)
+        let finishReason: 'length' | 'stop' | 'unknown' = 'stop'
         for await (const value of parseNdjson(stream)) {
           const parsed = ChunkSchema.safeParse(value)
           if (!parsed.success)
@@ -199,6 +202,12 @@ function createOllamaProvider(
               }
           }
           if (parsed.data.done) {
+            finishReason =
+              parsed.data.done_reason === 'length'
+                ? 'length'
+                : parsed.data.done_reason === 'stop' || !parsed.data.done_reason
+                  ? 'stop'
+                  : 'unknown'
             if (parsed.data.eval_count !== undefined) {
               const metrics: ProviderPerformanceMetrics = {
                 outputTokens: parsed.data.eval_count
@@ -213,6 +222,7 @@ function createOllamaProvider(
         }
         yield* reasoning.finish()
         yield* text.finish()
+        yield providerFinish({ reason: finishReason })
       })()
     }
   }

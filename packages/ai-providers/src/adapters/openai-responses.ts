@@ -1,4 +1,3 @@
-import type { UIMessageChunk } from 'ai'
 import * as z from 'zod'
 
 import type {
@@ -6,8 +5,10 @@ import type {
   ChatProviderConfiguration,
   ChatProviderDependencies,
   ChatProviderMessage,
-  ChatProviderTool
+  ChatProviderTool,
+  ProviderStreamPart
 } from '../contracts'
+import { providerFinish } from '../contracts'
 import { parseSse } from '../streaming/sse'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
 import { createReasoningChunkEmitter } from '../streaming/parts'
@@ -24,9 +25,17 @@ const OpenAIEventSchema = z.object({
   output_index: z.number().int().nonnegative().optional(),
   response: z
     .object({
+      id: z.string().optional(),
+      incomplete_details: z.object({ reason: z.string().optional() }).nullable().optional(),
+      status: z.string().optional(),
       usage: z
         .object({
-          output_tokens: z.number().nonnegative().optional()
+          input_tokens: z.number().nonnegative().optional(),
+          output_tokens: z.number().nonnegative().optional(),
+          output_tokens_details: z
+            .object({ reasoning_tokens: z.number().nonnegative().optional() })
+            .optional(),
+          total_tokens: z.number().nonnegative().optional()
         })
         .optional()
     })
@@ -51,6 +60,7 @@ type OpenAIInputItem =
   | { type: 'function_call_output'; call_id: string; output: string }
 type OpenAIResponsesRequest = {
   model: string
+  previous_response_id?: string
   stream: true
   input: OpenAIInputItem[]
   tools?: ReturnType<typeof toTools>
@@ -105,6 +115,16 @@ function toOpenAIInput(messages: ChatProviderMessage[]): OpenAIInputItem[] {
   }
   return input
 }
+function getPreviousResponse(
+  messages: ChatProviderMessage[]
+): { historyStart: number; responseId: string } | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.role === 'assistant' && message.replay?.provider === 'openai-responses')
+      return { historyStart: index + 1, responseId: message.replay.responseId }
+  }
+  return undefined
+}
 function toTools(tools: readonly ChatProviderTool[]) {
   return tools.map((tool) => ({
     type: 'function' as const,
@@ -128,11 +148,17 @@ function createOpenAIResponsesProvider(
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
     stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
+      const previousResponse = getPreviousResponse(messages)
       const request: OpenAIResponsesRequest = {
         model: configuration.modelId,
         stream: true,
-        input: toOpenAIInput(messages)
+        // Responses owns the prior assistant state behind responseId. Re-sending
+        // that history would duplicate reasoning and tool calls in the new turn.
+        input: toOpenAIInput(
+          previousResponse ? messages.slice(previousResponse.historyStart) : messages
+        )
       }
+      if (previousResponse) request.previous_response_id = previousResponse.responseId
       if (tools?.length) request.tools = toTools(tools)
       // Responses uses a different stream vocabulary from Chat Completions, so
       // reasoning summaries and output text are parsed from response.* events below.
@@ -158,7 +184,7 @@ function createOpenAIResponsesProvider(
         throw new Error(`OpenAI request failed (${response.status} ${response.statusText}).`)
       const stream = response.body
       if (!stream) throw new Error('OpenAI returned an empty streaming response.')
-      return (async function* (): AsyncIterable<UIMessageChunk> {
+      return (async function* (): AsyncIterable<ProviderStreamPart> {
         const text = createTextChunkEmitter(dependencies.createId)
         const reasoning = createReasoningChunkEmitter(dependencies.createId)
         const calls = new Map<
@@ -236,10 +262,27 @@ function createOpenAIResponsesProvider(
               onPerformanceMetrics?.({ outputTokens: data.response.usage.output_tokens })
             yield* reasoning.finish()
             yield* text.finish()
+            if (data.response?.id)
+              yield providerFinish({
+                reason: 'stop',
+                continuation: { provider: 'openai-responses', responseId: data.response.id },
+                usage: toUsage(data.response.usage)
+              })
             return
           }
-          if (event.event === 'response.incomplete')
-            throw new Error('The OpenAI provider returned an incomplete response.')
+          if (event.event === 'response.incomplete') {
+            yield* reasoning.finish()
+            yield* text.finish()
+            const reason = data.response?.incomplete_details?.reason
+            const finish = providerFinish({
+              reason: reason === 'max_output_tokens' ? 'length' : 'unknown',
+              usage: toUsage(data.response?.usage)
+            })
+            if (data.response?.id)
+              finish.continuation = { provider: 'openai-responses', responseId: data.response.id }
+            yield finish
+            return
+          }
           if (event.event === 'error' || event.event === 'response.failed')
             throw new Error(
               data.message ?? data.error?.message ?? 'The OpenAI provider returned an error.'
@@ -251,5 +294,21 @@ function createOpenAIResponsesProvider(
       })()
     }
   }
+}
+function toUsage(
+  usage: z.infer<typeof OpenAIEventSchema>['response'] extends infer Response
+    ? Response extends { usage?: infer Usage }
+      ? Usage
+      : undefined
+    : undefined
+) {
+  if (!usage) return undefined
+  const result = {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    reasoningTokens: usage.output_tokens_details?.reasoning_tokens,
+    totalTokens: usage.total_tokens
+  }
+  return Object.values(result).some((value) => value !== undefined) ? result : undefined
 }
 export { createOpenAIResponsesProvider }

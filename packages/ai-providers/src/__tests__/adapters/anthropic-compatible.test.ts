@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createChatProvider } from '../../index'
-async function collect(stream: AsyncIterable<unknown>) {
-  const chunks: unknown[] = []
-  for await (const chunk of stream) chunks.push(chunk)
+import { createChatProvider, isProviderFinish, type ProviderStreamPart } from '../../index'
+async function collect(stream: AsyncIterable<ProviderStreamPart>) {
+  const chunks = []
+  for await (const chunk of stream) if (!isProviderFinish(chunk)) chunks.push(chunk)
   return chunks
+}
+async function collectProtocol(stream: AsyncIterable<ProviderStreamPart>) {
+  const parts: ProviderStreamPart[] = []
+  for await (const part of stream) parts.push(part)
+  return parts
 }
 describe('Anthropic-compatible provider', () => {
   it('appends Messages directly to an explicitly versioned API root', async () => {
@@ -373,6 +378,7 @@ describe('Anthropic-compatible provider', () => {
   it('maps a selected thinking effort to an Anthropic token budget', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 400 }))
       .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
     const provider = createChatProvider(
       {
@@ -394,7 +400,7 @@ describe('Anthropic-compatible provider', () => {
       })
     )
 
-    const body = await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
+    const body = await new Request('https://example.test', fetch.mock.calls[1]?.[1]).json()
 
     expect(body).toMatchObject({
       max_tokens: 8192,
@@ -429,13 +435,19 @@ describe('Anthropic-compatible provider', () => {
     expect(fetch).toHaveBeenCalledTimes(3)
     expect(
       await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
-    ).toHaveProperty('thinking')
+    ).toMatchObject({
+      thinking: { type: 'adaptive' }
+    })
     expect(
       await new Request('https://example.test', fetch.mock.calls[1]?.[1]).json()
-    ).not.toHaveProperty('thinking')
+    ).toMatchObject({
+      thinking: { type: 'enabled' }
+    })
     expect(
       await new Request('https://example.test', fetch.mock.calls[2]?.[1]).json()
-    ).not.toHaveProperty('thinking')
+    ).toMatchObject({
+      thinking: { type: 'enabled' }
+    })
   })
 
   it('does not send the optional disabled thinking configuration', async () => {
@@ -500,5 +512,107 @@ describe('Anthropic-compatible provider', () => {
       { type: 'text-delta', id: 'part', delta: 'Done.' },
       { type: 'text-end', id: 'part' }
     ])
+  })
+
+  it('marks output-token exhaustion and reserves answer capacity for extra-high thinking', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 400 }))
+      .mockResolvedValue(
+        new Response(
+          'event: message_delta\ndata: {"delta":{"stop_reason":"max_tokens"}}\n\nevent: message_stop\ndata: {}\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        modelId: 'claude',
+        maxTokens: 8192
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    const chunks = await collectProtocol(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+        thinkingEffort: 'xhigh',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(chunks).toContainEqual({ type: 'provider-finish', reason: 'length' })
+    const body = await new Request('https://example.test', fetch.mock.calls[1]?.[1]).json()
+    expect(body).toMatchObject({ thinking: { type: 'enabled', budget_tokens: 7168 } })
+  })
+
+  it('probes adaptive thinking for an unknown Anthropic-compatible model', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        modelId: 'third-party-reasoner'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+        thinkingEffort: 'high',
+        signal: new AbortController().signal
+      })
+    )
+
+    const body = await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
+    expect(body).toMatchObject({ thinking: { type: 'adaptive' } })
+  })
+
+  it('falls back from rejected adaptive thinking to budget thinking', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 400 }))
+      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+    const provider = createChatProvider(
+      {
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://gateway.example',
+        apiKey: 'key',
+        modelId: 'third-party-reasoner'
+      },
+      { fetch, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
+        thinkingEffort: 'high',
+        signal: new AbortController().signal
+      })
+    )
+
+    const first = await new Request('https://example.test', fetch.mock.calls[0]?.[1]).json()
+    const second = await new Request('https://example.test', fetch.mock.calls[1]?.[1]).json()
+    expect(first).toMatchObject({ thinking: { type: 'adaptive' } })
+    expect(second).toMatchObject({ thinking: { type: 'enabled', budget_tokens: 6144 } })
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'y',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Again' }] }],
+        thinkingEffort: 'high',
+        signal: new AbortController().signal
+      })
+    )
+    const cached = await new Request('https://example.test', fetch.mock.calls[2]?.[1]).json()
+    expect(cached).toMatchObject({ thinking: { type: 'enabled', budget_tokens: 6144 } })
   })
 })

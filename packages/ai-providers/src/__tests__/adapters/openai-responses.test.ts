@@ -1,18 +1,113 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createChatProvider } from '../../index'
+import { createChatProvider, isProviderFinish, type ProviderStreamPart } from '../../index'
 
 function sseResponse(events: string): Response {
   return new Response(events, { headers: { 'content-type': 'text/event-stream' } })
 }
 
-async function collect(stream: AsyncIterable<unknown>): Promise<unknown[]> {
+async function collect(stream: AsyncIterable<ProviderStreamPart>) {
   const chunks = []
+  for await (const chunk of stream) if (!isProviderFinish(chunk)) chunks.push(chunk)
+  return chunks
+}
+async function collectProtocol(stream: AsyncIterable<ProviderStreamPart>) {
+  const chunks: ProviderStreamPart[] = []
   for await (const chunk of stream) chunks.push(chunk)
   return chunks
 }
 
 describe('OpenAI Responses provider', () => {
+  it('exposes a completed response ID for native continuation', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        sseResponse('event: response.completed\ndata: {"response":{"id":"resp_next"}}\n\n')
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-responses', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.2' },
+      { fetch: fetchMock, createId: () => 'part' }
+    )
+
+    const parts = await collectProtocol(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }],
+        thinkingEffort: 'high',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(parts).toContainEqual({
+      type: 'provider-finish',
+      reason: 'stop',
+      continuation: { provider: 'openai-responses', responseId: 'resp_next' }
+    })
+  })
+
+  it('uses a same-provider response ID for native continuation', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(sseResponse('event: response.completed\ndata: {}\n\n'))
+    const provider = createChatProvider(
+      { provider: 'openai-responses', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.2' },
+      { fetch: fetchMock, createId: () => 'part' }
+    )
+
+    await collect(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [
+          {
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'Partial answer.' }],
+            replay: { provider: 'openai-responses', responseId: 'resp_previous' }
+          },
+          { role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }
+        ],
+        thinkingEffort: 'high',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(
+      await new Request('https://example.test', fetchMock.mock.calls[0]?.[1]).json()
+    ).toMatchObject({
+      previous_response_id: 'resp_previous',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'Continue.' }] }]
+    })
+  })
+
+  it('maps an incomplete max-output response into a resumable provider finish', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        sseResponse(
+          'event: response.incomplete\ndata: {"response":{"id":"resp_123","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":12,"output_tokens":34,"output_tokens_details":{"reasoning_tokens":21},"total_tokens":46}}}\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-responses', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.2' },
+      { fetch: fetchMock, createId: () => 'part' }
+    )
+
+    const parts = await collectProtocol(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }],
+        thinkingEffort: 'high',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(parts).toContainEqual({
+      type: 'provider-finish',
+      reason: 'length',
+      continuation: { provider: 'openai-responses', responseId: 'resp_123' },
+      usage: { inputTokens: 12, outputTokens: 34, reasoningTokens: 21, totalTokens: 46 }
+    })
+  })
+
   it('preserves the no-tool assistant input shape', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -227,7 +322,7 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('rejects a terminal incomplete response', async () => {
+  it('marks a terminal incomplete response with an unknown reason', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: response.incomplete\ndata: {}\n\n'))
@@ -241,7 +336,7 @@ describe('OpenAI Responses provider', () => {
     )
 
     await expect(
-      collect(
+      collectProtocol(
         await provider.stream({
           conversationKey: 'x',
           messages: [{ role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }],
@@ -249,7 +344,7 @@ describe('OpenAI Responses provider', () => {
           signal: new AbortController().signal
         })
       )
-    ).rejects.toThrow('incomplete response')
+    ).resolves.toContainEqual({ type: 'provider-finish', reason: 'unknown' })
   })
 
   it('appends Responses directly to a versioned API root', async () => {

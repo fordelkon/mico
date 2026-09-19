@@ -241,16 +241,20 @@ once without it and remembers that fallback for the rest of the app session.
 
 Use `testChatProvider` to verify that a configured model can complete a minimal
 request. It consumes the complete response stream and returns timing metrics
-that are safe to show in a provider settings UI.
+that are safe to show in a provider settings UI. It verifies connectivity and
+stream completion only; it does not evaluate response quality.
 
 ```ts
 import { testChatProvider } from '@mico/ai-providers'
 
-const result = await testChatProvider({
-  provider: 'ollama',
-  baseUrl: 'http://localhost:11434',
-  modelId: 'llama3.2'
-})
+const result = await testChatProvider(
+  {
+    provider: 'ollama',
+    baseUrl: 'http://localhost:11434',
+    modelId: 'llama3.2'
+  },
+  { fetch, createId: () => crypto.randomUUID() }
+)
 
 // {
 //   durationMs: 5364,
@@ -270,6 +274,9 @@ providers use their streamed usage counters; the test helper derives throughput
 from the first generated token through completion. The OpenAI-compatible test
 request asks for standard `stream_options.include_usage`; endpoints that do not
 return usage still succeed, but return timing only.
+
+Pass the same provider dependencies used by the application, including `fetch`
+and `createId`; tests may additionally supply `now` for deterministic timing.
 
 Run package checks from the repository root:
 

@@ -1,4 +1,4 @@
-import type { ProviderMetadata, UIMessageChunk } from 'ai'
+import type { ProviderMetadata } from 'ai'
 import * as z from 'zod'
 
 import { createAnthropicHeaders } from '../anthropic-auth'
@@ -9,8 +9,10 @@ import type {
   ChatProviderMessage,
   ChatProviderTool,
   JsonObject,
+  ProviderStreamPart,
   ThinkingSelection
 } from '../contracts'
+import { providerFinish } from '../contracts'
 import { createReasoningChunkEmitter, type ReasoningChunkEmitter } from '../streaming/parts'
 import { parseSse } from '../streaming/sse'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
@@ -31,7 +33,10 @@ type AnthropicRequest = {
   messages: Array<NonNullable<ReturnType<typeof toMessage>>>
   stream: true
   system?: string
-  thinking?: { type: 'disabled' } | { type: 'enabled'; budget_tokens: number }
+  thinking?:
+    | { type: 'adaptive' }
+    | { type: 'disabled' }
+    | { type: 'enabled'; budget_tokens: number }
   tools?: Array<{
     name: string
     description: string
@@ -53,6 +58,9 @@ type AnthropicContentBlock =
 const DEFAULT_MAX_TOKENS = 8192
 // Anthropic requires an enabled thinking budget to be at least 1024 and below max_tokens.
 const MIN_THINKING_BUDGET = 1024
+// A thinking budget and max_tokens share one output allowance. Reserving this
+// capacity prevents maximum thinking from consuming the entire user-visible answer.
+const RESERVED_ANSWER_TOKENS = 1024
 const thinkingBudgetRatios = new Map<ThinkingSelection, number>([
   ['minimal', 0.125],
   ['low', 0.25],
@@ -79,7 +87,8 @@ const EventSchema = z.object({
       text: z.string().optional(),
       thinking: z.string().optional(),
       signature: z.string().optional(),
-      partial_json: z.string().optional()
+      partial_json: z.string().optional(),
+      stop_reason: z.string().optional()
     })
     .optional(),
   usage: z.object({ output_tokens: z.number().nonnegative().optional() }).optional(),
@@ -90,7 +99,7 @@ const ToolArgumentsSchema = z.record(z.string(), z.json())
 
 function getThinkingBudget(selection: ThinkingSelection, maxTokens: number): number | undefined {
   const ratio = thinkingBudgetRatios.get(selection)
-  const maxBudget = maxTokens - 1
+  const maxBudget = maxTokens - RESERVED_ANSWER_TOKENS
   if (!ratio || maxBudget < MIN_THINKING_BUDGET) return undefined
 
   // Preference levels are ratios here because Anthropic controls thinking by
@@ -147,6 +156,9 @@ function createAnthropicCompatibleProvider(
 ): ChatProvider {
   const maxTokens = configuration.maxTokens ?? DEFAULT_MAX_TOKENS
   const fetchWithThinkingFallback = createThinkingFallback()
+  // Anthropic-compatible gateways may front non-Claude models with adaptive
+  // thinking. Probe once, then cache a 400/422 rejection as budget-only.
+  let adaptiveThinkingEnabled = true
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
     stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
@@ -163,6 +175,7 @@ function createAnthropicCompatibleProvider(
       const getThinking = (includeThinking: boolean) =>
         includeThinking && thinkingEffort !== 'none'
           ? (() => {
+              if (adaptiveThinkingEnabled) return { type: 'adaptive' as const }
               const budgetTokens = getThinkingBudget(thinkingEffort, maxTokens)
               return budgetTokens
                 ? { type: 'enabled' as const, budget_tokens: budgetTokens }
@@ -201,7 +214,19 @@ function createAnthropicCompatibleProvider(
       const sendWithAuthenticationFallback = async (
         includeThinking: boolean
       ): Promise<Response> => {
-        const response = await send(includeThinking)
+        let response = await send(includeThinking)
+        if (response.status === 401 && configuration.apiKey)
+          response = await send(includeThinking, 'bearer')
+        if (
+          includeThinking &&
+          adaptiveThinkingEnabled &&
+          (response.status === 400 || response.status === 422)
+        ) {
+          // A gateway can advertise a Claude 4.6 name without supporting the
+          // adaptive request shape. Fall back to budget thinking, not no thinking.
+          adaptiveThinkingEnabled = false
+          response = await send(true)
+        }
         return response.status === 401 && configuration.apiKey
           ? send(includeThinking, 'bearer')
           : response
@@ -217,7 +242,7 @@ function createAnthropicCompatibleProvider(
       if (!response.body)
         throw new Error('Anthropic-compatible provider returned an empty streaming response.')
       const stream = response.body
-      return (async function* (): AsyncIterable<UIMessageChunk> {
+      return (async function* (): AsyncIterable<ProviderStreamPart> {
         const text = createTextChunkEmitter(dependencies.createId)
         const reasoning = new Map<number, ReasoningChunkEmitter>()
         const signatures = new Map<number, string>()
@@ -225,6 +250,7 @@ function createAnthropicCompatibleProvider(
           number,
           { id?: string; name?: string; argumentsJson: string; initialInput?: unknown }
         >()
+        let stopReason: string | undefined
         for await (const event of parseSse(stream)) {
           if (event.data === '[DONE]') {
             if (toolUses.size > 0)
@@ -239,6 +265,7 @@ function createAnthropicCompatibleProvider(
           if (parsed.data.error?.message) throw new Error(parsed.data.error.message)
           if (parsed.data.usage?.output_tokens !== undefined)
             onPerformanceMetrics?.({ outputTokens: parsed.data.usage.output_tokens })
+          if (event.event === 'message_delta') stopReason = parsed.data.delta?.stop_reason
           const index = parsed.data.index ?? 0
           if (
             event.event === 'content_block_start' &&
@@ -349,6 +376,9 @@ function createAnthropicCompatibleProvider(
             signatures.has(index) ? { anthropic: { signature: signatures.get(index) } } : undefined
           )
         yield* text.finish()
+        // `max_tokens` is an incomplete response, not a successful finish.
+        // The main-process runner consumes this signal and performs one bounded continuation.
+        if (stopReason === 'max_tokens') yield providerFinish({ reason: 'length' })
       })()
     }
   }

@@ -22,6 +22,39 @@ type ModelReasoningCapabilities = {
   selectableEfforts: ThinkingSelection[]
   defaultEffort: ThinkingSelection
 }
+type ProviderFinishReason =
+  | 'cancelled'
+  | 'content-filter'
+  | 'length'
+  | 'stop'
+  | 'tool-calls'
+  | 'unknown'
+type ProviderUsage = {
+  cachedInputTokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  reasoningTokens?: number
+  totalTokens?: number
+}
+type ProviderContinuation =
+  | { provider: 'anthropic-compatible'; reasoningSignatures: Record<string, string> }
+  | { provider: 'ollama' }
+  | { provider: 'openai-compatible' }
+  | { provider: 'openai-responses'; responseId: string }
+type ProviderFinish = {
+  type: 'provider-finish'
+  reason: ProviderFinishReason
+  continuation?: ProviderContinuation
+  usage?: ProviderUsage
+}
+type ProviderCapabilities = {
+  continuation: 'none' | 'response-id' | 'signed-reasoning'
+  reasoning: { efforts: ThinkingSelection[]; mode: 'adaptive' | 'budget' | 'effort' | 'none' }
+  terminalReason: boolean
+  tools: { inputStreaming: boolean; parallelCalls: boolean; strictSchema: boolean }
+  usage: { cachedInputTokens: boolean; reasoningTokens: boolean }
+}
+type ProviderStreamPart = ProviderFinish | UIMessageChunk
 
 type ChatProviderTextPart = { type: 'text'; text: string }
 type ChatProviderToolCall = {
@@ -43,10 +76,17 @@ type ChatProviderReasoningPart = {
   providerMetadata?: ProviderMetadata
 }
 
+type ChatProviderAssistantMessage = {
+  role: 'assistant'
+  parts: Array<ChatProviderTextPart | ChatProviderReasoningPart | ChatProviderToolCallPart>
+  providerMetadata?: ProviderMetadata
+  replay?: ProviderContinuation
+}
 type ChatProviderMessage =
+  | ChatProviderAssistantMessage
   | {
-      role: 'system' | 'user' | 'assistant'
-      parts: Array<ChatProviderTextPart | ChatProviderReasoningPart | ChatProviderToolCallPart>
+      role: 'system' | 'user'
+      parts: Array<ChatProviderTextPart | ChatProviderReasoningPart>
       providerMetadata?: ProviderMetadata
     }
   | { role: 'tool'; parts: ChatProviderToolResultPart[]; providerMetadata?: ProviderMetadata }
@@ -74,7 +114,15 @@ type ProviderTestResult = ProviderPerformanceMetrics & {
 
 type ChatProvider = {
   getModelCapabilities: () => Promise<ModelReasoningCapabilities | null>
-  stream: (input: ChatProviderStreamInput) => Promise<AsyncIterable<UIMessageChunk>>
+  getCapabilities?: () => Promise<ProviderCapabilities>
+  stream: (input: ChatProviderStreamInput) => Promise<AsyncIterable<ProviderStreamPart>>
+}
+
+function isProviderFinish(part: ProviderStreamPart): part is ProviderFinish {
+  return part.type === 'provider-finish'
+}
+function providerFinish(input: Omit<ProviderFinish, 'type'>): ProviderFinish {
+  return { type: 'provider-finish', ...input }
 }
 
 type ChatProviderConfiguration =
@@ -124,9 +172,10 @@ type ChatProviderDependencies = {
   createId: () => string
 }
 
-export { THINKING_SELECTIONS }
+export { THINKING_SELECTIONS, isProviderFinish, providerFinish }
 export type {
   ChatProvider,
+  ChatProviderAssistantMessage,
   ChatProviderConfiguration,
   ChatProviderDependencies,
   ChatProviderMessage,
@@ -146,6 +195,12 @@ export type {
   ModelDiscoveryInput,
   ModelReasoningCapabilities,
   ProviderPerformanceMetrics,
+  ProviderCapabilities,
+  ProviderContinuation,
+  ProviderFinish,
+  ProviderFinishReason,
   ProviderTestResult,
+  ProviderStreamPart,
+  ProviderUsage,
   ThinkingSelection
 }

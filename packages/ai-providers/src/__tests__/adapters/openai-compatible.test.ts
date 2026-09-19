@@ -1,12 +1,42 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createChatProvider } from '../../index'
+import { createChatProvider, isProviderFinish, type ProviderStreamPart } from '../../index'
 
-async function collect(stream: AsyncIterable<unknown>) {
-  const chunks: unknown[] = []
+async function collect(stream: AsyncIterable<ProviderStreamPart>) {
+  const chunks = []
+  for await (const chunk of stream) if (!isProviderFinish(chunk)) chunks.push(chunk)
+  return chunks
+}
+async function collectProtocol(stream: AsyncIterable<ProviderStreamPart>) {
+  const chunks: ProviderStreamPart[] = []
   for await (const chunk of stream) chunks.push(chunk)
   return chunks
 }
 describe('OpenAI-compatible provider', () => {
+  it('maps a length finish reason into the provider protocol envelope', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(
+      { provider: 'openai-compatible', baseUrl: 'https://example.com/v1', modelId: 'model' },
+      { fetch, createId: () => 'part' }
+    )
+
+    const parts = await collectProtocol(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(parts).toContainEqual({ type: 'provider-finish', reason: 'length' })
+  })
+
   it('serializes an app-owned tool definition', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

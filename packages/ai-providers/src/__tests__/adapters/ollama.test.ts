@@ -1,11 +1,37 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createChatProvider } from '../../index'
-async function collect(stream: AsyncIterable<unknown>) {
-  const chunks: unknown[] = []
+import { createChatProvider, isProviderFinish, type ProviderStreamPart } from '../../index'
+async function collect(stream: AsyncIterable<ProviderStreamPart>) {
+  const chunks = []
+  for await (const chunk of stream) if (!isProviderFinish(chunk)) chunks.push(chunk)
+  return chunks
+}
+async function collectProtocol(stream: AsyncIterable<ProviderStreamPart>) {
+  const chunks: ProviderStreamPart[] = []
   for await (const chunk of stream) chunks.push(chunk)
   return chunks
 }
 describe('Ollama provider', () => {
+  it('maps a native length terminal reason into the provider protocol envelope', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('{"done":true,"done_reason":"length"}\n'))
+    const provider = createChatProvider(
+      { provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'llama3.2' },
+      { fetch, createId: () => 'part' }
+    )
+
+    const parts = await collectProtocol(
+      await provider.stream({
+        conversationKey: 'x',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }],
+        thinkingEffort: 'none',
+        signal: new AbortController().signal
+      })
+    )
+
+    expect(parts).toContainEqual({ type: 'provider-finish', reason: 'length' })
+  })
+
   it('reports no reasoning capabilities for a model without the native thinking capability', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

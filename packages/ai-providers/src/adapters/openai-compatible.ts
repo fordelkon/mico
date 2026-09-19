@@ -1,4 +1,3 @@
-import type { UIMessageChunk } from 'ai'
 import * as z from 'zod'
 
 import type {
@@ -6,8 +5,11 @@ import type {
   ChatProviderConfiguration,
   ChatProviderDependencies,
   ChatProviderMessage,
-  ChatProviderTool
+  ChatProviderTool,
+  ProviderFinishReason,
+  ProviderStreamPart
 } from '../contracts'
+import { providerFinish } from '../contracts'
 import { createReasoningChunkEmitter } from '../streaming/parts'
 import { parseSse } from '../streaming/sse'
 import { createTaggedThinkingExtractor } from '../streaming/tagged-thinking'
@@ -178,7 +180,7 @@ function createOpenAICompatibleProvider(
       if (!response.body)
         throw new Error('OpenAI-compatible provider returned an empty streaming response.')
       const stream = response.body
-      return (async function* (): AsyncIterable<UIMessageChunk> {
+      return (async function* (): AsyncIterable<ProviderStreamPart> {
         const text = createTextChunkEmitter(dependencies.createId)
         const reasoning = createReasoningChunkEmitter(dependencies.createId)
         const tagged = createTaggedThinkingExtractor()
@@ -192,6 +194,7 @@ function createOpenAICompatibleProvider(
             started: boolean
           }
         >()
+        let finishReason: ProviderFinishReason = 'stop'
         for await (const event of parseSse(stream)) {
           if (event.data === '[DONE]') {
             if (toolCalls.size > 0)
@@ -207,6 +210,21 @@ function createOpenAICompatibleProvider(
           if (parsed.data.usage?.completion_tokens !== undefined)
             onPerformanceMetrics?.({ outputTokens: parsed.data.usage.completion_tokens })
           const delta = parsed.data.choices?.[0]?.delta
+          const nativeFinishReason = parsed.data.choices?.find(
+            (choice) => choice.finish_reason !== null && choice.finish_reason !== undefined
+          )?.finish_reason
+          if (nativeFinishReason) {
+            finishReason =
+              nativeFinishReason === 'length'
+                ? 'length'
+                : nativeFinishReason === 'content_filter'
+                  ? 'content-filter'
+                  : nativeFinishReason === 'tool_calls'
+                    ? 'tool-calls'
+                    : nativeFinishReason === 'stop'
+                      ? 'stop'
+                      : 'unknown'
+          }
           const nativeReasoning =
             delta?.reasoning_content ?? delta?.reasoning ?? delta?.reasoning_text
           // Compatible servers disagree on the reasoning field name, while the
@@ -290,6 +308,7 @@ function createOpenAICompatibleProvider(
         }
         yield* reasoning.finish()
         yield* text.finish()
+        yield providerFinish({ reason: finishReason })
       })()
     }
   }
