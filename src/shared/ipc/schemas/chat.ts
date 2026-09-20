@@ -16,6 +16,13 @@ type TurnTerminalEvent =
   | { type: 'cancelled'; requestId: string }
   | { type: 'error'; requestId: string; message: string }
   | { type: 'finish'; requestId: string }
+/** Ephemeral output emitted while a workspace tool is still executing. */
+type ToolOutputDeltaData = {
+  toolCallId: string
+  toolName: string
+  stream: 'preview' | 'stderr' | 'stdout'
+  delta: string
+}
 type TurnStreamEvent =
   | { type: 'chunk'; requestId: string; chunk: UIMessageChunk }
   | {
@@ -28,6 +35,18 @@ type TurnStreamEvent =
   | TurnTerminalEvent
 
 const TurnRequestIdSchema = defineSchema(z.string().trim().min(1))
+const ToolOutputDeltaDataSchema: z.ZodType<ToolOutputDeltaData> = defineSchema(
+  z.object({
+    toolCallId: z.string().trim().min(1).max(200),
+    toolName: z.string().trim().min(1).max(100),
+    stream: z.enum(['preview', 'stderr', 'stdout']),
+    // Bounds a single IPC event; the tool-level limits bound the complete output.
+    delta: z
+      .string()
+      .min(1)
+      .max(64 * 1024)
+  })
+)
 const TurnStartRequestSchema = defineSchema(
   z.object({
     requestId: TurnRequestIdSchema,
@@ -83,9 +102,11 @@ export {
   TurnRequestIdSchema,
   TurnStartRequestSchema,
   TurnStreamEventSchema,
+  ToolOutputDeltaDataSchema,
   chatIpcSchemas,
   type ChatAPI,
   type TurnStartRequest,
   type TurnStreamEvent,
-  type TurnTerminalEvent
+  type TurnTerminalEvent,
+  type ToolOutputDeltaData
 }

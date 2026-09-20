@@ -6,6 +6,7 @@ import * as z from 'zod'
 
 import {
   DEFAULT_BASH_TIMEOUT_SECONDS,
+  emitToolOutputDelta,
   MAX_BASH_OUTPUT_BYTES,
   type AgentTool,
   type ToolExecutionContext
@@ -48,8 +49,9 @@ function truncateOutput(output: string): string {
 function executeShell(
   command: string,
   timeoutSeconds: number,
-  { cwd, signal }: ToolExecutionContext
+  context: ToolExecutionContext
 ): Promise<string> {
+  const { cwd, signal } = context
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error('Command aborted'))
     const shell = getShellConfig()
@@ -63,8 +65,12 @@ function executeShell(
     let timedOut = false
     let settled = false
     let timeout: NodeJS.Timeout | undefined
-    const append = (chunk: Buffer) => {
-      if (Buffer.byteLength(output) < MAX_BASH_OUTPUT_BYTES) output += chunk.toString()
+    const append = (stream: 'stdout' | 'stderr', chunk: Buffer) => {
+      const remainingBytes = MAX_BASH_OUTPUT_BYTES - Buffer.byteLength(output)
+      if (remainingBytes <= 0) return
+      const text = chunk.subarray(0, remainingBytes).toString()
+      output += text
+      emitToolOutputDelta(context, { stream, delta: text })
     }
     const stop = () => {
       aborted = true
@@ -82,8 +88,8 @@ function executeShell(
     child.once('spawn', () => {
       if (aborted || timedOut) terminateProcessTree(child)
     })
-    child.stdout.on('data', append)
-    child.stderr.on('data', append)
+    child.stdout.on('data', (chunk: Buffer) => append('stdout', chunk))
+    child.stderr.on('data', (chunk: Buffer) => append('stderr', chunk))
     child.once('error', (error) => {
       settle(() => reject(error))
     })

@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 import * as z from 'zod'
 
-import { MAX_WRITE_BYTES, type AgentTool } from './tool-contract'
+import { emitToolOutputDelta, MAX_WRITE_BYTES, type AgentTool } from './tool-contract'
 import { resolveWorkspacePath } from './workspace-path-policy'
 
 const WriteInputSchema = z.object({
@@ -35,10 +36,14 @@ function createWriteTool(): AgentTool<WriteInput> {
     async execute({ path, content }, context) {
       context.signal.throwIfAborted()
       const target = await resolveWorkspacePath(context.cwd, path, { allowMissing: true })
+      const existed = existsSync(target)
+      // This is a preview of the already validated input, not a claim that the
+      // file has been written. The final tool result remains the commit signal.
+      emitToolOutputDelta(context, { stream: 'preview', delta: content })
       await mkdir(dirname(target), { recursive: true })
       context.signal.throwIfAborted()
       await writeFile(target, content, 'utf8')
-      return { output: `Successfully wrote ${path}.` }
+      return { output: `${existed ? 'Replaced' : 'Created'} ${path}.` }
     }
   }
 }

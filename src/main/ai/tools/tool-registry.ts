@@ -1,12 +1,23 @@
 import type { ChatProviderTool, ChatProviderToolResultPart } from '@mico/ai-providers'
+import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
 
 import { createBashTool } from './bash-tool'
 import { createEditTool } from './edit-tool'
 import { createReadTool } from './read-tool'
-import { registerTool, type RegisteredAgentTool, type ToolInput } from './tool-contract'
+import {
+  registerTool,
+  type RegisteredAgentTool,
+  type ToolInput,
+  type ToolOutputDelta
+} from './tool-contract'
 import { createWriteTool } from './write-tool'
 
 type ToolCall = { toolCallId: string; toolName: string; input: ToolInput }
+
+// A UTF-16 slice may encode to up to four bytes per code unit. Keep each IPC
+// fragment safely below the shared 64 KiB payload ceiling while preserving all
+// output from tools whose previews are larger than one renderer update.
+const MAX_OUTPUT_DELTA_CHARS = 16 * 1024
 
 class ToolRegistry {
   readonly #tools: Map<string, RegisteredAgentTool>
@@ -30,11 +41,28 @@ class ToolRegistry {
     return [...this.#tools.values()].map((tool) => tool.definition)
   }
 
-  async execute(call: ToolCall, signal: AbortSignal): Promise<ChatProviderToolResultPart> {
+  async execute(
+    call: ToolCall,
+    signal: AbortSignal,
+    onOutputDelta?: (delta: ToolOutputDeltaData) => void
+  ): Promise<ChatProviderToolResultPart> {
     const tool = this.#tools.get(call.toolName)
     if (!tool) return this.errorResult(call, `Tool "${call.toolName}" is unavailable.`)
     try {
-      const result = await tool.execute(call.input, { cwd: this.#cwd, signal })
+      const result = await tool.execute(call.input, {
+        cwd: this.#cwd,
+        signal,
+        onOutputDelta: (delta: ToolOutputDelta) => {
+          if (!delta.delta) return
+          for (let offset = 0; offset < delta.delta.length; offset += MAX_OUTPUT_DELTA_CHARS)
+            onOutputDelta?.({
+              toolCallId: call.toolCallId,
+              toolName: call.toolName,
+              stream: delta.stream,
+              delta: delta.delta.slice(offset, offset + MAX_OUTPUT_DELTA_CHARS)
+            })
+        }
+      })
       return {
         toolCallId: call.toolCallId,
         toolName: call.toolName,
@@ -52,7 +80,8 @@ class ToolRegistry {
 
   async executeBatch(
     calls: readonly ToolCall[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    onOutputDelta?: (delta: ToolOutputDeltaData) => void
   ): Promise<ChatProviderToolResultPart[]> {
     const results: ChatProviderToolResultPart[] = []
     let parallel: Array<Promise<void>> = []
@@ -65,7 +94,7 @@ class ToolRegistry {
     for (const [index, call] of calls.entries()) {
       signal.throwIfAborted()
       const run = async (): Promise<void> => {
-        results[index] = await this.execute(call, signal)
+        results[index] = await this.execute(call, signal, onOutputDelta)
       }
       if (this.#tools.get(call.toolName)?.executionMode === 'parallel-safe') {
         parallel.push(run())

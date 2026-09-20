@@ -12,11 +12,25 @@ type ChatReasoningPart = {
   providerMetadata?: ProviderMetadata
 }
 type ChatToolTraceInput = { command?: string; editCount?: number; path?: string }
+type ChatToolTracePresentation =
+  | { content: string; isTruncated: boolean; type: 'bash' | 'read' }
+  | {
+      content: string
+      isTruncated: boolean
+      operation: 'created' | 'replaced' | 'unknown'
+      type: 'write'
+    }
+  | {
+      edits: Array<{ newText: string; oldText: string }>
+      isTruncated: boolean
+      type: 'edit'
+    }
 type ChatToolTracePartBase = {
   type: 'tool-trace'
   toolCallId: string
   toolName: string
   input: ChatToolTraceInput
+  presentation?: ChatToolTracePresentation
 }
 type ChatToolTracePart =
   | (ChatToolTracePartBase & { state: 'output-available'; output: string })
@@ -108,6 +122,29 @@ const ChatToolTraceInputSchema: z.ZodType<ChatToolTraceInput> = defineSchema(
     path: z.string().trim().min(1).max(4_096).optional()
   })
 )
+const ToolTracePresentationMaxBytes = 64 * 1024
+const isBoundedToolPresentationText = (text: string): boolean =>
+  textEncoder.encode(text).byteLength <= ToolTracePresentationMaxBytes
+const ChatToolTracePresentationSchema: z.ZodType<ChatToolTracePresentation> = defineSchema(
+  z.discriminatedUnion('type', [
+    z.object({
+      type: z.enum(['bash', 'read']),
+      content: z.string().refine(isBoundedToolPresentationText),
+      isTruncated: z.boolean()
+    }),
+    z.object({
+      type: z.literal('write'),
+      content: z.string().refine(isBoundedToolPresentationText),
+      isTruncated: z.boolean(),
+      operation: z.enum(['created', 'replaced', 'unknown'])
+    }),
+    z.object({
+      type: z.literal('edit'),
+      edits: z.array(z.object({ oldText: z.string(), newText: z.string() })).max(100),
+      isTruncated: z.boolean()
+    })
+  ])
+)
 const ChatToolTracePartSchema: z.ZodType<ChatToolTracePart> = defineSchema(
   z.union([
     z.object({
@@ -115,6 +152,7 @@ const ChatToolTracePartSchema: z.ZodType<ChatToolTracePart> = defineSchema(
       toolCallId: z.string().trim().min(1).max(200),
       toolName: z.string().trim().min(1).max(64),
       input: ChatToolTraceInputSchema,
+      presentation: ChatToolTracePresentationSchema.optional(),
       state: z.literal('output-available'),
       output: z.string().trim().min(1).max(500)
     }),
@@ -123,6 +161,7 @@ const ChatToolTracePartSchema: z.ZodType<ChatToolTracePart> = defineSchema(
       toolCallId: z.string().trim().min(1).max(200),
       toolName: z.string().trim().min(1).max(64),
       input: ChatToolTraceInputSchema,
+      presentation: ChatToolTracePresentationSchema.optional(),
       state: z.literal('output-error'),
       errorText: z.string().trim().min(1).max(500)
     })
@@ -174,6 +213,7 @@ export {
   ChatDocumentPartSchema,
   ChatReasoningPartSchema,
   ChatToolTraceInputSchema,
+  ChatToolTracePresentationSchema,
   ChatToolTracePartSchema,
   ChatUserMessageSchema,
   ModelReasoningCapabilitiesSchema,
@@ -189,6 +229,7 @@ export type {
   ChatMessage,
   ChatUserMessage,
   ChatToolTraceInput,
+  ChatToolTracePresentation,
   ChatToolTracePart,
   ModelReasoningCapabilities,
   ThinkingSelection

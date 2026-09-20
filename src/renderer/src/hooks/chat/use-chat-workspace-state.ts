@@ -86,7 +86,7 @@ function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
               type: 'dynamic-tool',
               toolCallId: part.toolCallId,
               toolName: part.toolName,
-              input: part.input,
+              input: { ...part.input, __micoPresentation: part.presentation },
               state: 'output-error',
               errorText: part.errorText
             }
@@ -97,13 +97,15 @@ function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
             type: 'dynamic-tool',
             toolCallId: part.toolCallId,
             toolName: part.toolName,
-            input: part.input,
+            input: { ...part.input, __micoPresentation: part.presentation },
             state: 'output-available',
             output: part.output
           }
         ]
       }
-      return part.type === 'text' ? [{ type: 'text', text: part.text, state: 'done' }] : []
+      if (part.type === 'text') return [{ type: 'text', text: part.text, state: 'done' }]
+      if (part.type === 'reasoning') return [{ type: 'reasoning', text: part.text, state: 'done' }]
+      return []
     })
   }))
 }

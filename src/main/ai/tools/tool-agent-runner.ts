@@ -13,6 +13,7 @@ import * as z from 'zod'
 
 import { ToolRegistry, type ToolCall } from './tool-registry'
 import type { ToolExecutionTrace } from './tool-contract'
+import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
 
 // MODEL_STEP is one provider.stream() request. The final step is reserved for
 // a text answer, so this budget bounds model cost without cutting off a turn.
@@ -217,7 +218,18 @@ class ToolAgentRunner {
       const executionStartedAt = Date.now()
       const rawResults = exceedsCallBudget
         ? calls.map((call) => toolBudgetExceededResult(call))
-        : await registry.executeBatch(calls, signal)
+        : await registry.executeBatch(calls, signal, (delta) => {
+            // Validate before crossing the main/renderer boundary. Deltas are
+            // transient; completion still emits and persists the full trace.
+            const parsed = ToolOutputDeltaDataSchema.safeParse(delta)
+            if (!parsed.success) return
+            emit({
+              type: 'data-tool-output-delta',
+              id: parsed.data.toolCallId,
+              data: parsed.data,
+              transient: true
+            })
+          })
       const executionFinishedAt = Date.now()
       if (!exceedsCallBudget) callCount += calls.length
       const results = rawResults.map(boundToolResultForHistory)

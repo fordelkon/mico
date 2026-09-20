@@ -9,7 +9,20 @@ const MAX_EDIT_REPLACEMENTS = 100
 const MAX_BASH_OUTPUT_BYTES = 256 * 1024
 const DEFAULT_BASH_TIMEOUT_SECONDS = 30
 
-type ToolExecutionContext = { cwd: string; signal: AbortSignal }
+/** A bounded, in-progress fragment suitable for the chat's live tool output. */
+type ToolOutputDelta = {
+  stream: 'stdout' | 'stderr' | 'preview'
+  delta: string
+}
+type ToolExecutionContext = {
+  cwd: string
+  signal: AbortSignal
+  /**
+   * Observes output while the tool is still running. Tool completion remains the
+   * authoritative, persisted trace; consumers must tolerate dropped deltas.
+   */
+  onOutputDelta?: (delta: ToolOutputDelta) => void
+}
 type ToolExecutionResult = { output: string }
 /** Complete fact emitted once a tool call has settled. */
 type ToolExecutionTrace = {
@@ -35,6 +48,14 @@ type RegisteredAgentTool = {
   execute: (input: ToolInput, context: ToolExecutionContext) => Promise<ToolExecutionResult>
 }
 
+function emitToolOutputDelta(context: ToolExecutionContext, delta: ToolOutputDelta): void {
+  try {
+    context.onOutputDelta?.(delta)
+  } catch {
+    // Live UI observers are best-effort and must not affect tool execution.
+  }
+}
+
 function registerTool<Input>(tool: AgentTool<Input>): RegisteredAgentTool {
   return {
     definition: tool.definition,
@@ -54,6 +75,7 @@ export {
   MAX_READ_BYTES,
   MAX_READ_LINES,
   MAX_WRITE_BYTES,
+  emitToolOutputDelta,
   type AgentTool,
   type RegisteredAgentTool,
   type ToolExecutionContext,
@@ -61,5 +83,6 @@ export {
   type ToolExecutionResult,
   type ToolExecutionTrace,
   type ToolInput,
+  type ToolOutputDelta,
   registerTool
 }

@@ -7,8 +7,10 @@ import {
   ChatDocumentPartSchema,
   ChatMessageRoleSchema,
   ChatReasoningPartSchema,
+  ChatToolTracePresentationSchema,
   type ChatMessage,
   type ChatToolTraceInput,
+  type ChatToolTracePresentation,
   type ChatToolTracePart
 } from '@shared/data/schemas/chat'
 import { toolLabel } from '@shared/ai/tool-presentation'
@@ -64,6 +66,7 @@ type StoredToolTrace = {
   toolCallId: string
   toolName: string
   input: ChatToolTraceInput
+  presentation?: ChatToolTracePresentation
   status: 'completed' | 'failed'
   summary: string
   startedAt: number
@@ -841,6 +844,7 @@ const StoredToolTraceSchema: z.ZodType<StoredToolTrace> = z.object({
     editCount: z.number().int().positive().max(100).optional(),
     path: z.string().trim().min(1).max(4_096).optional()
   }),
+  presentation: ChatToolTracePresentationSchema.optional(),
   status: z.enum(['completed', 'failed']),
   summary: z.string().trim().min(1).max(500),
   startedAt: z.number().int().nonnegative(),
@@ -863,9 +867,15 @@ const AgentStepPayloadSchema: z.ZodType<{ step: AgentStep }> = z.object({
 })
 const ToolTraceSourceInputSchema = z.object({
   command: z.string().optional(),
-  edits: z.array(z.unknown()).max(100).optional(),
+  content: z.string().optional(),
+  edits: z
+    .array(z.object({ newText: z.string(), oldText: z.string() }))
+    .max(100)
+    .optional(),
   path: z.string().optional()
 })
+const TOOL_TRACE_PRESENTATION_MAX_BYTES = 64 * 1024
+type TruncatedToolPresentationText = { isTruncated: boolean; text: string }
 function toSessionSummary(row: SessionRow): SessionSummary {
   // SAFETY: default profiles are serialized by canonicalJson from an ExecutionProfileSnapshot.
   return {
@@ -948,6 +958,7 @@ function toStoredToolTrace(trace: ToolExecutionTrace): StoredToolTrace {
     toolCallId: trace.toolCallId.trim().slice(0, 200) || 'unknown-call',
     toolName,
     input,
+    presentation: toToolTracePresentation(toolName, trace.input, trace.output),
     status,
     summary: toolTraceSummary(toolName, input, status, trace.output),
     startedAt,
@@ -964,6 +975,59 @@ function toToolTraceInput(input: JsonObject): ChatToolTraceInput {
   if (parsed.data.edits?.length) traceInput.editCount = parsed.data.edits.length
   return traceInput
 }
+function truncateToolPresentationText(text: string): TruncatedToolPresentationText {
+  if (Buffer.byteLength(text) <= TOOL_TRACE_PRESENTATION_MAX_BYTES)
+    return { isTruncated: false, text }
+
+  let truncated = Buffer.from(text).subarray(0, TOOL_TRACE_PRESENTATION_MAX_BYTES).toString()
+  while (Buffer.byteLength(truncated) > TOOL_TRACE_PRESENTATION_MAX_BYTES)
+    truncated = truncated.slice(0, -1)
+  return { isTruncated: true, text: truncated }
+}
+function toToolTracePresentation(
+  toolName: string,
+  input: JsonObject,
+  output: string
+): StoredToolTrace['presentation'] {
+  const parsed = ToolTraceSourceInputSchema.safeParse(input)
+  if (!parsed.success) return undefined
+
+  switch (toolName) {
+    case 'read': {
+      const preview = truncateToolPresentationText(output)
+      return { content: preview.text, isTruncated: preview.isTruncated, type: 'read' }
+    }
+    case 'bash': {
+      const preview = truncateToolPresentationText(output)
+      return { content: preview.text, isTruncated: preview.isTruncated, type: 'bash' }
+    }
+    case 'write': {
+      if (parsed.data.content === undefined) return undefined
+      const preview = truncateToolPresentationText(parsed.data.content)
+      return {
+        content: preview.text,
+        isTruncated: preview.isTruncated,
+        operation: output.startsWith('Created ')
+          ? 'created'
+          : output.startsWith('Replaced ')
+            ? 'replaced'
+            : 'unknown',
+        type: 'write'
+      }
+    }
+    case 'edit': {
+      const edits = parsed.data.edits ?? []
+      const serialized = JSON.stringify(edits)
+      return {
+        edits: Buffer.byteLength(serialized) <= TOOL_TRACE_PRESENTATION_MAX_BYTES ? edits : [],
+        isTruncated: Buffer.byteLength(serialized) > TOOL_TRACE_PRESENTATION_MAX_BYTES,
+        type: 'edit'
+      }
+    }
+    default:
+      return undefined
+  }
+}
 function toolTraceSummary(
   toolName: string,
   input: ChatToolTraceInput,
@@ -979,6 +1043,10 @@ function toolTraceSummary(
       return `Read ${lineCount} ${lineCount === 1 ? 'line' : 'lines'}.`
     }
     case 'write':
+      if (output.startsWith('Created '))
+        return input.path ? `Created ${input.path}.` : 'Created file.'
+      if (output.startsWith('Replaced '))
+        return input.path ? `Replaced ${input.path}.` : 'Replaced file.'
       return input.path ? `Wrote ${input.path}.` : 'Wrote file.'
     case 'edit':
       return input.path
@@ -997,6 +1065,7 @@ function toToolTracePart(trace: StoredToolTrace): ChatToolTracePart {
       toolCallId: trace.toolCallId,
       toolName: trace.toolName,
       input: trace.input,
+      presentation: trace.presentation,
       state: 'output-error',
       errorText: trace.summary
     }
@@ -1006,6 +1075,7 @@ function toToolTracePart(trace: StoredToolTrace): ChatToolTracePart {
     toolCallId: trace.toolCallId,
     toolName: trace.toolName,
     input: trace.input,
+    presentation: trace.presentation,
     state: 'output-available',
     output: trace.summary
   }

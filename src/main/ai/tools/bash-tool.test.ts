@@ -34,6 +34,48 @@ describe('bash tool', () => {
     expect(result.output.trim()).toBe(await realpath(context.cwd))
   })
 
+  it('reports stdout fragments before the command settles', async () => {
+    const context = await createContext()
+    const deltas: Array<{ stream: string; delta: string }> = []
+
+    const result = await createBashTool().execute(
+      { command: "node -e \"process.stdout.write('out'); process.stderr.write('err')\"" },
+      { ...context, onOutputDelta: (delta) => deltas.push(delta) }
+    )
+
+    expect(deltas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stream: 'stdout', delta: 'out' }),
+        expect.objectContaining({ stream: 'stderr', delta: 'err' })
+      ])
+    )
+    expect(result.output).toContain('out')
+    expect(result.output).toContain('err')
+  })
+
+  it('emits stdout and stderr fragments while a command runs', async () => {
+    const context = await createContext()
+    const deltas: Array<{ stream: string; delta: string }> = []
+    const command = "node -e \"process.stdout.write('out'); process.stderr.write('err')\""
+
+    const result = await createBashTool().execute(
+      { command },
+      {
+        ...context,
+        onOutputDelta: (delta) => deltas.push(delta)
+      }
+    )
+
+    expect(deltas).toEqual(
+      expect.arrayContaining([
+        { stream: 'stdout', delta: 'out' },
+        { stream: 'stderr', delta: 'err' }
+      ])
+    )
+    expect(result.output).toContain('out')
+    expect(result.output).toContain('err')
+  })
+
   it('reports a non-zero exit as a tool failure', async () => {
     const context = await createContext()
     const command = 'node -e "process.exit(7)"'

@@ -108,6 +108,11 @@ describe('SessionRuntimeService', () => {
             toolCallId: 'call-1',
             toolName: 'read',
             input: { path: 'package.json' },
+            presentation: {
+              type: 'read',
+              content: '{"name":"mico"}',
+              isTruncated: false
+            },
             state: 'output-available',
             output: 'Read 1 line.'
           },
@@ -300,6 +305,12 @@ describe('SessionRuntimeService', () => {
             toolCallId: 'call-1',
             toolName: 'write',
             input: { path: 'notes.md' },
+            presentation: {
+              type: 'write',
+              content: 'private draft',
+              isTruncated: false,
+              operation: 'unknown'
+            },
             state: 'output-available',
             output: 'Wrote notes.md.'
           },
@@ -309,7 +320,7 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('does not persist write contents in tool traces', async () => {
+  it('persists a bounded write preview in tool traces', async () => {
     const { database, service } = await createService()
     const session = service.createSession({ title: 'Session', defaultProfile: profile })
     const run = service.startTurn({
@@ -334,7 +345,7 @@ describe('SessionRuntimeService', () => {
         .prepare("SELECT payload_json FROM runtime_events WHERE kind = 'tool_trace_recorded'")
         .pluck()
         .get()
-    ).not.toContain('do not persist this text')
+    ).toContain('do not persist this text')
   })
 
   it('migrates an existing event log to accept tool trace event kinds', async () => {

@@ -113,7 +113,7 @@ describe('ChatMessageList', () => {
     const { rerender } = render(
       <ChatMessageList conversationId="conversation-1" isResponding messages={[userMessage]} />
     )
-    expect(screen.getByRole('button', { name: 'Thinking' })).toBeVisible()
+    expect(screen.getByTestId('thinking-orb')).toBeVisible()
 
     rerender(
       <ChatMessageList
@@ -123,7 +123,7 @@ describe('ChatMessageList', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Thinking' })).toBeVisible()
+    expect(screen.getByTestId('thinking-orb')).toBeVisible()
 
     rerender(
       <ChatMessageList
@@ -140,7 +140,7 @@ describe('ChatMessageList', () => {
       />
     )
 
-    expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull()
+    expect(screen.queryByTestId('thinking-orb')).toBeNull()
     expect(screen.getAllByTestId('answer-content').at(-1)).toHaveTextContent(
       'Start with the most important task.'
     )

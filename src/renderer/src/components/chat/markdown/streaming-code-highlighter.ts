@@ -79,16 +79,10 @@ type HighlightSession = {
   failure: unknown
 }
 
-function splitStableCode(code: string, isStreaming: boolean): StableCode {
-  if (!isStreaming) return { stable: code, tail: '' }
-
-  const lastNewline = code.lastIndexOf('\n')
-  if (lastNewline === -1) return { stable: '', tail: code }
-
-  return {
-    stable: code.slice(0, lastNewline + 1),
-    tail: code.slice(lastNewline + 1)
-  }
+function splitStableCode(code: string, _isStreaming: boolean): StableCode {
+  // Feed the current tail into Shiki's recall-capable stream so it can update
+  // tokens as a line grows instead of leaving the tail as permanently raw text.
+  return { stable: code, tail: '' }
 }
 
 function countLineBreaks(content: string): number {

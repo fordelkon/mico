@@ -22,13 +22,6 @@
       transparent 0.65px
     );
   --chat-thinking-active-foreground: color-mix(in oklab, var(--foreground) 58%, transparent);
-  --chat-code-border: color-mix(in oklab, var(--border) 84%, var(--foreground));
-  --chat-code-header-border: color-mix(in oklab, var(--border) 88%, var(--foreground));
-  --chat-code-surface: color-mix(in oklab, var(--surface-secondary) 76%, var(--chat-canvas));
-  --chat-code-header-surface: color-mix(in oklab, var(--surface-secondary) 88%, var(--foreground));
-  --chat-code-body-surface: color-mix(in oklab, var(--surface-primary) 92%, var(--chat-canvas));
-  --chat-code-gutter-border: color-mix(in oklab, var(--border) 86%, transparent);
-  --chat-code-selection: color-mix(in oklab, var(--brand) 28%, transparent);
   --chat-retry-progress: color-mix(in oklab, currentcolor 55%, transparent);
   --chat-paper-top-shadow: linear-gradient(
     to bottom,

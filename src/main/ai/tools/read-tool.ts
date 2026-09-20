@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises'
 
 import * as z from 'zod'
 
-import { MAX_READ_BYTES, MAX_READ_LINES, type AgentTool } from './tool-contract'
+import {
+  emitToolOutputDelta,
+  MAX_READ_BYTES,
+  MAX_READ_LINES,
+  type AgentTool
+} from './tool-contract'
 import { resolveWorkspacePath } from './workspace-path-policy'
 
 const ReadInputSchema = z.object({
@@ -54,7 +59,9 @@ function createReadTool(): AgentTool<ReadInput> {
       const nextOffset = start + selected.length + 1
       const suffix =
         nextOffset <= lines.length ? `\n\n[More content available. Use offset=${nextOffset}.]` : ''
-      return { output: selected.join('\n') + suffix }
+      const output = selected.join('\n') + suffix
+      emitToolOutputDelta(context, { stream: 'preview', delta: output })
+      return { output }
     }
   }
 }

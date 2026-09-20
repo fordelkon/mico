@@ -1,93 +1,214 @@
-import { Button } from '@mico/ui'
-import { CheckIcon, CopyIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, FileCode2Icon, LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
+import { bundledLanguages, bundledThemes, createHighlighter, type Highlighter } from 'shiki'
 
-import { splitStableCode } from '../stream/streaming-code-highlighter'
-import { useStreamingCodeHighlight } from '../stream/use-streaming-code-highlight'
-import { ChatCodeLine } from './chat-code-line'
+import { cn } from '@mico/ui/lib/utils'
 
-type ChatCodeBlockProps = {
-  code: string
-  isStreaming: boolean
-  language?: string
+import { useStreamingCodeHighlight } from './use-streaming-code-highlight'
+
+type ChatCodeBlockProps = { code: string; isStreaming: boolean; language?: string }
+type CodeThemes = { dark: string; light: string }
+type CodeToken = { content: string; offset: number; style?: React.CSSProperties }
+
+const highlighterPromises = new Map<string, Promise<Highlighter>>()
+
+function getThemesKey(themes: CodeThemes): string {
+  return `${themes.light}\u0000${themes.dark}`
 }
 
-type HighlightIdentity = {
-  isFallback: boolean
-  source: { code: string; language?: string }
+function getHighlighter(themes: CodeThemes): Promise<Highlighter> {
+  const key = getThemesKey(themes)
+  const existing = highlighterPromises.get(key)
+  if (existing) return existing
+
+  const highlighter = createHighlighter({ themes: [themes.light, themes.dark], langs: [] })
+  highlighterPromises.set(key, highlighter)
+  return highlighter
 }
 
-function hasCompatibleHighlight(
-  highlight: HighlightIdentity,
+export function useCodeTokens(
   code: string,
-  language?: string
-): boolean {
-  // Keep completed lines highlighted while an append-only stream waits for its next Shiki update.
+  language: string,
+  themes: CodeThemes
+): CodeToken[][] | undefined {
+  const themesKey = getThemesKey(themes)
+  const key = `${themesKey}\u0000${language}\u0000${code}`
+  const [result, setResult] = React.useState<{
+    code: string
+    key: string
+    language: string
+    lines: CodeToken[][]
+    themesKey: string
+  }>()
+
+  React.useEffect(() => {
+    if (language === 'text') return
+
+    let cancelled = false
+    void getHighlighter(themes)
+      .then(async (highlighter) => {
+        // SAFETY: bundledLanguages is checked before use; unknown fence languages render as plain text.
+        const languageLoader = bundledLanguages[language as keyof typeof bundledLanguages]
+        if (!languageLoader) return
+        await highlighter.loadLanguage(languageLoader)
+        // SAFETY: languageLoader and the persisted theme values were validated above by their bundled registries.
+        const shikiLanguage = language as keyof typeof bundledLanguages
+        // SAFETY: theme values are only used after createHighlighter accepted them for this session.
+        const shikiThemes = {
+          dark: themes.dark as keyof typeof bundledThemes,
+          light: themes.light as keyof typeof bundledThemes
+        }
+        const lines = highlighter
+          .codeToTokensWithThemes(code, { lang: shikiLanguage, themes: shikiThemes })
+          .map((line) =>
+            line.map((token) => ({
+              content: token.content,
+              dark: token.variants.dark?.color,
+              light: token.variants.light?.color,
+              offset: token.offset
+            }))
+          )
+
+        if (!cancelled) setResult({ code, key, language, lines, themesKey })
+      })
+      .catch(() => {
+        // Code remains readable while a language or user-selected theme cannot be loaded.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [code, key, language, themes, themesKey])
+
+  if (result?.key === key) return result.lines
+  if (
+    result?.language === language &&
+    result.themesKey === themesKey &&
+    code.startsWith(result.code)
+  ) {
+    return result.lines
+  }
+
+  return undefined
+}
+
+function CodeLine({ code, tokens }: { code: string; tokens?: CodeToken[] }): React.JSX.Element {
+  const completeTokens =
+    tokens?.map((token) => token.content).join('') === code ? tokens : undefined
+
   return (
-    !highlight.isFallback &&
-    highlight.source.language === language &&
-    code.startsWith(highlight.source.code)
+    <span className="pr-4 pl-1 whitespace-pre">
+      {completeTokens
+        ? completeTokens.map((token) => (
+            <span
+              data-code-token
+              key={`${token.offset}-${token.content}`}
+              style={
+                // SAFETY: React permits CSS custom properties in a style object, but CSSProperties omits arbitrary --* keys.
+                {
+                  ...token.style
+                }
+              }
+              className="text-[var(--shiki-light)] dark:text-[var(--shiki-dark)]"
+            >
+              {token.content}
+            </span>
+          ))
+        : code || ' '}
+    </span>
   )
 }
 
 function ChatCodeBlock({ code, isStreaming, language }: ChatCodeBlockProps): React.JSX.Element {
+  const copyTimerRef = React.useRef<number | undefined>(undefined)
   const [copied, setCopied] = React.useState(false)
-  const lines = React.useMemo(() => code.split('\n'), [code])
+  const normalizedLanguage = language ?? 'text'
   const { isFallback, source, tokenLines } = useStreamingCodeHighlight({
     code,
     isStreaming,
-    language
+    language: normalizedLanguage
   })
-  const canRenderTokens = hasCompatibleHighlight({ isFallback, source }, code, language)
-  const visibleRawTail = canRenderTokens ? splitStableCode(code, isStreaming).tail : ''
-  const rawTailLines = React.useMemo(() => visibleRawTail.split('\n'), [visibleRawTail])
-  const stableLineCount = visibleRawTail ? lines.length - rawTailLines.length : 0
+  const tokens =
+    !isFallback && source.language === normalizedLanguage && code.startsWith(source.code)
+      ? tokenLines?.map((line) =>
+          line.map((token, index) => ({
+            content: token.content,
+            offset: index,
+            style: token.htmlStyle
+          }))
+        )
+      : undefined
+  const lines = code.split('\n')
 
-  React.useEffect(() => {
-    if (!copied) return
+  React.useEffect(
+    () => () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
+    },
+    []
+  )
 
-    const timeoutId = window.setTimeout(() => setCopied(false), 1_500)
-    return () => window.clearTimeout(timeoutId)
-  }, [copied])
-
-  const copy = (): void => {
-    void navigator.clipboard.writeText(code).then(
-      () => setCopied(true),
-      () => setCopied(false)
-    )
-  }
+  const copy = React.useCallback(async () => {
+    await navigator.clipboard?.writeText(code)
+    setCopied(true)
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = window.setTimeout(() => setCopied(false), 1600)
+  }, [code])
 
   return (
     <div
-      className="chat-code-block my-4 overflow-hidden rounded-lg border font-mono text-sm"
+      aria-busy={isStreaming}
+      className="my-4 w-full overflow-hidden rounded-2xl bg-muted/80 text-sm"
+      data-slot="code-block"
+      data-state={isStreaming ? 'streaming' : 'complete'}
       data-testid="code-block"
     >
-      <div className="chat-code-block__header flex h-10 items-center px-3 text-xs">
-        <span>{language ?? 'text'}</span>
-        <Button aria-label="Copy code" className="ml-auto" onClick={copy} size="xs" variant="ghost">
-          {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
+      <div className="flex h-10 items-center gap-2.5 px-3">
+        <FileCode2Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground/70" />
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/55">
+          {normalizedLanguage}
+        </span>
+        <span
+          aria-label={isStreaming ? 'Writing' : 'Ready'}
+          className="ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground"
+        >
+          {isStreaming ? (
+            <LoaderCircleIcon className="size-3 animate-spin motion-reduce:animate-none" />
+          ) : (
+            <CheckIcon className="size-3" />
+          )}
+          {isStreaming ? 'Writing' : 'Ready'}
+        </span>
+        <button
+          type="button"
+          aria-label={copied ? 'Copied' : 'Copy code'}
+          title={copied ? 'Copied' : 'Copy code'}
+          onClick={copy}
+          className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        </button>
       </div>
-      <pre className="chat-code-block__body overflow-x-auto py-3">
-        {lines.map((line, index) => {
-          const rawLine =
-            canRenderTokens && visibleRawTail && index >= stableLineCount
-              ? rawTailLines[index - stableLineCount]
-              : line
-
-          return (
-            <ChatCodeLine
-              canRenderTokens={canRenderTokens}
-              key={index}
-              line={line}
-              lineNumber={index + 1}
-              rawLine={rawLine}
-              tokens={tokenLines?.[index]}
-            />
-          )
-        })}
-      </pre>
+      <div
+        role={isStreaming ? 'log' : undefined}
+        aria-live={isStreaming ? 'polite' : undefined}
+        className="overflow-x-auto border-t border-border py-2"
+      >
+        <pre className="m-0 min-w-max font-mono text-xs leading-5 text-foreground/85">
+          <code>
+            {lines.map((line, index) => (
+              <span
+                key={`${index}-${line}`}
+                className={cn('grid min-h-5 grid-cols-[2.75rem_minmax(0,1fr)]')}
+              >
+                <span className="select-none pr-3 text-right tabular-nums text-muted-foreground/35">
+                  {index + 1}
+                </span>
+                <CodeLine code={line} tokens={tokens?.[index]} />
+              </span>
+            ))}
+          </code>
+        </pre>
+      </div>
     </div>
   )
 }

@@ -176,11 +176,11 @@ describe('ChatMessage', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Thought summary' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Agent run' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
-    expect(screen.getByText('Comparing the available options.')).toHaveAttribute(
+    expect(screen.getByTestId('thinking-panel').firstElementChild).toHaveAttribute(
       'aria-hidden',
       'true'
     )
@@ -201,8 +201,11 @@ describe('ChatMessage', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Thought summary' })).toBeVisible()
-    expect(screen.getByText('Inspecting the request.')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByRole('button', { name: 'Agent run' })).toBeVisible()
+    expect(screen.getByTestId('thinking-panel').firstElementChild).toHaveAttribute(
+      'aria-hidden',
+      'true'
+    )
     expect(screen.getByTestId('answer-content')).toHaveTextContent('The answer.')
     expect(screen.getByTestId('answer-content')).not.toHaveTextContent('Inspecting the request.')
   })
@@ -238,6 +241,44 @@ describe('ChatMessage', () => {
     )
   })
 
+  it('keeps an interim model update as body copy and starts the following activity in a new step', () => {
+    render(
+      <ChatMessage
+        isStreaming={false}
+        message={{
+          id: 'assistant-stage-output',
+          role: 'assistant',
+          parts: [
+            { type: 'reasoning', text: 'Inspecting the request.' },
+            { type: 'text', text: 'I found the relevant component.' },
+            {
+              type: 'dynamic-tool',
+              toolCallId: 'call-stage-output',
+              toolName: 'read',
+              state: 'output-available',
+              input: { path: 'src/index.ts' },
+              output: 'export {}'
+            },
+            { type: 'text', text: 'Done.' }
+          ]
+        }}
+      />
+    )
+
+    const activities = screen.getAllByTestId('agent-activity-event')
+    expect(activities).toHaveLength(2)
+    expect(activities[0]).toHaveTextContent('Inspecting the request.')
+    expect(activities[0]).not.toHaveTextContent('I found the relevant component.')
+    expect(activities[1]).toHaveTextContent('Read')
+    // The interim update renders as body copy between the two model steps.
+    const transcript = screen.getByText('Done.').closest('[data-slot="message-content"]')
+    if (!transcript) throw new Error('Message content is missing.')
+    expect(transcript.textContent).toMatch(
+      /Inspecting the request\.[\s\S]*I found the relevant component\.[\s\S]*Read[\s\S]*Done\./
+    )
+    expect(screen.getAllByTestId('answer-content').at(-1)).toHaveTextContent('Done.')
+  })
+
   it('compacts a completed tool when the next reasoning activity arrives', () => {
     const tool = {
       type: 'dynamic-tool' as const,
@@ -270,10 +311,10 @@ describe('ChatMessage', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Run printf sequenceCompleted' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Run printf sequence Completed' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
-    expect(screen.getAllByTestId('agent-activity-event')).toHaveLength(2)
+    expect(screen.getAllByTestId('agent-activity-event')).toHaveLength(1)
   })
 })

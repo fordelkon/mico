@@ -145,6 +145,17 @@ describe('ToolAgentRunner', () => {
         dynamic: true
       },
       {
+        type: 'data-tool-output-delta',
+        id: 'call-1',
+        data: {
+          toolCallId: 'call-1',
+          toolName: 'read',
+          stream: 'preview',
+          delta: 'contents'
+        },
+        transient: true
+      },
+      {
         type: 'tool-output-available',
         toolCallId: 'call-1',
         output: 'contents',

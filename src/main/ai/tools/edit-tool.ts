@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 
 import * as z from 'zod'
 
-import { MAX_EDIT_REPLACEMENTS, type AgentTool } from './tool-contract'
+import { emitToolOutputDelta, MAX_EDIT_REPLACEMENTS, type AgentTool } from './tool-contract'
 import { resolveWorkspacePath } from './workspace-path-policy'
 
 const EditInputSchema = z.object({
@@ -18,6 +18,15 @@ const EditInputSchema = z.object({
 })
 type EditInput = z.infer<typeof EditInputSchema>
 type Replacement = { start: number; end: number; newText: string }
+
+function formatEditPreview(edits: EditInput['edits']): string {
+  return edits
+    .flatMap(({ oldText, newText }) => [
+      ...oldText.split('\n').map((line) => `- ${line}`),
+      ...newText.split('\n').map((line) => `+ ${line}`)
+    ])
+    .join('\n')
+}
 
 function findUniqueReplacement(source: string, oldText: string, newText: string): Replacement {
   const start = source.indexOf(oldText)
@@ -68,6 +77,9 @@ function createEditTool(): AgentTool<EditInput> {
       for (const replacement of ordered)
         next = next.slice(0, replacement.start) + replacement.newText + next.slice(replacement.end)
       context.signal.throwIfAborted()
+      // Emit only after all exact-match and overlap checks pass, so the preview
+      // never depicts a patch that this tool has already rejected.
+      emitToolOutputDelta(context, { stream: 'preview', delta: formatEditPreview(edits) })
       await writeFile(target, lineEnding === '\r\n' ? next.replaceAll('\n', '\r\n') : next, 'utf8')
       return { output: `Successfully replaced ${edits.length} block(s) in ${path}.` }
     }

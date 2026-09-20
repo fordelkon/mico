@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -90,5 +90,47 @@ describe('ToolRegistry', () => {
     )
 
     expect(results.map((result) => result.isError)).toEqual([false, false])
+  })
+
+  it('associates live tool output with the originating call without changing its final result', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'mico-tool-registry-'))
+    temporaryPaths.push(cwd)
+    await writeFile(join(cwd, 'preview.txt'), 'preview text')
+    const deltas: unknown[] = []
+    const result = await ToolRegistry.forWorkspace(cwd).execute(
+      { toolCallId: 'call-preview', toolName: 'read', input: { path: 'preview.txt' } },
+      new AbortController().signal,
+      (delta) => deltas.push(delta)
+    )
+
+    expect(deltas).toEqual([
+      {
+        toolCallId: 'call-preview',
+        toolName: 'read',
+        stream: 'preview',
+        delta: 'preview text'
+      }
+    ])
+    expect(result).toMatchObject({ isError: false, output: 'preview text' })
+  })
+
+  it('splits a large preview into bounded deltas without dropping content', async () => {
+    const registry = await createRegistry()
+    const content = 'x'.repeat(20 * 1024)
+    const deltas: string[] = []
+
+    await registry.execute(
+      {
+        toolCallId: 'call-large-preview',
+        toolName: 'write',
+        input: { path: 'large.txt', content }
+      },
+      new AbortController().signal,
+      (delta) => deltas.push(delta.delta)
+    )
+
+    expect(deltas).toHaveLength(2)
+    expect(deltas.join('')).toBe(content)
+    expect(deltas.every((delta) => delta.length <= 16 * 1024)).toBe(true)
   })
 })

@@ -1,353 +1,177 @@
-import {
-  Button,
-  IconSwap,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from '@mico/ui'
-import {
-  BrainIcon,
-  ChevronDownIcon,
-  FilePenLineIcon,
-  FilePlus2Icon,
-  FileSearchIcon,
-  TerminalIcon,
-  WrenchIcon
-} from 'lucide-react'
+import { Button } from '@mico/ui'
+import { ChevronDownIcon, SparklesIcon } from 'lucide-react'
 import * as React from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
-import type { DynamicToolUIPart } from 'ai'
-import * as z from 'zod'
+
+import { ThinkingTrace } from './tools/thinking-trace'
+import { ToolTrace, type ToolActivityPart, type ToolOutputDelta } from './tools/tool-trace'
 
 const thinkingOrbStates = ['working', 'searching', 'solving'] as const
 
 type ThinkingOrbState = (typeof thinkingOrbStates)[number]
+type AgentActivityPart = { text: string; type: 'reasoning' } | ToolActivityPart
 
-type ThinkingBlockProps = {
-  id: string
-  isAnswerStreaming?: boolean
-  isStreaming: boolean
-  orbState?: ThinkingOrbState
-  text: string
-}
-type ToolDescription = { detail: string | null; title: string }
+function getCompletedSummary(parts: AgentActivityPart[]): string {
+  const toolCount = parts.filter((part) => part.type === 'dynamic-tool').length
+  const summary = [
+    toolCount ? `${toolCount} tool call${toolCount === 1 ? '' : 's'}` : null,
+    'Agent run'
+  ].filter(Boolean)
 
-const MAX_TOOL_DISPLAY_CHARACTERS = 2_000
-const MAX_TOOL_OUTPUT_LINES = 8
-const TOOL_OUTPUT_REVEAL_INTERVAL_MS = 48
-const ToolInputSchema = z.object({
-  command: z
-    .string()
-    .max(64 * 1024)
-    .optional(),
-  edits: z.array(z.object({ newText: z.string(), oldText: z.string() })).optional(),
-  path: z.string().max(4_096).optional()
-})
-const ToolOutputSchema = z.union([
-  z.string(),
-  z.object({ output: z.string() }).transform(({ output }) => output),
-  z.object({ stdout: z.string() }).transform(({ stdout }) => stdout),
-  z.object({ content: z.string() }).transform(({ content }) => content),
-  z.object({ text: z.string() }).transform(({ text }) => text)
-])
-type ToolInput = z.infer<typeof ToolInputSchema>
-
-function toolLabel(toolName: string): string {
-  return { bash: 'Run', edit: 'Edit', read: 'Read', write: 'Write' }[toolName] ?? toolName
+  return summary.join(' · ') || 'Completed step'
 }
 
-function truncateDisplay(text: string): string {
-  return text.length > MAX_TOOL_DISPLAY_CHARACTERS
-    ? `${text.slice(0, MAX_TOOL_DISPLAY_CHARACTERS)}\n\n[Output truncated.]`
-    : text
+function getLiveLabel(parts: AgentActivityPart[]): string {
+  const current = parts.at(-1)
+  if (current?.type === 'reasoning') return 'Thinking'
+  if (current?.type === 'dynamic-tool') return 'Working'
+  return 'Thinking'
 }
 
-function describeTool(toolName: string, input: ToolInput): ToolDescription {
-  switch (toolName) {
-    case 'read':
-      return input.path
-        ? { title: `Read ${input.path}`, detail: `File: ${input.path}` }
-        : { title: 'Read file', detail: null }
-    case 'write':
-      return input.path
-        ? { title: `Write ${input.path}`, detail: `File: ${input.path}` }
-        : { title: 'Write file', detail: null }
-    case 'edit':
-      return input.path
-        ? {
-            title: `Edit ${input.path}${input.edits ? ` · ${input.edits.length} changes` : ''}`,
-            detail: `File: ${input.path}`
-          }
-        : { title: 'Edit file', detail: null }
-    case 'bash':
-      return input.command
-        ? { title: `Run ${input.command.split('\n')[0]}`, detail: null }
-        : { title: 'Run command', detail: null }
-    default:
-      return { title: toolLabel(toolName), detail: null }
-  }
-}
-
-function describeOutput(toolName: string, output: string): string {
-  if (toolName === 'read') {
-    const lineCount = output.split('\n').filter((line) => !line.startsWith('[More content')).length
-    return `Read ${lineCount} ${lineCount === 1 ? 'line' : 'lines'}.`
-  }
-  const lines = output
-    .replaceAll('\r', '')
-    .split('\n')
-    .filter((line) => line.trim())
-    .slice(0, MAX_TOOL_OUTPUT_LINES)
-  const display = truncateDisplay(lines.join('\n'))
-  return lines.length === MAX_TOOL_OUTPUT_LINES && output.split('\n').length > lines.length
-    ? `${display}\n[More output omitted.]`
-    : display
-}
-
-function ToolIcon({ toolName }: { toolName: string }): React.JSX.Element {
-  switch (toolName) {
-    case 'bash':
-      return <TerminalIcon aria-hidden="true" className="size-3.5" />
-    case 'read':
-      return <FileSearchIcon aria-hidden="true" className="size-3.5" />
-    case 'write':
-      return <FilePlus2Icon aria-hidden="true" className="size-3.5" />
-    case 'edit':
-      return <FilePenLineIcon aria-hidden="true" className="size-3.5" />
-    default:
-      return <WrenchIcon aria-hidden="true" className="size-3.5" />
-  }
-}
-
-function ProgressiveToolOutput({ text }: { text: string }): React.JSX.Element {
-  const lines = text.split('\n')
-  const [visibleLineCount, setVisibleLineCount] = React.useState(1)
-
-  React.useEffect(() => {
-    if (visibleLineCount >= lines.length) return
-
-    const timeoutId = window.setTimeout(
-      () => setVisibleLineCount((current) => current + 1),
-      TOOL_OUTPUT_REVEAL_INTERVAL_MS
-    )
-    return () => window.clearTimeout(timeoutId)
-  }, [lines.length, visibleLineCount])
-
-  return (
-    <div className="mt-2 border-t border-border pt-2">
-      {lines.slice(0, visibleLineCount).map((line, index) => (
-        <div className="tool-trace__output-line" key={`${index}-${line}`}>
-          {line || ' '}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ToolTrace({
-  part,
-  isFollowedByActivity = false
+function AgentLoadingIndicator({
+  orbState = 'working'
 }: {
-  part: DynamicToolUIPart
-  isFollowedByActivity?: boolean
+  orbState?: ThinkingOrbState
 }): React.JSX.Element {
-  const [expanded, setExpanded] = React.useState(
-    part.state === 'input-available' || part.state === 'input-streaming'
-  )
-  const [hasUserToggled, setHasUserToggled] = React.useState(false)
-  const panelRef = React.useRef<HTMLDivElement>(null)
-  const isError = part.state === 'output-error'
-  const isRunning = part.state === 'input-available' || part.state === 'input-streaming'
-  const status = isError ? 'Failed' : isRunning ? 'Running' : 'Completed'
-  const input = ToolInputSchema.safeParse(part.input)
-  const output = 'output' in part ? ToolOutputSchema.safeParse(part.output) : undefined
-  const tool = input.success
-    ? describeTool(part.toolName, input.data)
-    : { detail: null, title: toolLabel(part.toolName) }
-  const detail = isError
-    ? part.errorText
-    : output?.success
-      ? describeOutput(part.toolName, output.data)
-      : isRunning
-        ? null
-        : 'No output was returned.'
-  const contentId = `tool-trace-${part.toolCallId}`
-  const isExpanded = hasUserToggled ? expanded : isRunning || (!isFollowedByActivity && expanded)
-  const hasDetail = Boolean(tool.detail || detail)
-
-  React.useEffect(() => {
-    if (!isRunning || !isExpanded) return
-
-    const frameId = window.requestAnimationFrame(() => {
-      const panel = panelRef.current
-      if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior: 'auto' })
-    })
-
-    return () => window.cancelAnimationFrame(frameId)
-  }, [detail, isExpanded, isRunning])
-
   return (
-    <section
-      className="thinking-block max-w-[42rem] text-sm text-text-tertiary"
-      data-open={isExpanded}
-    >
-      <TooltipProvider delayDuration={500}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-controls={hasDetail ? contentId : undefined}
-              aria-expanded={hasDetail ? isExpanded : undefined}
-              className="h-auto gap-2 px-0 py-1 text-text-tertiary hover:bg-transparent hover:text-foreground"
-              variant="ghost"
-              onClick={() => {
-                if (!hasDetail) return
-                setHasUserToggled(true)
-                setExpanded(!isExpanded)
-              }}
-            >
-              <ToolIcon toolName={part.toolName} />
-              <span className="font-medium text-foreground">{tool.title}</span>
-              <span
-                className={
-                  isError
-                    ? 'text-destructive'
-                    : isRunning
-                      ? 'thinking-block__label thinking-block__label--active'
-                      : 'text-text-tertiary'
-                }
-                data-text={status}
-              >
-                {status}
-              </span>
-              <span aria-hidden="true" className="thinking-block__chevron">
-                <ChevronDownIcon className="size-3.5" />
-              </span>
-            </Button>
-          </TooltipTrigger>
-          {input.success && input.data.command ? (
-            <TooltipContent className="max-w-sm break-all font-mono text-xs">
-              {input.data.command}
-            </TooltipContent>
-          ) : null}
-        </Tooltip>
-      </TooltipProvider>
-      {hasDetail ? (
-        <div className="thinking-block__panel">
-          <div
-            aria-hidden={!isExpanded}
-            className={`thinking-block__panel-inner whitespace-pre-wrap rounded-md bg-surface-secondary px-3 py-2 font-mono text-xs${
-              isRunning && isExpanded ? ' thinking-block__panel-inner--streaming' : ''
-            }`}
-            id={contentId}
-            ref={panelRef}
-          >
-            {tool.detail ? <div className="text-text-tertiary">{tool.detail}</div> : null}
-            {detail ? <ProgressiveToolOutput key={detail} text={detail} /> : null}
-          </div>
-        </div>
-      ) : null}
+    <section aria-label="Agent activity" className="agent-activity agent-activity--loading">
+      <div aria-live="polite" className="agent-activity__live-status">
+        <ThinkingOrb
+          aria-hidden="true"
+          data-orb-state={orbState}
+          data-testid="thinking-orb"
+          size={20}
+          state={orbState}
+        />
+        <span className="thinking-block__label thinking-block__label--active">Thinking</span>
+      </div>
     </section>
   )
 }
 
-function ThinkingBlock({
+/**
+ * A model step is only an orchestrator: traces own their individual renderers;
+ * this component owns chronological order, live-edge following and disclosure.
+ */
+function AgentActivityTimeline({
   id,
-  isAnswerStreaming = false,
+  isAnswerStreaming,
   isStreaming,
-  orbState = 'working',
-  text
-}: ThinkingBlockProps): React.JSX.Element | null {
-  const isThinking = isStreaming && !isAnswerStreaming
-  const [expanded, setExpanded] = React.useState(isThinking)
+  parts
+}: {
+  id: string
+  isAnswerStreaming: boolean
+  isStreaming: boolean
+  parts: AgentActivityPart[]
+}): React.JSX.Element {
+  const isLive = isStreaming && !isAnswerStreaming
+  const [open, setOpen] = React.useState(false)
   const [hasUserToggled, setHasUserToggled] = React.useState(false)
-  const wasAnswerStreaming = React.useRef(isAnswerStreaming)
-  const panelRef = React.useRef<HTMLDivElement>(null)
-  const contentId = `thinking-${id}`
-  const label = isThinking ? 'Thinking' : 'Thought summary'
-  const shouldAutoFollow = isThinking && expanded && !hasUserToggled
+  const viewportRef = React.useRef<HTMLDivElement>(null)
+  const isFollowingLiveEdge = React.useRef(true)
+  const wasLive = React.useRef(isLive)
+  const expanded = isLive || open
+  const contentId = `agent-activity-${id}`
+  const label = isLive ? getLiveLabel(parts) : getCompletedSummary(parts)
 
   React.useEffect(() => {
-    if (isAnswerStreaming && !wasAnswerStreaming.current && !hasUserToggled) {
-      setExpanded(false)
-    }
+    if (wasLive.current && !isLive && !hasUserToggled) setOpen(false)
+    wasLive.current = isLive
+  }, [hasUserToggled, isLive])
 
-    wasAnswerStreaming.current = isAnswerStreaming
-  }, [hasUserToggled, isAnswerStreaming])
+  React.useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport || !isLive || !expanded || !isFollowingLiveEdge.current) return
 
-  React.useEffect(() => {
-    if (!shouldAutoFollow) return
-
+    // Layout can grow after the first paint when a streamed token creates a new
+    // line. Assign scrollTop after layout and once more on the next frame so the
+    // outer activity viewport, rather than an intermediate child panel, owns the
+    // live edge.
+    viewport.scrollTop = viewport.scrollHeight
     const frameId = window.requestAnimationFrame(() => {
-      const panel = panelRef.current
-      if (!panel) return
-
-      panel.scrollTo({
-        top: panel.scrollHeight,
-        behavior: 'auto'
-      })
+      const current = viewportRef.current
+      if (current && isFollowingLiveEdge.current) current.scrollTop = current.scrollHeight
     })
 
     return () => window.cancelAnimationFrame(frameId)
-  }, [shouldAutoFollow, text])
+  }, [expanded, isLive, parts])
 
-  if (!text && !isThinking) return null
+  const handleActivityScroll = (): void => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    isFollowingLiveEdge.current =
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 16
+  }
 
   return (
     <section
-      className="thinking-block max-w-[42rem] text-sm text-text-tertiary"
+      aria-busy={isLive}
+      aria-label="Agent activity"
+      className={`agent-activity${isLive ? ' agent-activity--live' : ''}`}
       data-open={expanded}
+      data-testid="agent-activity-event"
     >
-      <Button
-        aria-controls={contentId}
-        aria-expanded={expanded}
-        className="h-auto gap-2 px-0 py-1 text-text-tertiary hover:bg-transparent hover:text-foreground"
-        variant="ghost"
-        onClick={() => {
-          setHasUserToggled(true)
-          setExpanded((current) => !current)
-        }}
-      >
-        <IconSwap
-          from={
-            <ThinkingOrb
-              data-orb-state={orbState}
-              data-testid="thinking-orb"
-              size={20}
-              state={orbState}
-            />
-          }
-          state={isThinking ? 'from' : 'to'}
-          to={<BrainIcon className="size-3.5" />}
-        />
-        <span
-          className={
-            isThinking
-              ? 'thinking-block__label thinking-block__label--active'
-              : 'thinking-block__label'
-          }
-          data-text={label}
+      {isLive ? (
+        <div className="agent-activity__live-status" role="status">
+          <span aria-hidden="true" className="agent-activity__live-dot" />
+          <span className="thinking-block__label thinking-block__label--active">{label}</span>
+        </div>
+      ) : (
+        <Button
+          aria-controls={contentId}
+          aria-expanded={expanded}
+          className="agent-activity__header h-7 gap-1.5 px-1 text-text-tertiary hover:bg-surface-secondary hover:text-foreground aria-expanded:bg-transparent"
+          variant="ghost"
+          onClick={() => {
+            setHasUserToggled(true)
+            setOpen((current) => !current)
+          }}
         >
-          {label}
-        </span>
-        <span aria-hidden="true" className="thinking-block__chevron">
-          <ChevronDownIcon className="size-3.5" />
-        </span>
-      </Button>
-      <div className="thinking-block__panel" data-testid="thinking-panel">
+          <SparklesIcon aria-hidden="true" className="agent-activity__step-icon size-3.5" />
+          <span className="thinking-block__label">{label}</span>
+          <ChevronDownIcon aria-hidden="true" className="agent-activity__group-chevron size-3.5" />
+        </Button>
+      )}
+      <div className="agent-activity__body" id={contentId}>
         <div
           aria-hidden={!expanded}
-          className={`thinking-block__panel-inner whitespace-pre-wrap rounded-md bg-surface-secondary px-3 py-2${
-            shouldAutoFollow ? ' thinking-block__panel-inner--streaming' : ''
-          }`}
-          id={contentId}
-          ref={panelRef}
+          className={`agent-activity__body-inner${isLive ? ' agent-activity__body-inner--streaming' : ''}`}
+          ref={viewportRef}
+          role="list"
+          onScroll={handleActivityScroll}
         >
-          {text}
+          {parts.map((part, index) => (
+            <div className="agent-activity__item" key={`${id}-${index}`} role="listitem">
+              {part.type === 'reasoning' ? (
+                <ThinkingTrace
+                  id={`${id}-${index}`}
+                  isAnswerStreaming={isAnswerStreaming}
+                  // Only the newest part is still streaming: a thought settles as
+                  // soon as the model moves on to a tool call or another part.
+                  isStreaming={isStreaming && index === parts.length - 1}
+                  text={part.text}
+                />
+              ) : (
+                <ToolTrace isFollowedByActivity={index < parts.length - 1} part={part} />
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </section>
   )
 }
 
-export { ThinkingBlock, ToolTrace, thinkingOrbStates, type ThinkingOrbState }
+// Compatibility exports keep consumers focused on a single conversation boundary.
+const ThinkingBlock = ThinkingTrace
+
+export {
+  AgentLoadingIndicator,
+  AgentActivityTimeline,
+  ThinkingBlock,
+  ToolTrace,
+  type ToolOutputDelta,
+  thinkingOrbStates,
+  type AgentActivityPart,
+  type ThinkingOrbState
+}

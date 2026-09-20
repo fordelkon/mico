@@ -17,7 +17,13 @@ import { CheckIcon, CopyIcon, FileTextIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMarkdown } from '../markdown/chat-markdown'
-import { ThinkingBlock, ToolTrace, type ThinkingOrbState } from './agent-activity'
+import {
+  AgentLoadingIndicator,
+  AgentActivityTimeline,
+  type AgentActivityPart,
+  type ThinkingOrbState,
+  type ToolOutputDelta
+} from './agent-activity'
 
 type ChatMessageProps = {
   message: MicoUIMessage
@@ -27,11 +33,79 @@ type ChatMessageProps = {
 
 const textEncoder = new TextEncoder()
 
-function isFollowedByActivity(parts: MicoUIMessage['parts'], index: number): boolean {
-  return parts.slice(index + 1).some((part) => {
-    if (part.type === 'dynamic-tool') return true
-    return (part.type === 'reasoning' || part.type === 'text') && Boolean(part.text)
-  })
+type AssistantBlock =
+  | { parts: AgentActivityPart[]; type: 'activity' }
+  | { text: string; type: 'text' }
+
+type ActivitySourcePart = Extract<
+  MicoUIMessage['parts'][number],
+  { type: 'reasoning' } | { type: 'dynamic-tool' }
+>
+type ToolOutputDeltaPart = {
+  data: {
+    delta: string
+    stream: 'preview' | 'stderr' | 'stdout'
+    toolCallId: string
+    toolName: string
+  }
+  type: 'data-tool-output-delta'
+}
+type AssistantSourcePart = MicoUIMessage['parts'][number] | ToolOutputDeltaPart
+
+function isActivityPart(part: AssistantSourcePart): part is ActivitySourcePart {
+  return part.type === 'reasoning' || part.type === 'dynamic-tool'
+}
+
+function isToolOutputDeltaPart(part: AssistantSourcePart): part is ToolOutputDeltaPart {
+  return part.type === 'data-tool-output-delta'
+}
+
+function getFinalAnswerText(parts: MicoUIMessage['parts']): string {
+  return parts.reduce((answer, part, index) => {
+    if (
+      part.type !== 'text' ||
+      parts.slice(index + 1).some((nextPart) => isActivityPart(nextPart))
+    ) {
+      return answer
+    }
+
+    return answer + part.text
+  }, '')
+}
+
+function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): AssistantBlock[] {
+  return parts.reduce<AssistantBlock[]>((blocks, part) => {
+    if (isActivityPart(part)) {
+      const previous = blocks.at(-1)
+      // Consecutive tool/reasoning events share one model step. Any text part is
+      // body copy — interim or final — and closes the step before it.
+      if (previous?.type === 'activity') previous.parts.push(part)
+      else blocks.push({ parts: [part], type: 'activity' })
+    } else if (isToolOutputDeltaPart(part)) {
+      const activity = blocks.findLast((block) => block.type === 'activity')
+      const target = activity?.parts.findLast(
+        (candidate): candidate is Extract<AgentActivityPart, { type: 'dynamic-tool' }> =>
+          candidate.type === 'dynamic-tool' && candidate.toolCallId === part.data.toolCallId
+      )
+      if (target) {
+        const liveOutput: ToolOutputDelta = target.liveOutput ?? {
+          preview: '',
+          stderr: '',
+          stdout: ''
+        }
+        target.liveOutput = {
+          ...liveOutput,
+          [part.data.stream]: liveOutput[part.data.stream] + part.data.delta
+        }
+      }
+    } else if (part.type === 'text') {
+      const previous = blocks.at(-1)
+
+      if (previous?.type === 'text') previous.text += part.text
+      else blocks.push({ text: part.text, type: 'text' })
+    }
+    return blocks
+  }, [])
 }
 
 function ChatMessageComponent({
@@ -40,11 +114,9 @@ function ChatMessageComponent({
   thinkingOrbState
 }: ChatMessageProps): React.JSX.Element {
   const [copyState, setCopyState] = React.useState<'idle' | 'copied'>('idle')
-  const text = message.parts
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('')
+  const text = getFinalAnswerText(message.parts)
   const isUser = message.role === 'user'
+  const assistantBlocks = groupAssistantParts(message.parts)
   const documents = message.parts
     .filter((part) => part.type === 'data-document')
     .map(({ data }) => {
@@ -96,51 +168,27 @@ function ChatMessageComponent({
           </AttachmentGroup>
         ) : null}
         {!isUser
-          ? message.parts.map((part, index) => {
-              const key = `${message.id}-${index}`
-              if (part.type === 'reasoning')
-                return (
-                  <div
-                    className="agent-activity__event"
-                    data-testid="agent-activity-event"
-                    key={key}
-                  >
-                    <ThinkingBlock
-                      id={key}
-                      isAnswerStreaming={isStreaming && Boolean(text)}
-                      isStreaming={isStreaming}
-                      orbState={thinkingOrbState}
-                      text={part.text}
-                    />
-                  </div>
-                )
-              if (part.type === 'dynamic-tool')
-                return (
-                  <div
-                    className="agent-activity__event"
-                    data-testid="agent-activity-event"
-                    key={key}
-                  >
-                    <ToolTrace
-                      part={part}
-                      isFollowedByActivity={isFollowedByActivity(message.parts, index)}
-                    />
-                  </div>
-                )
-              if (part.type !== 'text') return null
-              return (
-                <div className="agent-activity__event" data-testid="agent-activity-event" key={key}>
+          ? assistantBlocks.map((block, index) => (
+              <div className="agent-activity__event" key={`${message.id}-${index}`}>
+                {block.type === 'activity' ? (
+                  <AgentActivityTimeline
+                    id={`${message.id}-${index}`}
+                    isAnswerStreaming={isStreaming && Boolean(text)}
+                    isStreaming={isStreaming}
+                    parts={block.parts}
+                  />
+                ) : (
                   <Bubble align="start" variant="ghost">
                     <BubbleContent className="w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7">
-                      <ChatMarkdown isStreaming={isStreaming} text={part.text} />
+                      <ChatMarkdown isStreaming={isStreaming} text={block.text} />
                     </BubbleContent>
                   </Bubble>
-                </div>
-              )
-            })
+                )}
+              </div>
+            ))
           : null}
         {!isUser && isStreaming && !message.parts.length ? (
-          <ThinkingBlock id={message.id} isStreaming orbState={thinkingOrbState} text="" />
+          <AgentLoadingIndicator orbState={thinkingOrbState} />
         ) : null}
         {isUser && (text || !documents.length) ? (
           <Bubble
