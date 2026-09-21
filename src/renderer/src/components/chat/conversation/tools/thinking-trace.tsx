@@ -21,9 +21,11 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
   const label = isThinking ? 'Thinking' : 'Thought'
   const shouldAutoFollow = isThinking && expanded && !hasUserToggled
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     // A thought settles like a completed tool: the shimmer stops and the panel
     // collapses once reasoning hands over to the next activity part.
+    // Layout effect: the collapsed commit must land before paint, or the browser
+    // flashes one frame of the completed panel before the collapse starts.
     if (wasThinking.current && !isThinking && !hasUserToggled) setExpanded(false)
     wasThinking.current = isThinking
   }, [hasUserToggled, isThinking])
@@ -45,6 +47,7 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
     <section
       className="thinking-block agent-activity__trace w-full min-w-0 text-sm text-text-tertiary"
       data-open={expanded}
+      data-user-toggled={hasUserToggled ? 'true' : 'false'}
     >
       <Button
         aria-label={label}

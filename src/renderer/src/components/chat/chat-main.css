@@ -280,6 +280,15 @@
   grid-template-rows: 1fr;
 }
 
+/* Programmatic settle collapses are instant: animating them turns every streaming
+   settle into a per-frame height change that the scroll layer has to chase. Only
+   user-initiated disclosure keeps the animated motion. */
+.thinking-block[data-user-toggled="false"] .thinking-block__panel,
+.thinking-block[data-user-toggled="false"] .thinking-block__panel-inner,
+.agent-activity[data-user-toggled="false"] .agent-activity__body {
+  transition: none;
+}
+
 .thinking-block__panel-inner {
   min-height: 0;
   overflow: hidden;
@@ -564,7 +573,9 @@
   .thinking-block__chevron,
   .thinking-block__panel,
   .thinking-block__panel-inner,
-  .thinking-block__label--active {
+  .thinking-block__label--active,
+  .agent-activity__group-chevron,
+  .agent-activity__body {
     animation: none;
     transition: none;
   }
@@ -597,6 +608,7 @@
   }
 
   .agent-activity__item,
+  .agent-activity__live-dot::before,
   .agent-activity__live-dot::after {
     animation: none;
   }

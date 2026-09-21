@@ -214,8 +214,9 @@ describe('ThinkingBlock', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toBeVisible()
-    expect(screen.getByText('Reading file…')).toBeVisible()
+    expect(screen.queryByText('Reading file…')).not.toBeInTheDocument()
     expect(screen.queryByText('File read')).not.toBeInTheDocument()
+    expect(document.querySelector('.thinking-block__panel')).toBeNull()
   })
 
   it('user sees the tool detail auto-collapse when the run completes, then it stays collapsed', () => {
@@ -250,10 +251,10 @@ describe('AgentActivityTimeline', () => {
     }
     const tool = {
       type: 'dynamic-tool' as const,
-      toolCallId: 'read-live-1',
-      toolName: 'read',
+      toolCallId: 'bash-live-1',
+      toolName: 'bash',
       state: 'input-available' as const,
-      input: { path: 'src/index.ts' }
+      input: { command: 'cat package.json' }
     }
     const { rerender } = render(
       <AgentActivityTimeline id="step-live" isStreaming parts={[reasoning]} />
@@ -277,7 +278,29 @@ describe('AgentActivityTimeline', () => {
       'aria-expanded',
       'false'
     )
-    expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Run cat package.json Running' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+  })
+
+  it('user sees only the newest tool open when a batch runs, then earlier tools stay compact rows', () => {
+    const bash = (toolCallId: string) => ({
+      type: 'dynamic-tool' as const,
+      toolCallId,
+      toolName: 'bash' as const,
+      state: 'input-available' as const,
+      input: { command: `run ${toolCallId}` }
+    })
+    render(
+      <AgentActivityTimeline id="step-batch" isStreaming parts={[bash('call-1'), bash('call-2')]} />
+    )
+
+    expect(screen.getByRole('button', { name: 'Run run call-1 Running' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.getByRole('button', { name: 'Run run call-2 Running' })).toHaveAttribute(
       'aria-expanded',
       'true'
     )

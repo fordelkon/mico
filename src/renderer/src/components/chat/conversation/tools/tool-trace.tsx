@@ -127,8 +127,11 @@ function ToolTrace({
   part: ToolActivityPart
   isFollowedByActivity?: boolean
 }): React.JSX.Element {
+  // Traces whose content is only meaningful once finished render as a compact row
+  // while running and stay collapsed after completing; opening them is user-only.
+  const showsStreamedContent = part.toolName === 'bash' || part.toolName === 'write'
   const [expanded, setExpanded] = React.useState(
-    part.state === 'input-available' || part.state === 'input-streaming'
+    showsStreamedContent && (part.state === 'input-available' || part.state === 'input-streaming')
   )
   const [hasUserToggled, setHasUserToggled] = React.useState(false)
   const [isFollowingOutput, setIsFollowingOutput] = React.useState(true)
@@ -161,12 +164,22 @@ function ToolTrace({
     output?.success ? output.data : liveOutput && part.toolName === 'bash' ? '' : undefined
   )
   const contentId = `tool-trace-${part.toolCallId}`
-  const isExpanded = hasUserToggled ? expanded : isRunning || (!isFollowedByActivity && expanded)
-  const hasDetail = Boolean(tool.detail || detail || presentation || liveOutput)
+  // Auto-open belongs to the newest call only: in a parallel batch every part is
+  // running, so without the position gate all panels would open and close in a
+  // wave. A user toggle always wins over the gate.
+  const isExpanded = hasUserToggled
+    ? expanded
+    : showsStreamedContent && !isFollowedByActivity && (isRunning || expanded)
+  const hasDetail =
+    isRunning && !showsStreamedContent
+      ? false
+      : Boolean(tool.detail || detail || presentation || liveOutput)
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     // A completed tool should return to its compact trace row. The detail panel
     // remains available on demand, while active tools stay open at the live edge.
+    // Layout effect: the collapsed commit must land before paint, or the browser
+    // flashes one frame of the completed panel before the collapse starts.
     if (wasRunning.current && !isRunning && !hasUserToggled) setExpanded(false)
     wasRunning.current = isRunning
   }, [hasUserToggled, isRunning])
@@ -196,6 +209,7 @@ function ToolTrace({
     <section
       className="thinking-block agent-activity__trace w-full min-w-0 text-sm text-text-tertiary"
       data-open={isExpanded}
+      data-user-toggled={hasUserToggled ? 'true' : 'false'}
     >
       <TooltipProvider delayDuration={500}>
         <Tooltip>

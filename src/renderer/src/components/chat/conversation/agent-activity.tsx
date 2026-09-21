@@ -78,7 +78,9 @@ function AgentActivityTimeline({
   const contentId = `agent-activity-${id}`
   const label = isLive ? getLiveLabel(parts) : getCompletedSummary(parts)
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    // Layout effect: the collapsed commit must land before paint, or the browser
+    // flashes one frame of the completed panel before the collapse starts.
     if (wasLive.current && !isLive && !hasUserToggled) setOpen(false)
     wasLive.current = isLive
   }, [hasUserToggled, isLive])
@@ -113,6 +115,7 @@ function AgentActivityTimeline({
       aria-label="Agent activity"
       className={`agent-activity${isLive ? ' agent-activity--live' : ''}`}
       data-open={expanded}
+      data-user-toggled={hasUserToggled ? 'true' : 'false'}
       data-testid="agent-activity-event"
     >
       {isLive ? (
