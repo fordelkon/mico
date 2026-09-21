@@ -1,20 +1,22 @@
-import { Chat } from '@ai-sdk/react'
+import type { Chat } from '@ai-sdk/react'
 import * as React from 'react'
 
 import {
   IDLE_CHAT_RESPONSE,
+  isActiveChatResponse,
   type ChatResponseState,
   type Conversation,
   type MicoUIMessage
 } from '@renderer/types/chat'
-import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
 import type {
   ChatDocumentPart,
-  ChatMessage,
   ModelReasoningCapabilities,
   ThinkingSelection
 } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
+
+import { useChatResponses } from './chat-response-store'
+import { useChatSessions, type ChatSession } from './chat-session-instances'
 
 class ThinkingEffortStore {
   #value: ThinkingSelection = 'default'
@@ -55,14 +57,6 @@ type ChatWorkspace = {
   stopResponse: () => void
 }
 
-type ChatSession = {
-  conversation: Conversation
-  chat: Chat<MicoUIMessage>
-  modelEntryId: string | null
-  thinkingEffort: ThinkingSelection | null
-  project: WorkspaceProject | null
-}
-
 type ActiveChatSession = {
   conversationId: string
   chat: Chat<MicoUIMessage>
@@ -70,53 +64,6 @@ type ActiveChatSession = {
 }
 type ChatSendInput = { text: string; documents: ChatDocumentPart[] }
 type PendingMessage = { parts: MicoUIMessage['parts']; session: ChatSession }
-type ActiveChatResponse = Exclude<ChatResponseState, { status: 'idle' }>
-
-function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
-  return messages.map((message) => ({
-    id: crypto.randomUUID(),
-    role: message.role,
-    metadata: message.metadata,
-    parts: message.parts.flatMap<MicoUIMessage['parts'][number]>((part) => {
-      if (part.type === 'document') return [{ type: 'data-document', data: part }]
-      if (part.type === 'tool-trace') {
-        if (part.state === 'output-error') {
-          return [
-            {
-              type: 'dynamic-tool',
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              input: { ...part.input, __micoPresentation: part.presentation },
-              state: 'output-error',
-              errorText: part.errorText
-            }
-          ]
-        }
-        return [
-          {
-            type: 'dynamic-tool',
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            input: { ...part.input, __micoPresentation: part.presentation },
-            state: 'output-available',
-            output: part.output
-          }
-        ]
-      }
-      if (part.type === 'text') return [{ type: 'text', text: part.text, state: 'done' }]
-      if (part.type === 'reasoning') return [{ type: 'reasoning', text: part.text, state: 'done' }]
-      return []
-    })
-  }))
-}
-
-function isResponding(response: ActiveChatResponse): boolean {
-  return (
-    response.status === 'submitted' ||
-    response.status === 'streaming' ||
-    response.status === 'retrying'
-  )
-}
 
 function resolvePendingProject(
   projects: WorkspaceProject[],
@@ -128,14 +75,10 @@ function resolvePendingProject(
 }
 
 function useChatWorkspaceState(): ChatWorkspace {
-  // Keep sessions alive across selection changes so background responses can continue.
-  const sessionsRef = React.useRef(new Map<string, ChatSession>())
+  const { responses, respondingConversationIds, getResponse, setResponseState, settleResponse } =
+    useChatResponses()
   const [conversations, setConversations] = React.useState<Conversation[]>([])
   const [activeSession, setActiveSession] = React.useState<ActiveChatSession | null>(null)
-  const [responses, setResponses] = React.useState<Map<string, ActiveChatResponse>>(() => new Map())
-  const [respondingConversationIds, setRespondingConversationIds] = React.useState<
-    ReadonlySet<string>
-  >(() => new Set())
   const [pendingMessage, setPendingMessage] = React.useState<PendingMessage | null>(null)
   const [reasoningCapabilities, setReasoningCapabilities] =
     React.useState<ModelReasoningCapabilities | null>(null)
@@ -148,10 +91,14 @@ function useChatWorkspaceState(): ChatWorkspace {
     () => thinkingEffortStore.get(),
     [thinkingEffortStore]
   )
-  // Response actions can run before React commits, so they need the latest synchronous values.
-  const responseRef = React.useRef<Map<string, ActiveChatResponse>>(new Map())
   const isCreatingSessionRef = React.useRef(false)
   const [composerFocusKey, setComposerFocusKey] = React.useState(1)
+  const { getSession, removeSession, createSession, updateSession } = useChatSessions({
+    getThinkingEffort,
+    getResponse,
+    onResponseState: setResponseState,
+    onResponseSettled: settleResponse
+  })
 
   const refreshProjects = React.useCallback(async (): Promise<void> => {
     const loadedProjects = await window.api.workspaces.list()
@@ -166,15 +113,15 @@ function useChatWorkspaceState(): ChatWorkspace {
       thinkingEffortStore.set(next)
       setThinkingEffortState(next)
       if (activeSession) {
-        const session = sessionsRef.current.get(activeSession.conversationId)
-        if (session) session.thinkingEffort = next
-      }
-      if (activeSession)
+        updateSession(activeSession.conversationId, (session) => {
+          session.thinkingEffort = next
+        })
         void window.api.sessions
           .setThinkingEffort({ sessionId: activeSession.conversationId, thinkingEffort: next })
           .catch(() => undefined)
+      }
     },
-    [activeSession, thinkingEffortStore]
+    [activeSession, thinkingEffortStore, updateSession]
   )
 
   React.useEffect(() => {
@@ -240,90 +187,11 @@ function useChatWorkspaceState(): ChatWorkspace {
           )
         )
 
-        const session = sessionsRef.current.get(sessionId)
-        if (session) session.conversation = { ...session.conversation, title }
+        updateSession(sessionId, (session) => {
+          session.conversation = { ...session.conversation, title }
+        })
       }),
-    []
-  )
-
-  const setResponseState = React.useCallback((next: ActiveChatResponse): void => {
-    responseRef.current.set(next.conversationId, next)
-    setResponses(new Map(responseRef.current))
-    setRespondingConversationIds((current) => {
-      const currentlyResponding = current.has(next.conversationId)
-      const nextResponding = isResponding(next)
-      if (currentlyResponding === nextResponding) return current
-
-      const updated = new Set(current)
-      if (nextResponding) updated.add(next.conversationId)
-      else updated.delete(next.conversationId)
-      return updated
-    })
-  }, [])
-
-  const settleResponse = React.useCallback((conversationId: string): void => {
-    if (!responseRef.current.delete(conversationId)) return
-    setResponses(new Map(responseRef.current))
-    setRespondingConversationIds((current) => {
-      if (!current.has(conversationId)) return current
-
-      const updated = new Set(current)
-      updated.delete(conversationId)
-      return updated
-    })
-  }, [])
-
-  const createSession = React.useCallback(
-    (
-      conversation: Conversation,
-      messages: ChatMessage[] = [],
-      selection: Pick<ChatSession, 'modelEntryId' | 'thinkingEffort'> = {
-        modelEntryId: null,
-        thinkingEffort: null
-      },
-      project: WorkspaceProject | null = null
-    ): ChatSession => {
-      const chat = new Chat<MicoUIMessage>({
-        id: conversation.id,
-        messages: toUiMessages(messages),
-        transport: new ElectronChatTransport(window.api.chat, {
-          sessionId: conversation.id,
-          getThinkingEffort,
-          onStatusChange: (status) => {
-            const currentResponse = responseRef.current.get(conversation.id)
-            if (!currentResponse || currentResponse.status === 'error') return
-
-            if (status.type === 'retrying') {
-              setResponseState({
-                status: 'retrying',
-                conversationId: conversation.id,
-                ...status,
-                startedAt: Date.now()
-              })
-            } else if (
-              currentResponse.status === 'submitted' ||
-              currentResponse.status === 'retrying'
-            ) {
-              setResponseState({ status: 'streaming', conversationId: conversation.id })
-            }
-          }
-        }),
-        onFinish: ({ isError }) => {
-          if (!isError) settleResponse(conversation.id)
-        },
-        onError: (error) =>
-          setResponseState({
-            status: 'error',
-            conversationId: conversation.id,
-            message: error.message
-          })
-      })
-
-      const session = { conversation, chat, project, ...selection }
-      sessionsRef.current.set(conversation.id, session)
-      return session
-    },
-    [getThinkingEffort, setResponseState, settleResponse]
+    [updateSession]
   )
 
   React.useEffect(() => {
@@ -362,7 +230,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   const selectConversation = React.useCallback(
     (conversationId: string, { focusComposer = true }: { focusComposer?: boolean } = {}): void => {
-      const existing = sessionsRef.current.get(conversationId)
+      const existing = getSession(conversationId)
       if (existing) {
         setActiveSession({ conversationId, chat: existing.chat, project: existing.project })
         setSelectedModelEntryId(existing.modelEntryId)
@@ -410,29 +278,33 @@ function useChatWorkspaceState(): ChatWorkspace {
         if (focusComposer) setComposerFocusKey((key) => key + 1)
       })
     },
-    [createSession, thinkingEffortStore]
+    [createSession, getSession, thinkingEffortStore]
   )
 
-  const renameConversation = React.useCallback((conversationId: string, title: string): void => {
-    const trimmedTitle = title.trim()
-    if (!trimmedTitle) return
+  const renameConversation = React.useCallback(
+    (conversationId: string, title: string): void => {
+      const trimmedTitle = title.trim()
+      if (!trimmedTitle) return
 
-    void window.api.sessions
-      .rename({ sessionId: conversationId, title: trimmedTitle })
-      .then((summary) => {
-        setConversations((current) =>
-          current.map((conversation) =>
-            conversation.id === conversationId
-              ? { ...conversation, title: summary.title }
-              : conversation
+      void window.api.sessions
+        .rename({ sessionId: conversationId, title: trimmedTitle })
+        .then((summary) => {
+          setConversations((current) =>
+            current.map((conversation) =>
+              conversation.id === conversationId
+                ? { ...conversation, title: summary.title }
+                : conversation
+            )
           )
-        )
 
-        const session = sessionsRef.current.get(conversationId)
-        if (session) session.conversation = { ...session.conversation, title: summary.title }
-      })
-      .catch(() => undefined)
-  }, [])
+          updateSession(conversationId, (session) => {
+            session.conversation = { ...session.conversation, title: summary.title }
+          })
+        })
+        .catch(() => undefined)
+    },
+    [updateSession]
+  )
 
   const setSessionModelEntry = React.useCallback(
     async (modelEntryId: string): Promise<void> => {
@@ -441,24 +313,25 @@ function useChatWorkspaceState(): ChatWorkspace {
         sessionId: activeSession.conversationId,
         modelEntryId
       })
-      const session = sessionsRef.current.get(activeSession.conversationId)
-      if (session) session.modelEntryId = modelEntryId
+      updateSession(activeSession.conversationId, (session) => {
+        session.modelEntryId = modelEntryId
+      })
       setSelectedModelEntryId(modelEntryId)
     },
-    [activeSession]
+    [activeSession, updateSession]
   )
 
   const deleteConversation = React.useCallback(
     (conversationId: string): void => {
-      const session = sessionsRef.current.get(conversationId)
+      const session = getSession(conversationId)
       const deletePersistedSession = async (): Promise<void> => {
-        const currentResponse = responseRef.current.get(conversationId)
+        const currentResponse = getResponse(conversationId)
         if (session && currentResponse) {
           await session.chat.stop()
           settleResponse(conversationId)
         }
         await window.api.sessions.delete(conversationId)
-        sessionsRef.current.delete(conversationId)
+        removeSession(conversationId)
         setConversations((current) =>
           current.filter((conversation) => conversation.id !== conversationId)
         )
@@ -467,25 +340,19 @@ function useChatWorkspaceState(): ChatWorkspace {
 
       void deletePersistedSession()
     },
-    [settleResponse]
+    [getResponse, getSession, removeSession, settleResponse]
   )
 
   const sendMessage = React.useCallback(
     async ({ text, documents }: ChatSendInput): Promise<boolean> => {
       if (!text.trim() && !documents.length) return false
 
-      const existingSession = activeSession
-        ? sessionsRef.current.get(activeSession.conversationId)
-        : undefined
+      const existingSession = activeSession ? getSession(activeSession.conversationId) : undefined
       const currentResponse = existingSession
-        ? responseRef.current.get(existingSession.conversation.id)
+        ? getResponse(existingSession.conversation.id)
         : undefined
 
-      if (
-        currentResponse?.status === 'submitted' ||
-        currentResponse?.status === 'streaming' ||
-        currentResponse?.status === 'retrying'
-      ) {
+      if (currentResponse && isActiveChatResponse(currentResponse)) {
         return false
       }
 
@@ -524,19 +391,25 @@ function useChatWorkspaceState(): ChatWorkspace {
         isCreatingSessionRef.current = false
       }
     },
-    [activeSession, createSession, projects, selectedProjectId, setResponseState]
+    [
+      activeSession,
+      createSession,
+      getSession,
+      getResponse,
+      projects,
+      selectedProjectId,
+      setResponseState
+    ]
   )
 
   const stopResponse = React.useCallback((): void => {
-    const currentResponse = activeSession
-      ? responseRef.current.get(activeSession.conversationId)
-      : undefined
+    const currentResponse = activeSession ? getResponse(activeSession.conversationId) : undefined
     if (!currentResponse || currentResponse.conversationId !== activeSession?.conversationId) {
       return
     }
 
     const conversationId = currentResponse.conversationId
-    const session = sessionsRef.current.get(conversationId)
+    const session = getSession(conversationId)
     if (!session) {
       settleResponse(conversationId)
       return
@@ -559,12 +432,10 @@ function useChatWorkspaceState(): ChatWorkspace {
       },
       () => settleResponse(conversationId)
     )
-  }, [activeSession, settleResponse])
+  }, [activeSession, getSession, getResponse, settleResponse])
 
   const retryResponse = React.useCallback((): void => {
-    const currentResponse = activeSession
-      ? responseRef.current.get(activeSession.conversationId)
-      : undefined
+    const currentResponse = activeSession ? getResponse(activeSession.conversationId) : undefined
     if (
       currentResponse?.status !== 'error' ||
       currentResponse.conversationId !== activeSession?.conversationId
@@ -572,22 +443,12 @@ function useChatWorkspaceState(): ChatWorkspace {
       return
     }
 
-    const session = sessionsRef.current.get(currentResponse.conversationId)
+    const session = getSession(currentResponse.conversationId)
     if (!session) return
 
     setResponseState({ status: 'submitted', conversationId: currentResponse.conversationId })
     void session.chat.regenerate()
-  }, [activeSession, setResponseState])
-
-  React.useEffect(
-    () => () => {
-      // Sessions may continue streaming after navigation; stop all of them when the workspace unmounts.
-      for (const { chat } of sessionsRef.current.values()) {
-        void chat.stop()
-      }
-    },
-    []
-  )
+  }, [activeSession, getSession, getResponse, setResponseState])
 
   const activeConversation = React.useMemo(
     () =>

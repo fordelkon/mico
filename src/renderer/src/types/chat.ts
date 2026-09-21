@@ -22,19 +22,30 @@ type Conversation = {
   title: string
 }
 
+type ActiveChatResponse =
+  | { status: 'submitted'; conversationId: string }
+  | { status: 'streaming'; conversationId: string }
+  | ({ status: 'retrying'; conversationId: string } & ChatRetryState)
+
 type ChatResponseState =
   | { status: 'idle' }
+  | ActiveChatResponse
   | { status: 'error'; conversationId: string; message: string }
-  | ({ status: 'retrying'; conversationId: string } & ChatRetryState)
-  | {
-      status: 'submitted' | 'streaming'
-      conversationId: string
-    }
+
+function isActiveChatResponse(response: ChatResponseState): response is ActiveChatResponse {
+  return (
+    response.status === 'submitted' ||
+    response.status === 'streaming' ||
+    response.status === 'retrying'
+  )
+}
 
 const IDLE_CHAT_RESPONSE = { status: 'idle' } as const satisfies ChatResponseState
 
 export {
   IDLE_CHAT_RESPONSE,
+  isActiveChatResponse,
+  type ActiveChatResponse,
   type AssistantCompletionState,
   type ChatResponseState,
   type ChatRetryState,

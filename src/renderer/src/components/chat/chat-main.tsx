@@ -1,5 +1,6 @@
 import { Spinner } from '@mico/ui'
 import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
+import { isActiveChatResponse } from '@renderer/types/chat'
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import * as React from 'react'
 
@@ -28,29 +29,18 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
     if (!capabilities) setThinkingEffort('none')
   }, [setThinkingEffort])
 
-  const isActiveResponse =
-    (workspace.response.status === 'submitted' ||
-      workspace.response.status === 'streaming' ||
-      workspace.response.status === 'retrying') &&
-    workspace.activeConversation?.id === workspace.response.conversationId
-  const composerMode: ChatComposerMode =
-    workspace.response.status === 'submitted' ||
-    workspace.response.status === 'streaming' ||
-    workspace.response.status === 'retrying'
-      ? isActiveResponse
-        ? 'stop'
-        : 'disabled'
-      : 'send'
+  const { response } = workspace
+  const isForActiveConversation =
+    response.status !== 'idle' && workspace.activeConversation?.id === response.conversationId
+  const isActiveResponse = isActiveChatResponse(response) && isForActiveConversation
+  const composerMode: ChatComposerMode = !isActiveChatResponse(response)
+    ? 'send'
+    : isActiveResponse
+      ? 'stop'
+      : 'disabled'
   const errorMessage =
-    workspace.response.status === 'error' &&
-    workspace.activeConversation?.id === workspace.response.conversationId
-      ? workspace.response.message
-      : undefined
-  const retry =
-    workspace.response.status === 'retrying' &&
-    workspace.activeConversation?.id === workspace.response.conversationId
-      ? workspace.response
-      : undefined
+    response.status === 'error' && isForActiveConversation ? response.message : undefined
+  const retry = response.status === 'retrying' && isForActiveConversation ? response : undefined
   const composer = (
     <ChatComposer
       canAddProject={!workspace.activeConversation}
