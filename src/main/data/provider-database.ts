@@ -1,12 +1,14 @@
-import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import { rm } from 'node:fs/promises'
 
 import { providerLibraryState, providers } from './provider-schema'
 import { providerMigrations } from './provider-migrations'
 import * as schema from './provider-schema'
+import { SqliteDatabase } from './sqlite-database'
 
 type ProviderDatabaseDependencies = {
   getUserDataPath?: () => string
@@ -21,7 +23,7 @@ const defaultDependencies: Required<ProviderDatabaseDependencies> = {
 class ProviderDatabase {
   private readonly dependencies: Required<ProviderDatabaseDependencies>
   private database: BetterSQLite3Database<typeof schema> | undefined
-  private sqlite: Database.Database | undefined
+  private sqlite: SqliteDatabase | undefined
 
   constructor(dependencies: ProviderDatabaseDependencies = {}) {
     this.dependencies = { ...defaultDependencies, ...dependencies }
@@ -34,54 +36,20 @@ class ProviderDatabase {
 
   get connection(): Database.Database {
     if (!this.sqlite) throw new Error('Provider database is not initialized.')
-    return this.sqlite
+    return this.sqlite.connection
   }
 
   async initialize(): Promise<void> {
     const userDataPath = this.dependencies.getUserDataPath()
-    await mkdir(userDataPath, { recursive: true })
-
-    const sqlite = this.dependencies.openDatabase(join(userDataPath, 'providers.db'))
-    try {
-      sqlite.pragma('journal_mode = WAL')
-      sqlite.pragma('synchronous = NORMAL')
-      sqlite.pragma('foreign_keys = ON')
-      // This table records the schema changes already applied to the provider library.
-      sqlite.exec(`
-        CREATE TABLE IF NOT EXISTS provider_schema_migrations (
-          id TEXT PRIMARY KEY NOT NULL,
-          applied_at INTEGER NOT NULL
-        );
-      `)
-      const appliedMigrationIds = new Set(
-        sqlite
-          .prepare('SELECT id FROM provider_schema_migrations ORDER BY id')
-          .pluck()
-          .all()
-          .map(String)
-      )
-      const knownMigrationIds = new Set<string>(providerMigrations.map((migration) => migration.id))
-      const unknownMigrationId = [...appliedMigrationIds].find((id) => !knownMigrationIds.has(id))
-      if (unknownMigrationId)
-        throw new Error(`Provider database contains unknown migration ${unknownMigrationId}.`)
-
-      const recordMigration = sqlite.prepare(
-        'INSERT INTO provider_schema_migrations (id, applied_at) VALUES (?, ?)'
-      )
-      for (const migration of providerMigrations) {
-        if (appliedMigrationIds.has(migration.id)) continue
-        sqlite.transaction(() => {
-          migration.apply(sqlite)
-          recordMigration.run(migration.id, Date.now())
-        })()
-      }
-    } catch (error) {
-      sqlite.close()
-      throw error
-    }
-
+    const sqlite = await SqliteDatabase.open({
+      path: join(userDataPath, 'providers.db'),
+      migrations: providerMigrations,
+      migrationTable: 'provider_schema_migrations',
+      label: 'Provider',
+      open: this.dependencies.openDatabase
+    })
     this.sqlite = sqlite
-    this.database = drizzle(sqlite, { schema })
+    this.database = drizzle(sqlite.connection, { schema })
     this.db
       .insert(providers)
       .values([

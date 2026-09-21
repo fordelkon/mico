@@ -30,10 +30,7 @@ async function createService(): Promise<{
   database: SessionDatabase
   service: SessionRuntimeService
 }> {
-  const database = new SessionDatabase({
-    getUserDataPath: () => 'unused-for-memory-database',
-    openDatabase: () => new Database(':memory:')
-  })
+  const database = new SessionDatabase({ getUserDataPath: () => ':memory:' })
   await database.initialize()
   const service = new SessionRuntimeService({
     createId: (() => {

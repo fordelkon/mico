@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { app } from 'electron'
 import * as z from 'zod'
 
 import { WorkspaceProjectSchema } from '@shared/data/schemas/workspace'
+
+import { writeJsonAtomically } from '../../data/atomic-json'
 
 type StoredWorkspaceProject = {
   id: string
@@ -158,10 +160,7 @@ class WorkspaceService {
     }
   }
   private async writeCatalog(): Promise<void> {
-    await mkdir(this.dependencies.getUserDataPath(), { recursive: true })
-    const temporaryPath = `${this.catalogPath}.tmp`
-    await writeFile(temporaryPath, JSON.stringify(this.requireCatalog()), 'utf8')
-    await rename(temporaryPath, this.catalogPath)
+    await writeJsonAtomically(this.catalogPath, this.requireCatalog())
   }
   private get catalogPath(): string {
     return join(this.dependencies.getUserDataPath(), 'workspace-projects.json')

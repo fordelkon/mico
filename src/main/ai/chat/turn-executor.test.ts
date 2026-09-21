@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import Database from 'better-sqlite3'
 
 import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { ChatProvider } from '@mico/ai-providers'
@@ -42,10 +41,7 @@ async function createRuntime(): Promise<{
   database: SessionDatabase
   runtime: SessionRuntimeService
 }> {
-  const database = new SessionDatabase({
-    getUserDataPath: () => 'unused-for-memory-database',
-    openDatabase: () => new Database(':memory:')
-  })
+  const database = new SessionDatabase({ getUserDataPath: () => ':memory:' })
   await database.initialize()
   return { database, runtime: new SessionRuntimeService({ database }) }
 }

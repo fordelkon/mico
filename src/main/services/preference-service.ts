@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme } from 'electron'
 import * as z from 'zod'
@@ -8,6 +8,8 @@ import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
 import type { DataFor } from '@shared/data/types'
 import { IpcChannel } from '@shared/IpcChannel'
 import { resolveCodeTheme, type Appearance, type CodeThemeId } from '@shared/theme/theme-registry'
+
+import { writeJsonAtomically } from '../data/atomic-json'
 
 type AppearancePreference = DataFor<'appearancePreference'>
 type ThemePreferences = DataFor<'themePreferences'>
@@ -160,10 +162,7 @@ class PreferenceService {
   }
 
   private async writeThemePreferences(preferences: ThemePreferences): Promise<void> {
-    await mkdir(app.getPath('userData'), { recursive: true })
-    const temporaryPath = `${this.preferencesPath}.tmp`
-    await writeFile(temporaryPath, JSON.stringify(preferences), 'utf8')
-    await rename(temporaryPath, this.preferencesPath)
+    await writeJsonAtomically(this.preferencesPath, preferences)
   }
 
   private get preferencesPath(): string {
