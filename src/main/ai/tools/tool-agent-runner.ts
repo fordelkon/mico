@@ -52,8 +52,8 @@ type AgentStep = {
 }
 /**
  * The turn's parts in exact stream order across every model step. This is the
- * authoritative transcript for persisted display: an agent run is the activity
- * between two text outputs, so positions must survive persistence verbatim.
+ * authoritative transcript for persisted display: positions must survive
+ * persistence verbatim (see session-transcript.ts for the invariant).
  */
 type AgentDisplayPart =
   | { type: 'reasoning'; text: string }

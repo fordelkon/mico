@@ -1,20 +1,8 @@
-import { createHash } from 'node:crypto'
 import * as z from 'zod'
 
-import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
-
-import {
-  ChatDocumentPartSchema,
-  ChatMessageRoleSchema,
-  ChatReasoningPartSchema,
-  ChatToolTracePresentationSchema,
-  ChatToolTracePartSchema,
-  type ChatMessage,
-  type ChatToolTraceInput,
-  type ChatToolTracePresentation,
-  type ChatToolTracePart
-} from '@shared/data/schemas/chat'
+import type { ChatProviderMessage } from '@mico/ai-providers'
 import { toolLabel } from '@shared/ai/tool-presentation'
+import type { ChatMessage } from '@shared/data/schemas/chat'
 import type {
   ExecutionProfileSnapshot,
   PersistedSession,
@@ -22,30 +10,25 @@ import type {
 } from '@shared/data/schemas/session'
 import { SessionDatabase } from '../../data/session-database'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
+import {
+  assembleReplayEvents,
+  assembleTranscript,
+  assertPayloadDigest,
+  digest,
+  parseMessagePayload,
+  sanitizeAgentStep,
+  visibleMessage,
+  type LoadEventRow,
+  type ToolTraceSummary,
+  type VisibleMessage,
+  type AgentStep
+} from './session-transcript'
+import {
+  parseToolTracePayload,
+  toStoredToolTrace,
+  type StoredToolTrace
+} from './tool-trace-presentation'
 
-type VisibleMessage = {
-  role: ChatMessage['role']
-  parts: Array<
-    | { type: 'text'; text: string }
-    | { type: 'document'; name: string; text: string }
-    | { type: 'reasoning'; text: string }
-    | ChatToolTracePart
-  >
-  metadata?: { completionState?: 'complete' | 'stopped' }
-}
-const VisibleMessageSchema: z.ZodType<VisibleMessage> = z.object({
-  role: ChatMessageRoleSchema,
-  parts: z.array(
-    z.union([
-      z.object({ type: z.literal('text'), text: z.string() }),
-      ChatDocumentPartSchema,
-      ChatReasoningPartSchema,
-      ChatToolTracePartSchema
-    ])
-  ),
-  metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional()
-})
-const MessagePayloadSchema = z.object({ message: VisibleMessageSchema })
 type RuntimeEventPayloads = {
   run_started: {
     attempt: number
@@ -65,27 +48,6 @@ type RuntimeEventPayloads = {
 type RuntimeEventKind = keyof RuntimeEventPayloads
 type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string
 type JsonObject = { [key: string]: JsonValue }
-type StoredToolTrace = {
-  toolCallId: string
-  toolName: string
-  input: ChatToolTraceInput
-  presentation?: ChatToolTracePresentation
-  status: 'completed' | 'failed'
-  summary: string
-  startedAt: number
-  finishedAt: number
-}
-type ToolTraceSummary = {
-  total: number
-  succeeded: number
-  failed: number
-  summary: string
-}
-type AgentStep = {
-  index: number
-  assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
-  toolResults: ChatProviderToolResultPart[]
-}
 type StartedRun = {
   runId: string
   turnId: string
@@ -191,51 +153,7 @@ class SessionRuntimeService {
          ORDER BY turns.ordinal, runs.attempt, runtime_events.session_sequence`
       )
       .all(sessionId) as LoadEventRow[]
-    for (const row of rows) this.assertPayloadDigest(row)
-    const activityPartsByRun = new Map<string, ChatMessage['parts']>()
-    for (const row of rows) {
-      const current = activityPartsByRun.get(row.run_id) ?? []
-      if (row.kind === 'agent_step_recorded') {
-        const assistant = parseAgentStepPayload(row.payload_json).step.assistant
-        // Only tool-use rounds precede another model response. The terminal round's reasoning is
-        // already preserved in assistant_output_finalized, so replaying it here would duplicate it.
-        if (assistant.parts.some((part) => part.type === 'tool-call')) {
-          current.push(
-            ...assistant.parts.flatMap((part) =>
-              part.type === 'reasoning' ? [{ type: 'reasoning' as const, text: part.text }] : []
-            )
-          )
-        }
-      } else if (row.kind === 'tool_trace_recorded') {
-        current.push(toToolTracePart(parseToolTracePayload(row.payload_json).trace))
-      }
-      if (current.length) activityPartsByRun.set(row.run_id, current)
-    }
-    for (const row of rows) {
-      if (row.kind === 'tool_trace_summary_recorded') parseToolTraceSummaryPayload(row.payload_json)
-    }
-    return {
-      ...toSessionSummary(session),
-      messages: rows.flatMap((row) => {
-        if (
-          row.kind === 'agent_step_recorded' ||
-          row.kind === 'tool_trace_recorded' ||
-          row.kind === 'tool_trace_summary_recorded'
-        )
-          return []
-        const message = parseMessagePayload(row.payload_json).message
-        if (row.kind !== 'assistant_output_finalized') return [message]
-        // Finalized outputs that embed their tool traces already carry the exact
-        // stream order; event reassembly only fills legacy or interrupted runs.
-        if (message.parts.some((part) => part.type === 'tool-trace')) return [message]
-        return [
-          {
-            ...message,
-            parts: [...(activityPartsByRun.get(row.run_id) ?? []), ...message.parts]
-          }
-        ]
-      })
-    }
+    return { ...toSessionSummary(session), messages: assembleTranscript(rows) }
   }
 
   recordToolTrace(runId: string, trace: ToolExecutionTrace): void {
@@ -305,7 +223,7 @@ class SessionRuntimeService {
           )
           .get(prior.id) as { payload_json: string; payload_digest: string } | undefined
         if (finalized) {
-          this.assertPayloadDigest(finalized)
+          assertPayloadDigest(finalized)
           messages.push(
             toProviderContextMessage(parseMessagePayload(finalized.payload_json).message)
           )
@@ -322,7 +240,8 @@ class SessionRuntimeService {
   }
 
   private getRunReplayEvents(runId: string): ChatProviderMessage[] {
-    // SAFETY: the fixed query selects only declared replay-event columns.
+    // SAFETY: the fixed query selects only declared replay-event columns. Unlike the transcript
+    // projection, replay never needs run_id or UI-trace fields — only event payloads in order.
     const rows = this.dependencies.database.connection
       .prepare(
         "SELECT payload_json, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'agent_step_recorded' ORDER BY session_sequence"
@@ -331,13 +250,7 @@ class SessionRuntimeService {
       payload_json: string
       payload_digest: string
     }>
-    const messages: ChatProviderMessage[] = []
-    for (const row of rows) {
-      this.assertPayloadDigest(row)
-      const step = parseAgentStepPayload(row.payload_json).step
-      messages.push(toReplayAssistant(step.assistant), { role: 'tool', parts: step.toolResults })
-    }
-    return messages
+    return assembleReplayEvents(rows)
   }
 
   renameSession(sessionId: string, title: string): SessionSummary {
@@ -646,7 +559,7 @@ class SessionRuntimeService {
       )
       .all(run.id) as Array<{ payload_json: string; payload_digest: string }>
     const traces = rows.map((row) => {
-      this.assertPayloadDigest(row)
+      assertPayloadDigest(row)
       return parseToolTracePayload(row.payload_json).trace
     })
     const succeeded = traces.filter((trace) => trace.status === 'completed').length
@@ -711,7 +624,7 @@ class SessionRuntimeService {
       )
       .get(turnId) as { payload_json: string; payload_digest: string } | undefined
     if (!row) throw new Error('Turn has no user message.')
-    this.assertPayloadDigest(row)
+    assertPayloadDigest(row)
     return parseMessagePayload(row.payload_json).message
   }
 
@@ -723,14 +636,9 @@ class SessionRuntimeService {
       )
       .get(runId) as { payload_json: string; payload_digest: string } | undefined
     if (!row) throw new Error('Run has no start event.')
-    this.assertPayloadDigest(row)
+    assertPayloadDigest(row)
     // SAFETY: run_started payloads are serialized from RuntimeEventPayloads by appendEvent.
     return (JSON.parse(row.payload_json) as RuntimeEventPayloads['run_started']).profile
-  }
-
-  private assertPayloadDigest(row: { payload_json: string; payload_digest: string }): void {
-    if (digest(row.payload_json) !== row.payload_digest)
-      throw new Error('Runtime event payload digest does not match its stored value.')
   }
 
   private toStartedRun(run: RunRow): StartedRun {
@@ -818,70 +726,6 @@ type RunRow = {
   attempt: number
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 }
-/**
- * Narrow projection used only by `loadSession`.
- *
- * It deliberately excludes table columns that cannot affect the renderer
- * transcript, while retaining `run_id` to attach sanitized tool traces to
- * their finalized assistant message.
- */
-type LoadEventRow = {
-  run_id: string
-  kind:
-    | 'assistant_output_finalized'
-    | 'agent_step_recorded'
-    | 'tool_trace_recorded'
-    | 'tool_trace_summary_recorded'
-    | 'user_message_recorded'
-  payload_json: string
-  payload_digest: string
-}
-/**
- * Narrow projection used only by `getReplayMessages`.
- *
- * Unlike `LoadEventRow`, replay needs `turn_id` to distinguish retry events
- * from accepted earlier turns; it never needs `run_id` or UI-trace fields.
- */
-const StoredToolTraceSchema: z.ZodType<StoredToolTrace> = z.object({
-  toolCallId: z.string().trim().min(1).max(200),
-  toolName: z.string().trim().min(1).max(64),
-  input: z.object({
-    command: z.string().trim().min(1).max(240).optional(),
-    editCount: z.number().int().positive().max(100).optional(),
-    path: z.string().trim().min(1).max(4_096).optional()
-  }),
-  presentation: ChatToolTracePresentationSchema.optional(),
-  status: z.enum(['completed', 'failed']),
-  summary: z.string().trim().min(1).max(500),
-  startedAt: z.number().int().nonnegative(),
-  finishedAt: z.number().int().nonnegative()
-})
-const ToolTracePayloadSchema = z.object({ trace: StoredToolTraceSchema })
-const ToolTraceSummarySchema: z.ZodType<ToolTraceSummary> = z.object({
-  total: z.number().int().nonnegative(),
-  succeeded: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  summary: z.string().trim().min(1).max(500)
-})
-const ToolTraceSummaryPayloadSchema = z.object({ summary: ToolTraceSummarySchema })
-const AgentStepPayloadSchema: z.ZodType<{ step: AgentStep }> = z.object({
-  step: z.object({
-    index: z.number().int().positive(),
-    assistant: z.custom<Extract<ChatProviderMessage, { role: 'assistant' }>>(),
-    toolResults: z.array(z.custom<ChatProviderToolResultPart>()).min(1)
-  })
-})
-const ToolTraceSourceInputSchema = z.object({
-  command: z.string().optional(),
-  content: z.string().optional(),
-  edits: z
-    .array(z.object({ newText: z.string(), oldText: z.string() }))
-    .max(100)
-    .optional(),
-  path: z.string().optional()
-})
-const TOOL_TRACE_PRESENTATION_MAX_BYTES = 64 * 1024
-type TruncatedToolPresentationText = { isTruncated: boolean; text: string }
 function toSessionSummary(row: SessionRow): SessionSummary {
   // SAFETY: default profiles are serialized by canonicalJson from an ExecutionProfileSnapshot.
   return {
@@ -895,48 +739,6 @@ function toSessionSummary(row: SessionRow): SessionSummary {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastActivityAt: row.last_activity_at
-  }
-}
-function visibleMessage(message: ChatMessage): VisibleMessage {
-  const parts: VisibleMessage['parts'] = []
-  for (const part of message.parts) {
-    if (part.type === 'text') parts.push({ type: 'text', text: part.text })
-    else if (part.type === 'document') parts.push(part)
-    else if (part.type === 'reasoning') parts.push({ type: 'reasoning', text: part.text })
-    else if (part.type === 'tool-trace') parts.push(part)
-  }
-  const visible: VisibleMessage = {
-    role: message.role,
-    parts
-  }
-  if (message.metadata) visible.metadata = message.metadata
-  return VisibleMessageSchema.parse(visible)
-}
-function parseMessagePayload(value: string): { message: VisibleMessage } {
-  return MessagePayloadSchema.parse(JSON.parse(value))
-}
-function parseToolTracePayload(value: string): { trace: StoredToolTrace } {
-  return ToolTracePayloadSchema.parse(JSON.parse(value))
-}
-function parseToolTraceSummaryPayload(value: string): { summary: ToolTraceSummary } {
-  return ToolTraceSummaryPayloadSchema.parse(JSON.parse(value))
-}
-function parseAgentStepPayload(value: string): { step: AgentStep } {
-  return AgentStepPayloadSchema.parse(JSON.parse(value))
-}
-function sanitizeAgentStep(step: AgentStep): AgentStep {
-  if (!Number.isInteger(step.index) || step.index < 1 || step.assistant.role !== 'assistant')
-    throw new Error('Invalid agent step.')
-  return AgentStepPayloadSchema.parse({ step: JSON.parse(JSON.stringify(step)) }).step
-}
-function toReplayAssistant(
-  assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
-): Extract<ChatProviderMessage, { role: 'assistant' }> {
-  return {
-    ...assistant,
-    parts: assistant.parts.filter(
-      (part) => part.type !== 'reasoning' || Boolean(part.providerMetadata)
-    )
   }
 }
 function toProviderContextMessage(message: ChatMessage): ChatProviderMessage {
@@ -955,145 +757,6 @@ function toProviderContextMessage(message: ChatMessage): ChatProviderMessage {
     })
   }
 }
-function toStoredToolTrace(trace: ToolExecutionTrace): StoredToolTrace {
-  const toolName = trace.toolName.trim().slice(0, 64) || 'tool'
-  const input = toToolTraceInput(trace.input)
-  const status = trace.isError ? 'failed' : 'completed'
-  const startedAt = Math.max(0, Math.trunc(trace.startedAt))
-  const finishedAt = Math.max(startedAt, Math.trunc(trace.finishedAt))
-  return {
-    toolCallId: trace.toolCallId.trim().slice(0, 200) || 'unknown-call',
-    toolName,
-    input,
-    presentation: toToolTracePresentation(toolName, trace.input, trace.output),
-    status,
-    summary: toolTraceSummary(toolName, input, status, trace.output),
-    startedAt,
-    finishedAt
-  }
-}
-function toToolTraceInput(input: JsonObject): ChatToolTraceInput {
-  const parsed = ToolTraceSourceInputSchema.safeParse(input)
-  if (!parsed.success) return {}
-  const traceInput: ChatToolTraceInput = {}
-  if (parsed.data.path?.trim()) traceInput.path = parsed.data.path.trim().slice(0, 4_096)
-  if (parsed.data.command?.trim())
-    traceInput.command = parsed.data.command.trim().split(/\r?\n/, 1)[0]!.slice(0, 240)
-  if (parsed.data.edits?.length) traceInput.editCount = parsed.data.edits.length
-  return traceInput
-}
-function truncateToolPresentationText(text: string): TruncatedToolPresentationText {
-  if (Buffer.byteLength(text) <= TOOL_TRACE_PRESENTATION_MAX_BYTES)
-    return { isTruncated: false, text }
-
-  let truncated = Buffer.from(text).subarray(0, TOOL_TRACE_PRESENTATION_MAX_BYTES).toString()
-  while (Buffer.byteLength(truncated) > TOOL_TRACE_PRESENTATION_MAX_BYTES)
-    truncated = truncated.slice(0, -1)
-  return { isTruncated: true, text: truncated }
-}
-function toToolTracePresentation(
-  toolName: string,
-  input: JsonObject,
-  output: string
-): StoredToolTrace['presentation'] {
-  const parsed = ToolTraceSourceInputSchema.safeParse(input)
-  if (!parsed.success) return undefined
-
-  switch (toolName) {
-    case 'read': {
-      const preview = truncateToolPresentationText(output)
-      return { content: preview.text, isTruncated: preview.isTruncated, type: 'read' }
-    }
-    case 'bash': {
-      const preview = truncateToolPresentationText(output)
-      return { content: preview.text, isTruncated: preview.isTruncated, type: 'bash' }
-    }
-    case 'write': {
-      if (parsed.data.content === undefined) return undefined
-      const preview = truncateToolPresentationText(parsed.data.content)
-      return {
-        content: preview.text,
-        isTruncated: preview.isTruncated,
-        operation: output.startsWith('Created ')
-          ? 'created'
-          : output.startsWith('Replaced ')
-            ? 'replaced'
-            : 'unknown',
-        type: 'write'
-      }
-    }
-    case 'edit': {
-      const edits = parsed.data.edits ?? []
-      const serialized = JSON.stringify(edits)
-      return {
-        edits: Buffer.byteLength(serialized) <= TOOL_TRACE_PRESENTATION_MAX_BYTES ? edits : [],
-        isTruncated: Buffer.byteLength(serialized) > TOOL_TRACE_PRESENTATION_MAX_BYTES,
-        type: 'edit'
-      }
-    }
-    default:
-      return undefined
-  }
-}
-function toolTraceSummary(
-  toolName: string,
-  input: ChatToolTraceInput,
-  status: StoredToolTrace['status'],
-  output: string
-): string {
-  if (status === 'failed') return 'Tool execution failed.'
-  switch (toolName) {
-    case 'read': {
-      const lineCount = output
-        .split('\n')
-        .filter((line) => line.trim() && !line.startsWith('[More content available.')).length
-      return `Read ${lineCount} ${lineCount === 1 ? 'line' : 'lines'}.`
-    }
-    case 'write':
-      if (output.startsWith('Created '))
-        return input.path ? `Created ${input.path}.` : 'Created file.'
-      if (output.startsWith('Replaced '))
-        return input.path ? `Replaced ${input.path}.` : 'Replaced file.'
-      return input.path ? `Wrote ${input.path}.` : 'Wrote file.'
-    case 'edit':
-      return input.path
-        ? `Edited ${input.path}${input.editCount ? ` · ${input.editCount} changes` : ''}.`
-        : 'Edited file.'
-    case 'bash':
-      return 'Command completed.'
-    default:
-      return `${toolLabel(toolName)} completed.`
-  }
-}
-function toToolTracePart(trace: StoredToolTrace): ChatToolTracePart {
-  if (trace.status === 'failed') {
-    return {
-      type: 'tool-trace',
-      toolCallId: trace.toolCallId,
-      toolName: trace.toolName,
-      input: trace.input,
-      presentation: trace.presentation,
-      state: 'output-error',
-      errorText: trace.summary
-    }
-  }
-  return {
-    type: 'tool-trace',
-    toolCallId: trace.toolCallId,
-    toolName: trace.toolName,
-    input: trace.input,
-    presentation: trace.presentation,
-    state: 'output-available',
-    output: trace.summary
-  }
-}
-/** The persisted-display form of a finished tool execution, identical to replayed traces. */
-function toDisplayToolTrace(trace: ToolExecutionTrace): ChatToolTracePart {
-  return toToolTracePart(toStoredToolTrace(trace))
-}
-function digest(value: string): string {
-  return createHash('sha256').update(value).digest('hex')
-}
 function toJsonValue(value: RuntimeEventPayloads[RuntimeEventKind]): JsonValue {
   return z.json().parse(JSON.parse(JSON.stringify(value)))
 }
@@ -1110,7 +773,7 @@ function canonicalJson(value: JsonValue): string {
   return JSON.stringify(value)
 }
 
-export { SessionRuntimeService, toDisplayToolTrace }
+export { SessionRuntimeService }
 export type {
   ExecutionProfileSnapshot,
   PersistedSession,

@@ -15,10 +15,10 @@ import { ToolAgentRunner } from '../tools/tool-agent-runner'
 import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
 import { ToolRegistry } from '../tools/tool-registry'
 import {
-  toDisplayToolTrace,
   type ExecutionProfileSnapshot,
   type SessionRuntimeService
 } from '../sessions/session-runtime-service'
+import { toDisplayToolTrace } from '../sessions/tool-trace-presentation'
 
 type ActiveTurn = {
   assistantTextBuilder: CappedTextBuilder
@@ -341,9 +341,9 @@ class TurnExecutor {
 
           if (!turn.controller.signal.aborted) {
             if (turn.runId) {
-              // Persist the exact stream order: an agent run is the activity between
-              // two text outputs, so reasoning, tool traces and interim texts keep
-              // their positions instead of collapsing into one trailing blob.
+              // Persist the exact stream order (see session-transcript.ts for the invariant):
+              // reasoning, tool traces and interim texts keep their positions relative to the
+              // texts around them instead of collapsing into one trailing blob.
               const displayParts: ChatMessage['parts'] = []
               for (const part of result.displaySequence) {
                 if (part.type === 'reasoning') {
