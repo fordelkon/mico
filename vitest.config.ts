@@ -12,6 +12,13 @@ export default defineConfig({
     }
   },
   test: {
+    // Coverage must stay scoped to the sources these projects execute. Without
+    // an explicit include, the default pulls every TS file in the repo —
+    // including packages/* that only their own vitest projects test — and
+    // reports them as 0% in the root report.
+    coverage: {
+      include: ['src/main/**', 'src/renderer/**', 'src/shared/**']
+    },
     projects: [
       {
         extends: true,

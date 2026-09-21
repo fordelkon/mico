@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
@@ -15,6 +16,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "4.1.6",
     "ai": "^7.0.77",
     "vitest": "4.1.6"
   }
