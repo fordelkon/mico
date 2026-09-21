@@ -45,9 +45,24 @@
         "node": true
       },
       "files": ["src/preload/**"]
+    },
+    {
+      "files": ["**/*.{test,spec}.{ts,tsx}", "**/__tests__/**"],
+      "rules": {
+        "anti-slop/no-sleep-in-tests": "error",
+        "anti-slop/require-bdd-test-title": "error",
+        "vitest/expect-expect": "error",
+        "vitest/no-commented-out-tests": "error",
+        "vitest/no-conditional-expect": "error",
+        "vitest/no-disabled-tests": "error",
+        "vitest/no-focused-tests": "error",
+        "vitest/no-identical-title": "error",
+        "vitest/no-test-prefixes": "error",
+        "vitest/valid-title": "error"
+      }
     }
   ],
-  "plugins": ["typescript", "unicorn", "oxc", "react"],
+  "plugins": ["typescript", "unicorn", "oxc", "react", "vitest"],
   "rules": {
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",

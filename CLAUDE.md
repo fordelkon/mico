@@ -47,9 +47,7 @@ Use pnpm. Treat `package.json` scripts as the executable source of truth; use ex
 
 ### Test Quality
 
-- Test observable behavior and meaningful invariants independently of the implementation, including relevant failure and edge cases. Before adding a test, identify the regression it would catch; code changes or coverage increases alone do not justify a test.
-- For regression fixes, demonstrate failure before the fix and success afterward, or report the evidence gap.
-- Prefer deterministic coordination or controlled scheduling over sleeps for concurrency tests.
+- The testing standards and their lint enforcement live in [docs/testing.md](docs/testing.md); read it before writing or changing tests.
 
 ### UI Verification
 
@@ -75,6 +73,8 @@ Use pnpm. Treat `package.json` scripts as the executable source of truth; use ex
 
 ## Task-specific References
 
+- Before writing or changing tests, read [docs/testing.md](docs/testing.md) for the testing standards and their lint enforcement.
+- Before designing or changing module boundaries and public interfaces, read [docs/design.md](docs/design.md) for reviewing abstraction quality and boundary enforcement.
 - Before changing CSS, component styling, or themes, read [docs/styling.md](docs/styling.md) for token ownership, theme boundaries, styling scope, and verification.
 - When adding or changing shared UI components, read [packages/ui/README.md](packages/ui/README.md) for component, story, and test conventions.
 - When changing provider adapters, protocols, or discovery, read [packages/ai-providers/README.md](packages/ai-providers/README.md).
