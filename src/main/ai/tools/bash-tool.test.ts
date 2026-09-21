@@ -1,31 +1,34 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { realpath } from 'node:fs/promises'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createBashTool } from './bash-tool'
+import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('bash tool', () => {
-  const temporaryPaths: string[] = []
-
-  afterEach(async () => {
-    await Promise.all(
-      temporaryPaths
-        .splice(0)
-        // Windows taskkill is asynchronous. Retry the workspace removal until its
-        // descendant process has released the cwd rather than racing cleanup.
-        .map((path) => rm(path, { force: true, maxRetries: 5, recursive: true, retryDelay: 50 }))
-    )
-  })
+  // Windows taskkill is asynchronous. Retry the workspace removal until its
+  // descendant process has released the cwd rather than racing cleanup.
+  afterEach(() => removeTemporaryPaths({ maxRetries: 10, retryDelay: 100 }))
 
   async function createContext() {
-    const cwd = await mkdtemp(join(tmpdir(), 'mico-bash-tool-'))
-    temporaryPaths.push(cwd)
+    const cwd = await createTemporaryWorkspace('mico-bash-tool-')
     return { cwd, signal: new AbortController().signal }
   }
 
-  it('starts commands in the session cwd', async () => {
+  async function createStreamingContext() {
+    const cwd = await createTemporaryWorkspace('mico-bash-tool-')
+    const controller = new AbortController()
+    const deltas: Array<{ stream: string; delta: string }> = []
+    return {
+      cwd,
+      signal: controller.signal,
+      controller,
+      deltas,
+      onOutputDelta: (delta: { stream: string; delta: string }) => deltas.push(delta)
+    }
+  }
+
+  it('user commands run when executed, then they start in the session cwd', async () => {
     const context = await createContext()
     const command = 'node -e "console.log(process.cwd())"'
 
@@ -34,39 +37,51 @@ describe('bash tool', () => {
     expect(result.output.trim()).toBe(await realpath(context.cwd))
   })
 
-  it('reports stdout fragments before the command settles', async () => {
-    const context = await createContext()
-    const deltas: Array<{ stream: string; delta: string }> = []
+  it('user sees output while the command still runs when it writes both streams, then each delta arrives before completion', async () => {
+    const context = await createStreamingContext()
+    // The command stays alive after writing so settling the promise cannot race
+    // the deltas: any delta observed here arrived while the command still ran.
+    let settled = false
+    const pending = createBashTool()
+      .execute(
+        {
+          command:
+            "node -e \"process.stdout.write('out'); process.stderr.write('err'); setTimeout(() => {}, 30000)\""
+        },
+        context
+      )
+      .then(
+        (result) => {
+          settled = true
+          return result
+        },
+        (error) => {
+          settled = true
+          throw error
+        }
+      )
 
-    const result = await createBashTool().execute(
-      { command: "node -e \"process.stdout.write('out'); process.stderr.write('err')\"" },
-      { ...context, onOutputDelta: (delta) => deltas.push(delta) }
-    )
+    await vi.waitFor(() => {
+      expect(context.deltas).toEqual(
+        expect.arrayContaining([
+          { stream: 'stdout', delta: 'out' },
+          { stream: 'stderr', delta: 'err' }
+        ])
+      )
+    })
 
-    expect(deltas).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ stream: 'stdout', delta: 'out' }),
-        expect.objectContaining({ stream: 'stderr', delta: 'err' })
-      ])
-    )
-    expect(result.output).toContain('out')
-    expect(result.output).toContain('err')
+    expect(settled).toBe(false)
+    context.controller.abort()
+    await expect(pending).rejects.toThrow('Command aborted')
   })
 
-  it('emits stdout and stderr fragments while a command runs', async () => {
-    const context = await createContext()
-    const deltas: Array<{ stream: string; delta: string }> = []
+  it('user watches command progress when output streams, then both streams arrive', async () => {
+    const context = await createStreamingContext()
     const command = "node -e \"process.stdout.write('out'); process.stderr.write('err')\""
 
-    const result = await createBashTool().execute(
-      { command },
-      {
-        ...context,
-        onOutputDelta: (delta) => deltas.push(delta)
-      }
-    )
+    const result = await createBashTool().execute({ command }, context)
 
-    expect(deltas).toEqual(
+    expect(context.deltas).toEqual(
       expect.arrayContaining([
         { stream: 'stdout', delta: 'out' },
         { stream: 'stderr', delta: 'err' }
@@ -76,7 +91,7 @@ describe('bash tool', () => {
     expect(result.output).toContain('err')
   })
 
-  it('reports a non-zero exit as a tool failure', async () => {
+  it('user sees a failure when a command exits non-zero, then the code is reported', async () => {
     const context = await createContext()
     const command = 'node -e "process.exit(7)"'
 
@@ -85,13 +100,20 @@ describe('bash tool', () => {
     )
   })
 
-  it('terminates the child process when aborted', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'mico-bash-tool-'))
-    temporaryPaths.push(cwd)
+  it('user gets no dangling process when a running command is aborted, then nothing is left running', async () => {
+    const { cwd } = await createContext()
     const controller = new AbortController()
-    const command = 'node -e "setTimeout(() => {}, 30000)"'
+    const command = 'node -e "process.stdout.write(\'ready\'); setTimeout(() => {}, 30000)"'
+    const deltas: Array<{ stream: string; delta: string }> = []
 
-    const pending = createBashTool().execute({ command }, { cwd, signal: controller.signal })
+    const pending = createBashTool().execute(
+      { command },
+      { cwd, signal: controller.signal, onOutputDelta: (delta) => deltas.push(delta) }
+    )
+    // Abort once the command is observably running. Aborting during shell startup
+    // races taskkill's tree enumeration against the shell spawning the command,
+    // which can orphan the command instead of killing it.
+    await vi.waitFor(() => expect(deltas).toContainEqual({ stream: 'stdout', delta: 'ready' }))
     controller.abort()
 
     await expect(pending).rejects.toThrow('Command aborted')

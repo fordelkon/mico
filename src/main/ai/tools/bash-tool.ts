@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -74,19 +75,21 @@ function executeShell(
     }
     const stop = () => {
       aborted = true
-      terminateProcessTree(child)
-      settle(() => reject(new Error('Command aborted')))
+      void terminateProcessTree(child).then(() =>
+        settle(() => reject(new Error('Command aborted')))
+      )
     }
     timeout = setTimeout(() => {
       timedOut = true
-      terminateProcessTree(child)
-      settle(() => reject(new Error(`Command timed out after ${timeoutSeconds} seconds`)))
+      void terminateProcessTree(child).then(() =>
+        settle(() => reject(new Error(`Command timed out after ${timeoutSeconds} seconds`)))
+      )
     }, timeoutSeconds * 1_000)
     // Abort can win the race with OS process creation. Retrying after `spawn`
     // closes that gap; otherwise a Windows taskkill issued before the PID exists
     // succeeds nowhere and the command can outlive the cancelled agent turn.
     child.once('spawn', () => {
-      if (aborted || timedOut) terminateProcessTree(child)
+      if (aborted || timedOut) void terminateProcessTree(child)
     })
     child.stdout.on('data', (chunk: Buffer) => append('stdout', chunk))
     child.stderr.on('data', (chunk: Buffer) => append('stderr', chunk))
@@ -112,11 +115,18 @@ function executeShell(
   })
 }
 
-/** Kill descendants too: a shell can exit while a command it launched keeps running. */
-function terminateProcessTree(child: ReturnType<typeof spawn>): void {
+/**
+ * Kill descendants too: a shell can exit while a command it launched keeps running.
+ * Resolves once the kill is confirmed (direct child on Unix, the taskkill killer on
+ * Windows) so a cancelled turn is not reported finished while its process tree is
+ * still dying. Waiting for the process, not the pipes: inherited pipe handles must
+ * never delay cancellation.
+ */
+async function terminateProcessTree(child: ChildProcess): Promise<void> {
   if (!child.pid) return
   if (process.platform !== 'win32') {
     child.kill()
+    await boundedExit(child)
     return
   }
   const killer = spawn('taskkill.exe', ['/f', '/t', '/pid', String(child.pid)], {
@@ -125,6 +135,20 @@ function terminateProcessTree(child: ReturnType<typeof spawn>): void {
     windowsHide: true
   })
   killer.once('error', () => child.kill())
+  await boundedExit(killer)
+}
+
+/** A kill that never confirms must not hang cancellation. */
+async function boundedExit(process: ChildProcess): Promise<void> {
+  const confirmed = once(process, 'exit').then(
+    () => undefined,
+    () => undefined
+  )
+  const deadline = new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 5_000)
+    timer.unref()
+  })
+  await Promise.race([confirmed, deadline])
 }
 
 function createBashTool(): AgentTool<BashInput> {
