@@ -1,6 +1,7 @@
 import { Button, SearchPopover } from '@mico/ui'
 import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
-import type { CustomProvider, ModelEntry, ProviderLibrary } from '@shared/data/schemas/provider'
+import type { CustomProvider, ModelEntry } from '@shared/data/schemas/provider'
+import type { ProviderCatalog } from '@renderer/components/settings/providers/provider-library'
 import { ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
 
@@ -12,13 +13,13 @@ type EligibleModel = ModelEntry & {
 }
 
 type ChatModelSelectorProps = {
-  library: ProviderLibrary | null
+  library: ProviderCatalog | null
   onSelect: (modelId: string) => void
   selectedModelId?: string | null
 }
 
 function getProviderDetails(
-  library: ProviderLibrary,
+  library: ProviderCatalog,
   providerId: string
 ): Pick<EligibleModel, 'providerIcon' | 'providerLabel'> {
   const customProvider = library.customProviders.find(({ id }) => id === providerId)
@@ -28,18 +29,25 @@ function getProviderDetails(
   return { providerLabel: providerId }
 }
 
-function getEligibleModels(library: ProviderLibrary | null): EligibleModel[] {
+function getEligibleModels(library: ProviderCatalog | null): EligibleModel[] {
   if (!library) return []
 
-  const enabledProviderIds = new Set([
-    ...library.configurations.filter(({ enabled }) => enabled).map(({ provider }) => provider),
-    ...library.customProviders.filter(({ enabled }) => enabled).map(({ id }) => id)
-  ])
+  const enabledProviderIds = new Set(library.enabledProviderIds)
 
   return library.models.flatMap((model) => {
-    if (!model.enabled || !enabledProviderIds.has(model.provider)) return []
+    if (!model.enabled || !enabledProviderIds.has(model.providerId)) return []
 
-    return [{ ...model, ...getProviderDetails(library, model.provider) }]
+    return [
+      {
+        ...getProviderDetails(library, model.providerId),
+        displayName: model.name,
+        enabled: model.enabled,
+        id: model.id,
+        modelId: model.modelId,
+        // SAFETY: catalog models mirror persisted entries, whose provider is a ModelProvider.
+        provider: model.providerId as ModelEntry['provider']
+      }
+    ]
   })
 }
 

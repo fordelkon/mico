@@ -1,5 +1,9 @@
-import type { ProviderLibrary } from '@shared/data/schemas/provider'
 import * as React from 'react'
+
+import {
+  useProviderLibraryActions,
+  useProviderLibraryState
+} from '@renderer/components/settings/providers/provider-library'
 
 import { getEligibleModels } from './chat-model-selector'
 
@@ -12,7 +16,7 @@ type UseComposerModelSelectionOptions = {
 type ComposerModelSelection = {
   hasSelectedModel: boolean
   currentModelId: string | null | undefined
-  library: ProviderLibrary | null
+  library: ReturnType<typeof useProviderLibraryState>['library']
   selectModel: (modelId: string) => Promise<void>
   selectionError: string | null
 }
@@ -22,33 +26,15 @@ function useComposerModelSelection({
   selectedModelEntryId,
   selectSessionModel
 }: UseComposerModelSelectionOptions): ComposerModelSelection {
-  const [library, setLibrary] = React.useState<ProviderLibrary | null>(null)
+  const { library, loadError } = useProviderLibraryState()
+  const { selectModel: selectLibraryModel } = useProviderLibraryActions()
   const [selectionError, setSelectionError] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    let active = true
-
-    void (async (): Promise<void> => {
-      try {
-        const nextLibrary = await window.api.providers.getLibrary()
-        if (active) setLibrary(nextLibrary)
-      } catch {
-        if (active) setSelectionError('Could not load models. Open Settings and try again.')
-      }
-    })()
-
-    return () => {
-      active = false
-    }
-  }, [])
 
   const selectModel = React.useCallback(
     async (modelId: string): Promise<void> => {
       try {
         if (selectSessionModel) await selectSessionModel(modelId)
-        else await window.api.providers.selectModel(modelId)
-        const nextLibrary = await window.api.providers.getLibrary()
-        setLibrary(nextLibrary)
+        else await selectLibraryModel(modelId)
         setSelectionError(null)
         await onModelSelected()
       } catch {
@@ -57,12 +43,18 @@ function useComposerModelSelection({
         )
       }
     },
-    [onModelSelected, selectSessionModel]
+    [onModelSelected, selectLibraryModel, selectSessionModel]
   )
   const currentModelId = selectedModelEntryId ?? library?.selectedModelId
   const hasSelectedModel = getEligibleModels(library).some(({ id }) => id === currentModelId)
 
-  return { currentModelId, hasSelectedModel, library, selectModel, selectionError }
+  return {
+    currentModelId,
+    hasSelectedModel,
+    library,
+    selectModel,
+    selectionError: loadError ?? selectionError
+  }
 }
 
 export { useComposerModelSelection }

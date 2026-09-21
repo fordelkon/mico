@@ -9,6 +9,7 @@ import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 
 import { ChatMain } from './chat-main'
+import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
 
 Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
   configurable: true,
@@ -85,16 +86,29 @@ describe('ChatMain', () => {
             .fn<() => Promise<typeof library>>()
             .mockResolvedValueOnce(library)
             .mockResolvedValue({ ...library, selectedModelId: 'ollama:qwen3' }),
+          // The provider context flushes unsaved drafts on unmount; keep it a no-op here.
+          saveLibrary: vi
+            .fn<(persisted: typeof library) => Promise<typeof library>>()
+            .mockImplementation(async (persisted) => persisted),
           selectModel: vi
             .fn<(modelId: string | null) => Promise<string | null>>()
             .mockResolvedValue('ollama:qwen3')
+        },
+        windowControls: {
+          onProviderDraftFlush: vi
+            .fn<(listener: () => Promise<void>) => () => void>()
+            .mockReturnValue(() => undefined)
         }
       }
     })
   })
 
   it('user keeps the stop control when a response reconnects, then it stays visible', () => {
-    render(<ChatMain workspace={createWorkspace()} />)
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain workspace={createWorkspace()} />
+      </ProviderLibraryProvider>
+    )
 
     expect(screen.getByRole('button', { name: 'Stop response' })).toBeVisible()
   })
@@ -103,7 +117,11 @@ describe('ChatMain', () => {
     const user = userEvent.setup()
     const workspace = createWorkspace()
 
-    render(<ChatMain workspace={workspace} />)
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain workspace={workspace} />
+      </ProviderLibraryProvider>
+    )
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: 'Select model' }))
@@ -116,7 +134,11 @@ describe('ChatMain', () => {
     const user = userEvent.setup()
     const workspace = createWorkspace()
 
-    render(<ChatMain workspace={workspace} />)
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain workspace={workspace} />
+      </ProviderLibraryProvider>
+    )
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: 'Select model' }))

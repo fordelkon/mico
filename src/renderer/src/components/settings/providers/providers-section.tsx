@@ -22,6 +22,7 @@ import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
 
 import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
+import { useProviderDraftAutosave } from './use-provider-draft-autosave'
 import { GlidingRadioSelect } from './gliding-radio-select'
 import { ProviderModelsSection } from './provider-models-section'
 import { ProviderTestMenu, type ProviderTestState } from './provider-test-menu'
@@ -80,16 +81,10 @@ function ProvidersSection({
     providerId: ProviderId
     value: string
   } | null>(null)
-  const [customProviderDraft, setCustomProviderDraft] = React.useState<{
+  type CustomProviderDraft = {
     providerId: ProviderId
     values: Partial<Omit<CustomProvider, 'id'>>
-  } | null>(null)
-  const customProviderDraftRef = React.useRef<{
-    providerId: ProviderId
-    values: Partial<Omit<CustomProvider, 'id'>>
-  } | null>(null)
-  const customProviderDraftVersion = React.useRef(0)
-  const customProviderSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  }
   const [status, setStatus] = React.useState<{ kind: 'error' | 'success'; message: string } | null>(
     null
   )
@@ -104,6 +99,29 @@ function ProvidersSection({
   const models = library.models.filter((model) => model.providerId === providerId)
   const hasModels = hasFetchedModels || models.length > 0
 
+  // The draft accumulates debounced field edits; flushes persist them through
+  // the library actions, which own the actual save timing and queues.
+  const providerDraft = useProviderDraftAutosave<CustomProviderDraft>({
+    delayMs: 150,
+    save: async (draft, updates) => {
+      if (!customProvider) return false
+      const draftValues = draft?.providerId === providerId ? draft.values : {}
+      const values = { ...draftValues, ...updates.values }
+      const apiKey =
+        values.apiKey === undefined ? customProvider.apiKey : values.apiKey.trim() || undefined
+      try {
+        await updateCustomProvider({ ...customProvider, ...values, apiKey })
+        return true
+      } catch (error) {
+        setStatus({
+          kind: 'error',
+          message: error instanceof Error ? error.message : 'Unable to update the custom provider.'
+        })
+        return false
+      }
+    }
+  })
+
   const customProviderHeaders =
     customProviderHeadersDraft?.providerId === providerId
       ? customProviderHeadersDraft.value
@@ -113,8 +131,8 @@ function ProvidersSection({
           : JSON.stringify(customProvider.headers, null, 2)
         : ''
   const customProviderValues =
-    customProviderDraft?.providerId === providerId && customProvider
-      ? { ...customProvider, ...customProviderDraft.values }
+    providerDraft.draft?.providerId === providerId && customProvider
+      ? { ...customProvider, ...providerDraft.draft.values }
       : customProvider
 
   const customProviderConfiguration = customProviderValues
@@ -157,58 +175,17 @@ function ProvidersSection({
     }
   }
   const editCustomProvider = (updates: Partial<Omit<CustomProvider, 'id'>>): void => {
-    const current = customProviderDraftRef.current
-    const next = {
+    providerDraft.editWith((current) => ({
       providerId,
       values:
         current?.providerId === providerId ? { ...current.values, ...updates } : { ...updates }
-    }
-    customProviderDraftRef.current = next
-    customProviderDraftVersion.current += 1
-    setCustomProviderDraft(next)
+    }))
   }
   const saveCustomProvider = (updates: Partial<Omit<CustomProvider, 'id'>> = {}): void => {
-    if (!customProvider) return
-
-    if (customProviderSaveTimer.current) {
-      clearTimeout(customProviderSaveTimer.current)
-      customProviderSaveTimer.current = null
-    }
-
-    const draft =
-      customProviderDraftRef.current?.providerId === providerId
-        ? customProviderDraftRef.current.values
-        : {}
-    const apiKey =
-      draft.apiKey === undefined ? customProvider.apiKey : draft.apiKey.trim() || undefined
-    const provider = { ...customProvider, ...draft, ...updates, apiKey }
-    const draftVersion = customProviderDraftVersion.current
-
-    void updateCustomProvider(provider).then(
-      () => {
-        if (customProviderDraftVersion.current !== draftVersion) return
-        customProviderDraftRef.current = null
-        setCustomProviderDraft(null)
-      },
-      (error) => {
-        setStatus({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Unable to update the custom provider.'
-        })
-      }
-    )
+    void (Object.keys(updates).length
+      ? providerDraft.flushWith({ values: updates })
+      : providerDraft.flush())
   }
-  const scheduleCustomProviderSave = (): void => {
-    if (customProviderSaveTimer.current) clearTimeout(customProviderSaveTimer.current)
-    customProviderSaveTimer.current = setTimeout(() => saveCustomProvider(), 150)
-  }
-
-  React.useEffect(
-    () => () => {
-      if (customProviderSaveTimer.current) clearTimeout(customProviderSaveTimer.current)
-    },
-    []
-  )
 
   return (
     <main
@@ -345,7 +322,6 @@ function ProvidersSection({
                   onBlur={() => saveCustomProvider()}
                   onChange={(event) => {
                     editCustomProvider({ name: event.target.value })
-                    scheduleCustomProviderSave()
                   }}
                   value={customProviderValues?.name ?? ''}
                 />
@@ -364,7 +340,6 @@ function ProvidersSection({
                 onChange={(event) => {
                   if (customProvider) {
                     editCustomProvider({ baseUrl: event.target.value })
-                    scheduleCustomProviderSave()
                   } else
                     updateConfiguration(providerId, {
                       ...configuration,
@@ -388,7 +363,6 @@ function ProvidersSection({
                     onChange={(event) => {
                       if (customProvider) {
                         editCustomProvider({ apiKey: event.target.value })
-                        scheduleCustomProviderSave()
                       } else
                         updateConfiguration(providerId, {
                           ...configuration,
@@ -492,12 +466,8 @@ function ProvidersSection({
                       editCustomProvider({
                         headers: event.target.value.trim() ? JSON.parse(event.target.value) : {}
                       })
-                      scheduleCustomProviderSave()
                     } catch {
-                      if (customProviderSaveTimer.current) {
-                        clearTimeout(customProviderSaveTimer.current)
-                        customProviderSaveTimer.current = null
-                      }
+                      providerDraft.cancel()
                       // Keep the invalid draft local until the user corrects it.
                     }
                   }}

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
 
 import { ChatComposer } from './chat-composer'
+import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 
@@ -47,13 +48,34 @@ beforeEach(() => {
       },
       providers: {
         getLibrary: vi.fn<() => Promise<typeof library>>().mockResolvedValue(library),
+        // The provider context flushes unsaved drafts on unmount; keep it a no-op here.
+        saveLibrary: vi
+          .fn<(persisted: typeof library) => Promise<typeof library>>()
+          .mockImplementation(async (persisted) => persisted),
         selectModel: vi
           .fn<(modelId: string | null) => Promise<string | null>>()
           .mockResolvedValue('ollama:qwen3')
+      },
+      windowControls: {
+        onProviderDraftFlush: vi
+          .fn<(listener: () => Promise<void>) => () => void>()
+          .mockReturnValue(() => undefined)
       }
     }
   })
 })
+
+// The composer reads the provider catalog from the app-wide context, so every
+// render mounts the provider; its initial load uses the mocked getLibrary.
+function renderWithLibrary(ui: React.ReactElement): ReturnType<typeof render> {
+  return render(<ProviderLibraryProvider>{ui}</ProviderLibraryProvider>)
+}
+function rerenderWithLibrary(
+  rerender: (ui: React.ReactElement) => void,
+  ui: React.ReactElement
+): void {
+  rerender(<ProviderLibraryProvider>{ui}</ProviderLibraryProvider>)
+}
 
 function ComposerHarness({ mode = 'send' }: { mode?: 'send' | 'stop' }): React.JSX.Element {
   const [sentContent, setSentContent] = React.useState('')
@@ -132,7 +154,7 @@ function renderWorkspaceComposer(
   overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {}
 ): void {
   const { onProjectSelected, projects = [], ...rest } = overrides
-  render(
+  renderWithLibrary(
     <ChatComposer
       {...props}
       canAddProject
@@ -152,7 +174,7 @@ describe('ChatComposer', () => {
       const document: ChatDocumentPart = { type: 'document', name: 'index.ts', text: 'export {}' }
       vi.mocked(window.api.attachments.pickCodeDocuments).mockResolvedValue([document])
       const onSend = vi.fn<() => Promise<boolean>>(async () => true)
-      render(<ChatComposer {...props} onSend={onSend} />)
+      renderWithLibrary(<ChatComposer {...props} onSend={onSend} />)
       await waitForModelButton('Qwen 3 8B')
       await user.click(screen.getByRole('button', { name: 'Add attachment' }))
       await user.click(screen.getByRole('menuitem', { name: 'Attach files' }))
@@ -185,7 +207,7 @@ describe('ChatComposer', () => {
           rejectSend = reject
         })
     )
-    render(<ChatComposer {...props} onSend={onSend} />)
+    renderWithLibrary(<ChatComposer {...props} onSend={onSend} />)
     await waitForModelButton('Qwen 3 8B')
     await user.click(screen.getByRole('button', { name: 'Add attachment' }))
     await user.click(screen.getByRole('menuitem', { name: 'Attach files' }))
@@ -228,14 +250,14 @@ describe('ChatComposer', () => {
   it.each(['stop', 'disabled'] as const)(
     'user cannot add attachments when the mode is %s, then the picker stays disabled',
     (mode) => {
-      render(<ChatComposer {...props} mode={mode} />)
+      renderWithLibrary(<ChatComposer {...props} mode={mode} />)
       expect(screen.getByRole('button', { name: 'Add attachment' })).toBeDisabled()
     }
   )
 
   it('user submits a draft when pressing Send message, then the sent content is shown', async () => {
     const user = userEvent.setup()
-    render(<ComposerHarness />)
+    renderWithLibrary(<ComposerHarness />)
 
     await waitForModelButton('Qwen 3 8B')
 
@@ -248,11 +270,11 @@ describe('ChatComposer', () => {
 
   it('user gets a workspace control when starting a new chat, then adding one binds it', async () => {
     const user = userEvent.setup()
-    const { rerender } = render(<WorkspaceComposerHarness />)
+    const { rerender } = renderWithLibrary(<WorkspaceComposerHarness />)
 
     expect(screen.queryByRole('button', { name: 'Choose workspace' })).toBeNull()
 
-    rerender(<WorkspaceComposerHarness canAddProject />)
+    rerenderWithLibrary(rerender, <WorkspaceComposerHarness canAddProject />)
 
     await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
     await user.click(screen.getByRole('button', { name: 'Add workspace' }))
@@ -334,7 +356,7 @@ describe('ChatComposer', () => {
       )
     }
 
-    render(<RefreshingWorkspaceComposer />)
+    renderWithLibrary(<RefreshingWorkspaceComposer />)
 
     await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
 
@@ -381,7 +403,7 @@ describe('ChatComposer', () => {
   it('user sees rotating suggestions when the composer is blank, then focusing shows the placeholder', async () => {
     vi.useFakeTimers()
     try {
-      render(<ChatComposer {...props} canAddProject />)
+      renderWithLibrary(<ChatComposer {...props} canAddProject />)
 
       expect(screen.getByText('Ask Mico to explain a concept…')).toBeVisible()
 
@@ -415,7 +437,7 @@ describe('ChatComposer', () => {
     })
 
     try {
-      render(<ChatComposer {...props} canAddProject />)
+      renderWithLibrary(<ChatComposer {...props} canAddProject />)
 
       expect(screen.queryByText('Ask Mico to explain a concept…')).toBeNull()
       expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'Ask Mico anything…')
@@ -428,7 +450,7 @@ describe('ChatComposer', () => {
   })
 
   it('user focuses the draft when typing outside editable controls, then focus lands in the textarea', () => {
-    render(
+    renderWithLibrary(
       <>
         <button type="button">Conversation action</button>
         <ChatComposer {...props} />
@@ -444,7 +466,7 @@ describe('ChatComposer', () => {
   })
 
   it('user keeps the draft unfocused when pressing a non-text key, then the textarea ignores it', () => {
-    render(<ChatComposer {...props} />)
+    renderWithLibrary(<ChatComposer {...props} />)
 
     fireEvent.keyDown(window, { key: 'ArrowDown' })
 
@@ -453,7 +475,7 @@ describe('ChatComposer', () => {
 
   it('user sees the textarea shrink back when sending, then the draft returns to one line', async () => {
     const user = userEvent.setup()
-    render(<ComposerHarness />)
+    renderWithLibrary(<ComposerHarness />)
 
     await waitForModelButton('Qwen 3 8B')
 
@@ -475,7 +497,7 @@ describe('ChatComposer', () => {
 
   it('user stops the response when pressing Stop response, then the stop callback runs', async () => {
     const user = userEvent.setup()
-    render(<ComposerHarness mode="stop" />)
+    renderWithLibrary(<ComposerHarness mode="stop" />)
 
     await user.click(screen.getByRole('button', { name: 'Stop response' }))
 
@@ -491,13 +513,22 @@ describe('ChatComposer', () => {
           getLibrary: vi
             .fn<() => Promise<typeof library>>()
             .mockResolvedValue({ ...library, selectedModelId: null }),
+          // The provider context flushes unsaved drafts on unmount; keep it a no-op here.
+          saveLibrary: vi
+            .fn<(persisted: typeof library) => Promise<typeof library>>()
+            .mockImplementation(async (persisted) => persisted),
           selectModel: vi
             .fn<(modelId: string | null) => Promise<string | null>>()
             .mockResolvedValue('ollama:qwen3')
+        },
+        windowControls: {
+          onProviderDraftFlush: vi
+            .fn<(listener: () => Promise<void>) => () => void>()
+            .mockReturnValue(() => undefined)
         }
       }
     })
-    render(<ChatComposer {...props} />)
+    renderWithLibrary(<ChatComposer {...props} />)
 
     await waitForModelButton('Select model')
     await user.type(screen.getByRole('textbox'), 'Hello')
@@ -518,14 +549,22 @@ describe('ChatComposer', () => {
             .fn<() => Promise<typeof library>>()
             .mockResolvedValueOnce({ ...library, selectedModelId: null })
             .mockResolvedValue(library),
+          saveLibrary: vi
+            .fn<(persisted: typeof library) => Promise<typeof library>>()
+            .mockImplementation(async (persisted) => persisted),
           selectModel: vi
             .fn<(modelId: string | null) => Promise<string | null>>()
             .mockResolvedValue('ollama:qwen3')
+        },
+        windowControls: {
+          onProviderDraftFlush: vi
+            .fn<(listener: () => Promise<void>) => () => void>()
+            .mockReturnValue(() => undefined)
         }
       }
     })
 
-    render(<ModelSelectionHarness />)
+    renderWithLibrary(<ModelSelectionHarness />)
 
     await waitForModelButton('Select model')
     await user.click(screen.getByRole('button', { name: 'Select model' }))
@@ -536,14 +575,14 @@ describe('ChatComposer', () => {
   })
 
   it('user gets no thinking menu when the model has nothing adjustable, then it is absent', () => {
-    render(<ChatComposer {...props} />)
+    renderWithLibrary(<ChatComposer {...props} />)
 
     expect(screen.queryByRole('button', { name: 'Thinking effort' })).toBeNull()
   })
 
   it('user sees only advertised efforts when opening the thinking menu, then the rest are missing', async () => {
     const user = userEvent.setup()
-    render(<ThinkingEffortHarness />)
+    renderWithLibrary(<ThinkingEffortHarness />)
 
     await user.click(screen.getByRole('button', { name: /^Thinking effort:/ }))
 
@@ -554,7 +593,7 @@ describe('ChatComposer', () => {
 
   it('user commits the chosen effort when selecting an option, then the parent receives it', async () => {
     const user = userEvent.setup()
-    render(<ThinkingEffortHarness />)
+    renderWithLibrary(<ThinkingEffortHarness />)
 
     await user.click(screen.getByRole('button', { name: /^Thinking effort:/ }))
 
@@ -566,7 +605,7 @@ describe('ChatComposer', () => {
   it.each(['stop', 'disabled'] as const)(
     'user cannot adjust thinking when the mode is %s, then the menu stays disabled',
     (mode) => {
-      render(
+      renderWithLibrary(
         <ChatComposer
           {...props}
           mode={mode}

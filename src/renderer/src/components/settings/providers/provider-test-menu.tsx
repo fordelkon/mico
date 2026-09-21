@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import * as React from 'react'
 
-import type { ProviderModel } from './provider-library'
+import type { CatalogModel } from './provider-library'
 
 type ProviderTestState = 'error' | 'idle' | 'success' | 'testing'
 
@@ -23,7 +23,7 @@ function ProviderTestMenu({
 }: {
   hasModels: boolean
   isTesting: boolean
-  models: ProviderModel[]
+  models: CatalogModel[]
   onTestModel: (modelId: string) => void
   providerLabel: string
   testState: ProviderTestState

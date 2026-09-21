@@ -12,24 +12,24 @@ import * as React from 'react'
 import type { ProviderId } from './providers-sidebar'
 
 type ProviderConfiguration = { apiKey: string; baseUrl: string; enabled: boolean }
-type ProviderModel = {
+type CatalogModel = {
   enabled: boolean
   id: string
   modelId: string
   name: string
   providerId: ProviderId
 }
-type ProviderLibrary = {
+type ProviderCatalog = {
   configurations: Record<ProviderId, ProviderConfiguration>
   customProviders: CustomProvider[]
   enabledProviderIds: ProviderId[]
   enabledModelIds: string[]
-  models: ProviderModel[]
+  models: CatalogModel[]
   selectedModelId: string | null
   selectedProviderId: string | null
 }
 
-function toPersistedLibrary(library: ProviderLibrary): PersistedProviderLibrary {
+function toPersistedLibrary(library: ProviderCatalog): PersistedProviderLibrary {
   const configurations: PersistedProviderLibrary['configurations'][number][] = []
   const ollama = library.configurations.ollama
   if (ollama)
@@ -61,7 +61,7 @@ type ProviderLibraryActions = {
   selectModel: (modelId: string) => Promise<void>
   selectProvider: (providerId: ProviderId | null) => Promise<void>
   syncModels: (providerId: ProviderId, models: DiscoveredModel[]) => Promise<void>
-  toggleModel: (model: ProviderModel, enabled: boolean) => Promise<void>
+  toggleModel: (model: CatalogModel, enabled: boolean) => Promise<void>
   flushConfiguration: (providerId: ProviderId) => void
   updateConfiguration: (
     providerId: ProviderId,
@@ -72,11 +72,13 @@ type ProviderLibraryActions = {
 }
 type ProviderLibraryState = {
   isLoaded: boolean
-  library: ProviderLibrary
+  /** Copy shown when the initial catalog load fails; null once loaded. */
+  loadError: string | null
+  library: ProviderCatalog
 }
 
 const configurationSaveDelay = 150
-const initialLibrary: ProviderLibrary = {
+const initialLibrary: ProviderCatalog = {
   configurations: {
     ollama: { apiKey: '', baseUrl: 'http://localhost:11434', enabled: false }
   },
@@ -87,7 +89,7 @@ const initialLibrary: ProviderLibrary = {
   selectedModelId: null,
   selectedProviderId: null
 }
-function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderLibrary {
+function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderCatalog {
   const configurations = { ...initialLibrary.configurations }
   for (const configuration of next.configurations) {
     if (configuration.provider === 'ollama') {
@@ -147,11 +149,13 @@ const ProviderLibraryActionsContext = React.createContext<ProviderLibraryActions
 })
 const ProviderLibraryStateContext = React.createContext<ProviderLibraryState>({
   isLoaded: false,
+  loadError: null,
   library: initialLibrary
 })
 function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.JSX.Element {
   const [library, setLibrary] = React.useState(initialLibrary)
   const [isLoaded, setIsLoaded] = React.useState(false)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
   const configurationSaveTimers = React.useRef(new Map<ProviderId, ReturnType<typeof setTimeout>>())
   const configurationSaveRevisions = React.useRef(new Map<ProviderId, number>())
   const configurationSaveQueues = React.useRef(new Map<ProviderId, Promise<void>>())
@@ -171,8 +175,16 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   const refreshRevision = React.useRef(0)
   const refresh = React.useCallback(async (): Promise<void> => {
     const revision = ++refreshRevision.current
-    const next = await window.api.providers.getLibrary()
-    if (revision === refreshRevision.current) setLibrary(fromPersistedLibrary(next))
+    try {
+      const next = await window.api.providers.getLibrary()
+      if (revision === refreshRevision.current) {
+        setLibrary(fromPersistedLibrary(next))
+        setIsLoaded(true)
+      }
+    } catch {
+      if (revision === refreshRevision.current)
+        setLoadError('Could not load models. Open Settings and try again.')
+    }
   }, [])
   const commitLibrary = React.useCallback(async (): Promise<void> => {
     const revision = libraryRevision.current
@@ -267,15 +279,23 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   )
   React.useEffect(() => {
     let isActive = true
-    void refresh().then(() => {
-      if (!isActive) return
-      isLibraryLoaded.current = true
-      setIsLoaded(true)
-    })
+    void (async (): Promise<void> => {
+      const revision = ++refreshRevision.current
+      try {
+        const next = await window.api.providers.getLibrary()
+        if (!isActive || revision !== refreshRevision.current) return
+        setLibrary(fromPersistedLibrary(next))
+        isLibraryLoaded.current = true
+        setIsLoaded(true)
+      } catch {
+        if (isActive && revision === refreshRevision.current)
+          setLoadError('Could not load models. Open Settings and try again.')
+      }
+    })()
     return () => {
       isActive = false
     }
-  }, [refresh])
+  }, [])
   const updateConfiguration = React.useCallback(
     (
       providerId: ProviderId,
@@ -359,7 +379,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     [scheduleLibrarySave, waitForConfigurationSaves]
   )
   const toggleModel = React.useCallback(
-    async (model: ProviderModel, enabled: boolean) => {
+    async (model: CatalogModel, enabled: boolean) => {
       await waitForConfigurationSaves()
       setLibrary((current) => ({
         ...current,
@@ -427,7 +447,10 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       updateCustomProvider
     ]
   )
-  const state = React.useMemo(() => ({ isLoaded, library }), [isLoaded, library])
+  const state = React.useMemo(
+    () => ({ isLoaded, loadError, library }),
+    [isLoaded, loadError, library]
+  )
   return (
     <ProviderLibraryActionsContext value={actions}>
       <ProviderLibraryStateContext value={state}>{children}</ProviderLibraryStateContext>
@@ -443,9 +466,9 @@ function useProviderLibraryState(): ProviderLibraryState {
 
 export {
   type ProviderConfiguration,
-  type ProviderLibrary,
+  type ProviderCatalog,
   ProviderLibraryProvider,
-  type ProviderModel,
+  type CatalogModel,
   useProviderLibraryActions,
   useProviderLibraryState
 }
