@@ -796,15 +796,17 @@ describe('registerIpc theme handlers', () => {
     expect(preference.setThemePreferences).toHaveBeenCalledWith(themePreferences)
   })
 
-  it('user cannot save theme preferences when a code theme is unsupported, then nothing is persisted', async () => {
+  it('user cannot save theme preferences when a code theme is unsupported, then nothing is persisted', () => {
     const { handlers, preference, event } = createHarness()
 
-    await expect(
+    // The invoke wrapper validates before delegating; in the running app the
+    // validation error reaches the renderer as a rejected invoke either way.
+    expect(() =>
       handlers.get(IpcChannel.Appearance_SetThemePreferences)?.(event, {
         ...themePreferences,
         codeThemeLight: 'unsupported'
       })
-    ).rejects.toThrow('Invalid theme preferences')
+    ).toThrow('Invalid theme preferences')
     expect(preference.setThemePreferences).not.toHaveBeenCalled()
   })
 })
