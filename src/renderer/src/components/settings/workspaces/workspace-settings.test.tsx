@@ -4,6 +4,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
+
 import { WorkspaceSettings } from './workspace-settings'
 
 const projects = [
@@ -21,21 +23,23 @@ describe('WorkspaceSettings', () => {
       configurable: true,
       value: {
         workspaces: {
-          addFromDialog: vi.fn(),
-          archive: vi.fn().mockResolvedValue(undefined),
+          addFromDialog: vi.fn<WorkspacesAPI['addFromDialog']>(),
+          archive: vi.fn<WorkspacesAPI['archive']>().mockResolvedValue(undefined),
           list: vi
-            .fn()
+            .fn<WorkspacesAPI['list']>()
             .mockResolvedValueOnce(projects)
             .mockResolvedValueOnce(projectsWithProjectOneAsDefault),
-          rename: vi.fn(),
-          reveal: vi.fn(),
-          setDefault: vi.fn().mockResolvedValue({ ...projects[0], isDefault: true })
+          rename: vi.fn<WorkspacesAPI['rename']>(),
+          reveal: vi.fn<WorkspacesAPI['reveal']>(),
+          setDefault: vi
+            .fn<WorkspacesAPI['setDefault']>()
+            .mockResolvedValue({ ...projects[0], isDefault: true })
         }
       }
     })
   })
 
-  it('updates the selected workspace after changing the default', async () => {
+  it('user sees Project one become default when set, then only it cannot be archived', async () => {
     const user = userEvent.setup()
     render(<WorkspaceSettings />)
 

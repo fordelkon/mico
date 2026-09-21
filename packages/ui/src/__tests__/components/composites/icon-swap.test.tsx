@@ -5,36 +5,42 @@ import { describe, expect, it } from 'vitest'
 
 import { IconSwap } from '../../../components/composites/icon-swap'
 
+function iconSwap(state: 'from' | 'to') {
+  return (
+    <IconSwap
+      from={<svg data-testid="from-icon" />}
+      state={state}
+      to={<svg data-testid="to-icon" />}
+    />
+  )
+}
+
+// jsdom does not apply Tailwind's compiled stylesheet, so the visibility rules IconSwap
+// relies on are injected here; only the utilities used by the component are replicated.
+const ICON_SWAP_VISIBILITY_CSS = String.raw`
+  .opacity-0 { opacity: 0 }
+  .group\/icon-swap[data-state='to'] .group-data-\[state\=to\]\/icon-swap\:opacity-0 { opacity: 0 }
+  .group\/icon-swap[data-state='to'] .group-data-\[state\=to\]\/icon-swap\:opacity-100 { opacity: 1 }
+`
+
 describe('IconSwap', () => {
-  it('keeps both icons mounted while switching the visible state', () => {
-    const { rerender } = render(
-      <IconSwap
-        from={<svg data-testid="from-icon" />}
-        state="from"
-        to={<svg data-testid="to-icon" />}
-      />
-    )
+  it('user switches the state when swapping icons, then only the matching icon is presented', () => {
+    const style = document.createElement('style')
+    style.textContent = ICON_SWAP_VISIBILITY_CSS
+    document.head.append(style)
 
-    expect(screen.getByTestId('from-icon')).toBeInTheDocument()
-    expect(screen.getByTestId('to-icon')).toBeInTheDocument()
-    expect(screen.getByTestId('from-icon').closest('[data-slot="icon-swap"]')).toHaveAttribute(
-      'data-state',
-      'from'
-    )
+    try {
+      const { rerender } = render(iconSwap('from'))
 
-    rerender(
-      <IconSwap
-        from={<svg data-testid="from-icon" />}
-        state="to"
-        to={<svg data-testid="to-icon" />}
-      />
-    )
+      expect(screen.getByTestId('from-icon')).toBeVisible()
+      expect(screen.getByTestId('to-icon')).not.toBeVisible()
 
-    expect(screen.getByTestId('from-icon')).toBeInTheDocument()
-    expect(screen.getByTestId('to-icon')).toBeInTheDocument()
-    expect(screen.getByTestId('from-icon').closest('[data-slot="icon-swap"]')).toHaveAttribute(
-      'data-state',
-      'to'
-    )
+      rerender(iconSwap('to'))
+
+      expect(screen.getByTestId('from-icon')).not.toBeVisible()
+      expect(screen.getByTestId('to-icon')).toBeVisible()
+    } finally {
+      style.remove()
+    }
   })
 })

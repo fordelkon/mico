@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataFor } from '@shared/data/types'
+import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
 
 import { AppearanceProvider } from '../../appearance-provider'
 import { AppearanceSettings } from './appearance-settings'
@@ -23,11 +24,19 @@ const initialTheme: ThemeState = {
 }
 
 const appearanceApi = {
-  getThemeState: vi.fn(),
-  onAppearanceChange: vi.fn(() => () => undefined),
-  onThemeChange: vi.fn(() => () => undefined),
-  setPreference: vi.fn(),
-  setThemePreferences: vi.fn()
+  getThemeState: vi.fn<AppearanceAPI['getThemeState']>(),
+  onAppearanceChange: vi.fn<AppearanceAPI['onAppearanceChange']>(() => () => undefined),
+  onThemeChange: vi.fn<AppearanceAPI['onThemeChange']>(() => () => undefined),
+  setPreference: vi.fn<AppearanceAPI['setPreference']>(),
+  setThemePreferences: vi.fn<AppearanceAPI['setThemePreferences']>()
+}
+
+function renderAppearanceSettings(): void {
+  render(
+    <AppearanceProvider>
+      <AppearanceSettings />
+    </AppearanceProvider>
+  )
 }
 
 describe('AppearanceSettings', () => {
@@ -52,13 +61,9 @@ describe('AppearanceSettings', () => {
     })
   })
 
-  it('applies a selected dark preset to the document root after it is persisted', async () => {
+  it('user sees the document root update when a preset saves, then attributes match', async () => {
     const user = userEvent.setup()
-    render(
-      <AppearanceProvider>
-        <AppearanceSettings />
-      </AppearanceProvider>
-    )
+    renderAppearanceSettings()
 
     await screen.findByRole('radio', { name: 'Tokyo Night' })
     await user.click(screen.getByRole('radio', { name: 'Tokyo Night' }))
@@ -69,13 +74,9 @@ describe('AppearanceSettings', () => {
     })
   })
 
-  it('persists the selected appearance preference and marks its theme card as selected', async () => {
+  it('user sees the Dark card selected when picked, then the preference is persisted', async () => {
     const user = userEvent.setup()
-    render(
-      <AppearanceProvider>
-        <AppearanceSettings />
-      </AppearanceProvider>
-    )
+    renderAppearanceSettings()
 
     const darkTheme = await screen.findByRole('radio', { name: 'Dark' })
     await user.click(darkTheme)
@@ -84,12 +85,8 @@ describe('AppearanceSettings', () => {
     expect(darkTheme).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('shows only the system-resolved mode theme when the preference is system', async () => {
-    render(
-      <AppearanceProvider>
-        <AppearanceSettings />
-      </AppearanceProvider>
-    )
+  it('user sees one mode theme when preference is system, then the other is absent', async () => {
+    renderAppearanceSettings()
 
     expect(await screen.findByRole('heading', { name: 'Dark Mode Theme' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Light Mode Theme' })).not.toBeInTheDocument()

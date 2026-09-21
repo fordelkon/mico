@@ -1,14 +1,14 @@
 import '@testing-library/jest-dom/vitest'
 
-import { Button } from '@mico/ui/components/primitives/button'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import { SearchPopover } from '../../../components/composites/search-popover'
+import { Button } from '../../../components/primitives/button'
 
 describe('SearchPopover', () => {
-  it('focuses the query, passes it to the caller, and closes on selection', async () => {
+  it('user picks an option when searching, then the popover closes and resets', async () => {
     const user = userEvent.setup()
     render(
       <SearchPopover

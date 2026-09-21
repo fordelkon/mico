@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { Popover, PopoverContent, PopoverTrigger } from '../../../index'
 
 describe('Popover', () => {
-  it('exposes portal content through the public package entry point when open', () => {
+  it('user sees the popover content when it is open, then it renders in the portal', () => {
     render(
       <Popover open>
         <PopoverTrigger>Model options</PopoverTrigger>
@@ -18,7 +18,7 @@ describe('Popover', () => {
     expect(screen.getByText('Choose a model')).toBeVisible()
   })
 
-  it('does not render portal content when closed', () => {
+  it('user sees no popover content when it is closed, then nothing renders', () => {
     render(
       <Popover open={false}>
         <PopoverTrigger>Model options</PopoverTrigger>

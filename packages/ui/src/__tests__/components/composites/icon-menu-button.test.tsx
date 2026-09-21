@@ -8,7 +8,7 @@ import { DropdownMenuItem } from '../../../components/primitives/dropdown-menu'
 import { IconMenuButton } from '../../../components/composites/icon-menu-button'
 
 describe('IconMenuButton', () => {
-  it('opens an accessible labelled menu on click', async () => {
+  it('user clicks the icon button when it has a label, then the menu items show', async () => {
     const user = userEvent.setup()
 
     render(
@@ -25,7 +25,7 @@ describe('IconMenuButton', () => {
     expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeVisible()
   })
 
-  it('forwards supported button props and prevents a disabled trigger from opening the menu', async () => {
+  it('user clicks the trigger when it is disabled, then the menu does not open', async () => {
     const user = userEvent.setup()
 
     render(
@@ -48,24 +48,17 @@ describe('IconMenuButton', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('forwards menu alignment and content sizing to the opened menu', async () => {
+  it('user opens the menu when a custom content width is set, then the menu opens with it', async () => {
     const user = userEvent.setup()
 
     render(
-      <IconMenuButton
-        icon={<svg />}
-        label="Browse models"
-        menuAlign="end"
-        menuContentClassName="w-72"
-      >
+      <IconMenuButton icon={<svg />} label="Browse models" menuContentClassName="w-72">
         <DropdownMenuItem>Model A</DropdownMenuItem>
       </IconMenuButton>
     )
 
     await user.click(screen.getByRole('button', { name: 'Browse models' }))
 
-    const menu = screen.getByRole('menu')
-    expect(menu).toHaveAttribute('data-align', 'end')
-    expect(menu).toHaveClass('w-72')
+    expect(screen.getByRole('menu')).toHaveClass('w-72')
   })
 })

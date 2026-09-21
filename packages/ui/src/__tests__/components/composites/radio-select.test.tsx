@@ -8,9 +8,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { RadioSelect } from '../../../components/composites/radio-select'
 
 describe('RadioSelect', () => {
-  it('emits the selected option and reflects it in the controlled trigger', async () => {
+  it('user selects an option when clicking it, then the trigger shows the value', async () => {
     const user = userEvent.setup()
-    const onValueChange = vi.fn()
+    const onValueChange = vi.fn<(value: string) => void>()
 
     function CodeThemeSelect() {
       const [value, setValue] = React.useState('auto')
@@ -40,14 +40,14 @@ describe('RadioSelect', () => {
     expect(screen.getByRole('button', { name: 'Code theme' })).toHaveTextContent('GitHub Dark')
   })
 
-  it('does not open when disabled', async () => {
+  it('user cannot open the select when it is disabled, then no menu renders', async () => {
     const user = userEvent.setup()
 
     render(
       <RadioSelect
         aria-label="Code theme"
         disabled
-        onValueChange={vi.fn()}
+        onValueChange={vi.fn<(value: string) => void>()}
         options={[{ label: 'Auto', value: 'auto' }]}
         value="auto"
       />

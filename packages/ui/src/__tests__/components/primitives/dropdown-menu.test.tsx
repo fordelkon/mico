@@ -25,7 +25,7 @@ function renderOpenMenu(children: React.ReactNode) {
 }
 
 describe('DropdownMenu', () => {
-  it('renders an accessible menu and exposes item selection', async () => {
+  it('user selects a menu item when clicking it, then its label updates', async () => {
     const user = userEvent.setup()
     function RenameAction() {
       const [renamed, setRenamed] = useState(false)
@@ -52,7 +52,7 @@ describe('DropdownMenu', () => {
     expect(screen.getByRole('menuitem', { name: 'Renamed' })).toBeVisible()
   })
 
-  it('does not select a disabled item', async () => {
+  it('user cannot select the item when it is disabled, then no selection occurs', async () => {
     const user = userEvent.setup()
     function DeleteAction() {
       const [deleted, setDeleted] = useState(false)
@@ -77,7 +77,7 @@ describe('DropdownMenu', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeVisible()
   })
 
-  it('renders an open submenu as another accessible menu', () => {
+  it('user sees the submenu when it is open, then it renders as a second menu', () => {
     renderOpenMenu(
       <DropdownMenuSub open>
         <DropdownMenuSubTrigger>Share</DropdownMenuSubTrigger>

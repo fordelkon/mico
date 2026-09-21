@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
+import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 
 import { ChatMain } from './chat-main'
 
@@ -33,19 +35,21 @@ function createWorkspace(): ChatWorkspace {
     pendingProject: null,
     activeProject: null,
     projects: [],
-    refreshProjects: vi.fn(),
-    addProjectToNewChat: vi.fn(),
-    selectProjectForNewChat: vi.fn(),
-    setThinkingEffort: vi.fn(),
-    setSessionModelEntry: vi.fn(),
+    refreshProjects: vi.fn<() => Promise<void>>(),
+    addProjectToNewChat: vi.fn<() => Promise<void>>(),
+    selectProjectForNewChat: vi.fn<(project: WorkspaceProject) => void>(),
+    setThinkingEffort: vi.fn<(thinkingEffort: ThinkingSelection) => void>(),
+    setSessionModelEntry: vi.fn<(modelEntryId: string) => Promise<void>>(),
     composerFocusKey: 1,
-    startNewChat: vi.fn(),
-    selectConversation: vi.fn(),
-    renameConversation: vi.fn(),
-    deleteConversation: vi.fn(),
-    sendMessage: vi.fn(),
-    retryResponse: vi.fn(),
-    stopResponse: vi.fn()
+    startNewChat: vi.fn<() => void>(),
+    selectConversation:
+      vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
+    renameConversation: vi.fn<(conversationId: string, title: string) => void>(),
+    deleteConversation: vi.fn<(conversationId: string) => void>(),
+    sendMessage:
+      vi.fn<(content: Parameters<ChatWorkspace['sendMessage']>[0]) => Promise<boolean>>(),
+    retryResponse: vi.fn<() => void>(),
+    stopResponse: vi.fn<() => void>()
   }
 }
 
@@ -65,30 +69,37 @@ describe('ChatMain', () => {
           enabled: true
         }
       ],
-      selectedModelId: null
+      // SAFETY: the provider library is served with the model unselected, then selected.
+      selectedModelId: null as string | null
     }
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
-        chat: { getCapabilities: vi.fn().mockResolvedValue(null) },
+        chat: {
+          getCapabilities: vi
+            .fn<() => Promise<ModelReasoningCapabilities | null>>()
+            .mockResolvedValue(null)
+        },
         providers: {
           getLibrary: vi
-            .fn()
+            .fn<() => Promise<typeof library>>()
             .mockResolvedValueOnce(library)
             .mockResolvedValue({ ...library, selectedModelId: 'ollama:qwen3' }),
-          selectModel: vi.fn().mockResolvedValue('ollama:qwen3')
+          selectModel: vi
+            .fn<(modelId: string | null) => Promise<string | null>>()
+            .mockResolvedValue('ollama:qwen3')
         }
       }
     })
   })
 
-  it('keeps the stop control available while a response is reconnecting', () => {
+  it('user keeps the stop control when a response reconnects, then it stays visible', () => {
     render(<ChatMain workspace={createWorkspace()} />)
 
     expect(screen.getByRole('button', { name: 'Stop response' })).toBeVisible()
   })
 
-  it('persists a model selected from the composer on the active session', async () => {
+  it('user stores the chosen model when picking it from the composer, then it persists', async () => {
     const user = userEvent.setup()
     const workspace = createWorkspace()
 
@@ -101,7 +112,7 @@ describe('ChatMain', () => {
     await waitFor(() => expect(workspace.setSessionModelEntry).toHaveBeenCalledWith('ollama:qwen3'))
   })
 
-  it('turns off thinking when a newly selected model has no reasoning capabilities', async () => {
+  it('user turns thinking off when the model has no reasoning, then effort resets', async () => {
     const user = userEvent.setup()
     const workspace = createWorkspace()
 

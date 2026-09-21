@@ -15,7 +15,7 @@ import {
 } from '../../../components/primitives/command'
 
 describe('Command', () => {
-  it('renders command children inside its dialog', () => {
+  it('user sees the command input when the dialog opens, then its content renders', () => {
     render(
       <CommandDialog open>
         <CommandInput placeholder="Search commands" />
@@ -28,7 +28,7 @@ describe('Command', () => {
     expect(screen.getByPlaceholderText('Search commands')).toBeInTheDocument()
   })
 
-  it('filters commands by the query entered into its input', async () => {
+  it('user sees only matches when typing a query, then other items are filtered out', async () => {
     const user = userEvent.setup()
 
     render(
@@ -49,7 +49,7 @@ describe('Command', () => {
     expect(screen.queryByRole('option', { name: 'Light theme' })).not.toBeInTheDocument()
   })
 
-  it('reports the selected command value when confirmed from the keyboard', async () => {
+  it('user presses Enter when a command is highlighted, then it is selected', async () => {
     const user = userEvent.setup()
 
     function ThemeCommand() {

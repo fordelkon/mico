@@ -13,7 +13,8 @@ type TestNativeTheme = {
 }
 type PersistedPreferences = Record<string, string>
 
-const onNativeThemeUpdated = vi.fn()
+const onNativeThemeUpdated = vi.fn<(event: 'updated', listener: () => void) => void>()
+// SAFETY: jsdom/node lacks Electron's nativeTheme; stubbed at the PreferenceService constructor seam.
 const nativeTheme: TestNativeTheme = {
   on: onNativeThemeUpdated,
   shouldUseDarkColors: false,
@@ -43,7 +44,7 @@ describe('PreferenceService theme preferences', () => {
     nativeTheme.themeSource = 'system'
   })
 
-  it('migrates legacy code theme ids to appearance-specific Shiki themes', async () => {
+  it('user sees migrated Shiki themes when legacy ids persist, then each mode gets one', async () => {
     const { cleanup, service } = await initializeWithPreferences({
       appearancePreference: 'system',
       codeThemeDark: 'github',
@@ -64,7 +65,7 @@ describe('PreferenceService theme preferences', () => {
     }
   })
 
-  it('returns default preferences when the persisted theme object is invalid', async () => {
+  it('user gets default preferences when persisted data is invalid, then they apply', async () => {
     const { cleanup, service } = await initializeWithPreferences({
       appearancePreference: 'dark',
       codeThemeDark: 'not-a-theme'

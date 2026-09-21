@@ -21,8 +21,16 @@ function SidebarState() {
   return <output aria-label="Sidebar state">{state}</output>
 }
 
+function renderResizable(children: React.ReactNode) {
+  render(
+    <SidebarProvider resize={{ defaultWidth: 240, maxWidth: 320, minWidth: 180 }}>
+      {children}
+    </SidebarProvider>
+  )
+}
+
 describe('Sidebar', () => {
-  it('toggles the sidebar state from its trigger', async () => {
+  it('user clicks the trigger when the sidebar is open, then it collapses', async () => {
     const user = userEvent.setup()
 
     render(
@@ -32,14 +40,16 @@ describe('Sidebar', () => {
       </SidebarProvider>
     )
 
-    expect(screen.getByRole('status', { name: 'Sidebar state' })).toHaveTextContent('expanded')
+    const state = screen.getByRole('status', { name: 'Sidebar state' })
+
+    expect(state).toHaveTextContent('expanded')
 
     await user.click(screen.getByRole('button', { name: 'Toggle Sidebar' }))
 
-    expect(screen.getByRole('status', { name: 'Sidebar state' })).toHaveTextContent('collapsed')
+    expect(state).toHaveTextContent('collapsed')
   })
 
-  it('provides tooltip context to menu buttons', () => {
+  it('user sees the menu button when the sidebar provides a tooltip, then it renders', () => {
     render(
       <SidebarProvider defaultOpen={false}>
         <SidebarMenu>
@@ -53,12 +63,8 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: 'Home' })).toBeInTheDocument()
   })
 
-  it('clamps pointer resizing at the configured maximum', () => {
-    render(
-      <SidebarProvider resize={{ defaultWidth: 240, maxWidth: 320, minWidth: 180 }}>
-        <SidebarResizeHandle />
-      </SidebarProvider>
-    )
+  it('user drags the resize handle when past the max, then the width clamps at 320', () => {
+    renderResizable(<SidebarResizeHandle />)
 
     const resizeHandle = screen.getByRole('separator', { name: 'Resize Sidebar' })
 
@@ -70,13 +76,11 @@ describe('Sidebar', () => {
     fireEvent.pointerUp(resizeHandle, { pointerId: 7 })
   })
 
-  it('resizes by eight pixels from the keyboard', () => {
-    render(
-      <SidebarProvider resize={{ defaultWidth: 240, maxWidth: 320, minWidth: 180 }}>
-        <Sidebar>
-          <SidebarResizeHandle />
-        </Sidebar>
-      </SidebarProvider>
+  it('user presses ArrowRight when resizing, then the width grows by eight pixels', () => {
+    renderResizable(
+      <Sidebar>
+        <SidebarResizeHandle />
+      </Sidebar>
     )
 
     const resizeHandle = screen.getByRole('separator', { name: 'Resize Sidebar' })
@@ -86,16 +90,16 @@ describe('Sidebar', () => {
     expect(resizeHandle).toHaveAttribute('aria-valuenow', '248')
   })
 
-  it('removes resizing while collapsed and restores the remembered width', async () => {
+  it('user restores the sidebar when it was collapsed, then the width is remembered', async () => {
     const user = userEvent.setup()
 
-    render(
-      <SidebarProvider resize={{ defaultWidth: 240, maxWidth: 320, minWidth: 180 }}>
+    renderResizable(
+      <>
         <Sidebar>
           <SidebarResizeHandle />
         </Sidebar>
         <SidebarTrigger />
-      </SidebarProvider>
+      </>
     )
 
     fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize Sidebar' }), {

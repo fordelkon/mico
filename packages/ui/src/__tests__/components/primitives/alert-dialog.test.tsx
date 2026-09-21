@@ -17,7 +17,7 @@ import {
 } from '../../../components/primitives/alert-dialog'
 
 describe('AlertDialog', () => {
-  it('keeps a destructive action pending until the user confirms it', async () => {
+  it('user cancels the dialog when it is open, then nothing is deleted', async () => {
     const user = userEvent.setup()
     function DeleteAction() {
       const [deleted, setDeleted] = useState(false)
@@ -48,7 +48,7 @@ describe('AlertDialog', () => {
     expect(screen.getByText('Pending')).toBeVisible()
   })
 
-  it('runs the destructive action after confirmation', async () => {
+  it('user confirms the dialog when it is open, then the item is deleted', async () => {
     const user = userEvent.setup()
     function DeleteAction() {
       const [deleted, setDeleted] = useState(false)

@@ -9,7 +9,7 @@ async function runProviderTest(
 ) {
   const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response)
   const clock = [...timestamps]
-  const now = vi.fn(() => {
+  const now = vi.fn<() => number>(() => {
     const timestamp = clock.shift()
     if (timestamp === undefined) throw new Error('Test clock was read more times than expected.')
     return timestamp
@@ -20,7 +20,7 @@ async function runProviderTest(
 }
 
 describe('testChatProvider', () => {
-  it('returns Ollama native output metrics alongside measured request timing', async () => {
+  it('user gets Ollama metrics when a chat runs, then throughput uses native counts', async () => {
     const { result } = await runProviderTest(
       { provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'qwen3' },
       new Response(
@@ -37,7 +37,7 @@ describe('testChatProvider', () => {
     })
   })
 
-  it('returns duration for a compatible provider that does not report token statistics', async () => {
+  it('user gets only a duration when usage is missing, then no throughput appears', async () => {
     const { result } = await runProviderTest(
       { provider: 'openai-compatible', baseUrl: 'http://localhost:8000', modelId: 'model' },
       new Response('data: [DONE]\n\n'),
@@ -47,7 +47,7 @@ describe('testChatProvider', () => {
     expect(result).toEqual({ durationMs: 200 })
   })
 
-  it('calculates OpenAI Responses throughput from completed-event usage', async () => {
+  it('user gets Responses throughput when usage is reported, then tokens come from it', async () => {
     const { result } = await runProviderTest(
       {
         provider: 'openai-responses',
@@ -69,7 +69,7 @@ describe('testChatProvider', () => {
     })
   })
 
-  it('calculates OpenAI-compatible throughput from streamed usage', async () => {
+  it('user gets compatible throughput when usage streams, then the request opts in', async () => {
     const { fetch, result } = await runProviderTest(
       { provider: 'openai-compatible', baseUrl: 'http://localhost:8000', modelId: 'model' },
       new Response(
@@ -91,7 +91,7 @@ describe('testChatProvider', () => {
     })
   })
 
-  it('calculates Anthropic-compatible throughput from message usage', async () => {
+  it('user gets Anthropic throughput when deltas report usage, then tokens count', async () => {
     const { result } = await runProviderTest(
       {
         provider: 'anthropic-compatible',

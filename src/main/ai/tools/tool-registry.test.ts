@@ -1,27 +1,19 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { ToolRegistry } from './tool-registry'
+import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('ToolRegistry', () => {
-  const temporaryPaths: string[] = []
-
-  afterEach(async () => {
-    await Promise.all(
-      temporaryPaths.splice(0).map((path) => rm(path, { force: true, recursive: true }))
-    )
-  })
+  afterEach(() => removeTemporaryPaths())
 
   async function createRegistry(): Promise<ToolRegistry> {
-    const cwd = await mkdtemp(join(tmpdir(), 'mico-tool-registry-'))
-    temporaryPaths.push(cwd)
-    return ToolRegistry.forWorkspace(cwd)
+    return ToolRegistry.forWorkspace(await createTemporaryWorkspace('mico-tool-registry-'))
   }
 
-  it('returns an error result for a tool the workspace does not expose', async () => {
+  it('user sees an error result when calling an unknown tool, then nothing executes', async () => {
     const result = await (await createRegistry()).execute(
       { toolCallId: 'call-1', toolName: 'unknown', input: {} },
       new AbortController().signal
@@ -36,7 +28,7 @@ describe('ToolRegistry', () => {
     })
   })
 
-  it('returns an error result when a tool call fails schema validation', async () => {
+  it('user sees an error when tool input fails validation, then the tool never runs', async () => {
     const result = await (await createRegistry()).execute(
       { toolCallId: 'call-2', toolName: 'read', input: { path: 1 } },
       new AbortController().signal
@@ -51,7 +43,7 @@ describe('ToolRegistry', () => {
     expect(result.output).toContain('Invalid tool input.')
   })
 
-  it('returns a tool error result when execution fails', async () => {
+  it('user sees a tool error when execution fails, then the failure is captured', async () => {
     const registry = await createRegistry()
 
     const result = await registry.execute(
@@ -68,7 +60,7 @@ describe('ToolRegistry', () => {
     expect(result.output).toContain('ENOENT')
   })
 
-  it('does not overlap an exclusive command with a following write', async () => {
+  it('user gets ordered runs when exclusive and write tools mix, then none overlap', async () => {
     const registry = await createRegistry()
     const results = await registry.executeBatch(
       [
@@ -92,9 +84,8 @@ describe('ToolRegistry', () => {
     expect(results.map((result) => result.isError)).toEqual([false, false])
   })
 
-  it('associates live tool output with the originating call without changing its final result', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'mico-tool-registry-'))
-    temporaryPaths.push(cwd)
+  it('user sees live output attributed when a tool streams, then the result is intact', async () => {
+    const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'preview.txt'), 'preview text')
     const deltas: unknown[] = []
     const result = await ToolRegistry.forWorkspace(cwd).execute(
@@ -114,7 +105,7 @@ describe('ToolRegistry', () => {
     expect(result).toMatchObject({ isError: false, output: 'preview text' })
   })
 
-  it('splits a large preview into bounded deltas without dropping content', async () => {
+  it('user gets bounded deltas when a preview is large, then no content is dropped', async () => {
     const registry = await createRegistry()
     const content = 'x'.repeat(20 * 1024)
     const deltas: string[] = []

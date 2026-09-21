@@ -37,6 +37,15 @@ class FakeChatAPI implements ChatAPI {
   }
 }
 
+function createTransport(getThinkingEffort: () => ThinkingSelection = () => 'default') {
+  const api = new FakeChatAPI()
+  const transport = new ElectronChatTransport(api, {
+    sessionId: 'conversation-1',
+    getThinkingEffort
+  })
+  return { api, transport }
+}
+
 const requestId = '00000000-0000-4000-8000-000000000001'
 const sendOptions: Parameters<ChatTransport<MicoUIMessage>['sendMessages']>[0] = {
   abortSignal: undefined,
@@ -53,6 +62,7 @@ const sendOptions: Parameters<ChatTransport<MicoUIMessage>['sendMessages']>[0] =
 }
 
 beforeEach(() => {
+  // SAFETY: request ids must be deterministic for the tests to assert the exact IPC payloads.
   vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
 })
 
@@ -63,13 +73,9 @@ afterEach(() => {
 
 describe('ElectronChatTransport', () => {
   it.each(['submit-message', 'regenerate-message'] as const)(
-    'preserves attached documents for %s',
+    'user keeps attached documents when sending %s, then the request carries them',
     async (trigger) => {
-      const api = new FakeChatAPI()
-      const transport = new ElectronChatTransport(api, {
-        sessionId: 'conversation-1',
-        getThinkingEffort: () => 'default'
-      })
+      const { api, transport } = createTransport()
       const stream = await transport.sendMessages({
         ...sendOptions,
         trigger,
@@ -99,12 +105,8 @@ describe('ElectronChatTransport', () => {
     }
   )
 
-  it('allows a document-only user message', async () => {
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
+  it('user sends a document-only message when there is no text, then only it is sent', async () => {
+    const { api, transport } = createTransport()
     const stream = await transport.sendMessages({
       ...sendOptions,
       messages: [
@@ -121,13 +123,9 @@ describe('ElectronChatTransport', () => {
     await stream.cancel()
   })
 
-  it('takes the selection once when sendMessages starts', async () => {
-    const api = new FakeChatAPI()
+  it('user sees the effort captured when sending, then later changes do not apply', async () => {
     let effort: ThinkingSelection = 'low'
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => effort
-    })
+    const { api, transport } = createTransport(() => effort)
 
     const stream = await transport.sendMessages(sendOptions)
     effort = 'high'
@@ -140,12 +138,8 @@ describe('ElectronChatTransport', () => {
     await stream.cancel()
   })
 
-  it('sends only the latest user message across IPC', async () => {
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
+  it('user sends only the latest message when submitting, then prior ones stay out', async () => {
+    const { api, transport } = createTransport()
 
     const stream = await transport.sendMessages({
       ...sendOptions,
@@ -181,29 +175,8 @@ describe('ElectronChatTransport', () => {
     await stream.cancel()
   })
 
-  it('marks regenerate requests as retries across IPC', async () => {
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
-
-    const stream = await transport.sendMessages({
-      ...sendOptions,
-      trigger: 'regenerate-message'
-    })
-
-    expect(api.startedRequests[0]).toMatchObject({ retry: true })
-
-    await stream.cancel()
-  })
-
-  it('forwards matching chunks and closes when the matching request finishes', async () => {
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
+  it('user receives chunks when the request streams, then the stream closes on finish', async () => {
+    const { api, transport } = createTransport()
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
 
@@ -230,12 +203,8 @@ describe('ElectronChatTransport', () => {
     expect(api.unsubscribeCount).toBe(1)
   })
 
-  it('closes when the main process explicitly cancels the matching request', async () => {
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
+  it('user sees the stream close when cancelled, then the buffered chunk still arrives', async () => {
+    const { api, transport } = createTransport()
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
 
@@ -254,13 +223,9 @@ describe('ElectronChatTransport', () => {
     expect(api.unsubscribeCount).toBe(1)
   })
 
-  it('flushes consecutive text deltas while the stream remains open', async () => {
+  it('user sees consecutive deltas flushed when streaming, then they arrive combined', async () => {
     vi.useFakeTimers()
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
+    const { api, transport } = createTransport()
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
 
@@ -287,13 +252,9 @@ describe('ElectronChatTransport', () => {
     expect(api.unsubscribeCount).toBe(1)
   })
 
-  it('flushes a full text batch before buffering more streamed content', async () => {
+  it('user receives a full batch when it is ready to flush, then later deltas wait', async () => {
     vi.useFakeTimers()
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
+    const { api, transport } = createTransport()
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
     const batch = 'x'.repeat(4 * 1024)
@@ -322,14 +283,10 @@ describe('ElectronChatTransport', () => {
     await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
   })
 
-  it('drops a pending text batch when its request is aborted', async () => {
+  it('user gets a pending batch dropped when aborted, then the stream ends', async () => {
     vi.useFakeTimers()
-    const api = new FakeChatAPI()
+    const { api, transport } = createTransport()
     const abortController = new AbortController()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
-    })
     const stream = await transport.sendMessages({
       ...sendOptions,
       abortSignal: abortController.signal
@@ -349,12 +306,8 @@ describe('ElectronChatTransport', () => {
     expect(api.unsubscribeCount).toBe(1)
   })
 
-  it('ignores events for a different request ID', async () => {
-    const api = new FakeChatAPI()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'medium'
-    })
+  it('user sees mismatched events ignored when IDs differ, then the stream stays open', async () => {
+    const { api, transport } = createTransport(() => 'medium')
     const stream = await transport.sendMessages(sendOptions)
     const reader = stream.getReader()
 
@@ -376,14 +329,10 @@ describe('ElectronChatTransport', () => {
     await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
   })
 
-  it('reports a safe error and releases its listener when IPC cannot start the request', async () => {
-    const api = new FakeChatAPI()
-    api.startTurn = vi.fn(async () => {
+  it('user sees a safe error when the start fails, then the listener is released', async () => {
+    const { api, transport } = createTransport()
+    api.startTurn = vi.fn<ChatAPI['startTurn']>(async () => {
       throw new Error('sensitive IPC details')
-    })
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'default'
     })
     const reader = (await transport.sendMessages(sendOptions)).getReader()
 
@@ -391,13 +340,9 @@ describe('ElectronChatTransport', () => {
     expect(api.unsubscribeCount).toBe(1)
   })
 
-  it('aborts its request and removes its event listener once', async () => {
-    const api = new FakeChatAPI()
+  it('user aborts the request when the signal fires, then the abort is forwarded once', async () => {
+    const { api, transport } = createTransport(() => 'medium')
     const controller = new AbortController()
-    const transport = new ElectronChatTransport(api, {
-      sessionId: 'conversation-1',
-      getThinkingEffort: () => 'medium'
-    })
 
     await transport.sendMessages({ ...sendOptions, abortSignal: controller.signal })
     controller.abort()

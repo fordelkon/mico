@@ -6,13 +6,14 @@ import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
+import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { useChatWorkspaceState } from './use-chat-workspace-state'
 
 class FakeChatAPI implements ChatAPI {
   readonly startedRequests: Parameters<ChatAPI['startTurn']>[0][] = []
   readonly listeners = new Set<Parameters<ChatAPI['onTurnEvent']>[0]>()
   readonly titleListeners = new Set<(update: { sessionId: string; title: string }) => void>()
-  readonly createSession = vi.fn(async (_input: { title: string }) => ({
+  readonly createSession = vi.fn<SessionsAPI['create']>(async (_input: { title: string }) => ({
     id: 'session-new',
     title: 'New chat',
     defaultProfile: null,
@@ -20,7 +21,7 @@ class FakeChatAPI implements ChatAPI {
     updatedAt: 1,
     lastActivityAt: 1
   }))
-  readonly addProjectFromDialog = vi.fn(async () => ({
+  readonly addProjectFromDialog = vi.fn<WorkspacesAPI['addFromDialog']>(async () => ({
     id: 'project-1',
     name: 'Project one',
     rootPath: '/projects/one',
@@ -95,23 +96,18 @@ function exposeApi(chat: FakeChatAPI): void {
       sessions: chat.sessions,
       workspaces: {
         addFromDialog: () => chat.addProjectFromDialog(),
-        archive: async (): Promise<void> => {},
-        list: async () => chat.workspaceProjects,
-        rename: async () => ({
-          id: 'project-1',
-          name: 'Project one',
-          rootPath: '/projects/one',
-          isDefault: false
-        }),
-        setDefault: async () => ({
-          id: 'project-1',
-          name: 'Project one',
-          rootPath: '/projects/one',
-          isDefault: true
-        })
+        list: async () => chat.workspaceProjects
       }
     }
   })
+}
+
+function renderWorkspaceState(configure?: (api: FakeChatAPI) => void) {
+  const api = new FakeChatAPI()
+  configure?.(api)
+  exposeApi(api)
+  const rendered = renderHook(() => useChatWorkspaceState())
+  return { api, ...rendered }
 }
 
 const originalApi = Object.getOwnPropertyDescriptor(window, 'api')
@@ -123,19 +119,18 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
-  it('selects the default workspace for a new chat and persists that selection', async () => {
-    const api = new FakeChatAPI()
-    api.workspaceProjects = [
-      {
-        id: 'project-1',
-        name: 'Archived never shown',
-        rootPath: '/projects/one',
-        isDefault: false
-      },
-      { id: 'project-2', name: 'Default workspace', rootPath: '/projects/two', isDefault: true }
-    ]
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user starts new chats in the default workspace when sending, then it is used', async () => {
+    const { api, result } = renderWorkspaceState((api) => {
+      api.workspaceProjects = [
+        {
+          id: 'project-1',
+          name: 'Archived never shown',
+          rootPath: '/projects/one',
+          isDefault: false
+        },
+        { id: 'project-2', name: 'Default workspace', rootPath: '/projects/two', isDefault: true }
+      ]
+    })
 
     await waitFor(() =>
       expect(result.current.activeProject).toMatchObject({
@@ -151,10 +146,8 @@ describe('useChatWorkspaceState', () => {
     expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat', projectId: 'project-2' })
   })
 
-  it('reports whether a turn was accepted and declines another turn while responding', async () => {
-    const api = new FakeChatAPI()
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user cannot send another turn when one is responding, then the send is declined', async () => {
+    const { api, result } = renderWorkspaceState()
     const content = {
       text: '',
       documents: [{ type: 'document' as const, name: 'index.ts', text: 'export {}' }]
@@ -170,17 +163,16 @@ describe('useChatWorkspaceState', () => {
     expect(api.startedRequests).toHaveLength(1)
   })
 
-  it('propagates session creation failure and permits retrying the unaccepted turn', async () => {
-    const api = new FakeChatAPI()
+  it('user can resend when session creation fails, then the retry succeeds', async () => {
     let failCreation: ((reason: Error) => void) | undefined
-    api.createSession.mockImplementationOnce(
-      () =>
-        new Promise((_resolve, reject) => {
-          failCreation = reject
-        })
-    )
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+    const { api, result } = renderWorkspaceState((api) => {
+      api.createSession.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failCreation = reject
+          })
+      )
+    })
     const content = {
       text: 'Review this file',
       documents: [{ type: 'document' as const, name: 'index.ts', text: 'export {}' }]
@@ -188,11 +180,10 @@ describe('useChatWorkspaceState', () => {
 
     const pending = result.current.sendMessage(content)
     expect(pending).toBeInstanceOf(Promise)
-    const rejection = expect(pending).rejects.toThrow('Session storage unavailable')
     await act(async () => {
       expect(await result.current.sendMessage(content)).toBe(false)
       failCreation?.(new Error('Session storage unavailable'))
-      await rejection
+      await expect(pending).rejects.toThrow('Session storage unavailable')
     })
     expect(result.current.activeConversation).toBeNull()
     expect(api.startedRequests).toEqual([])
@@ -209,15 +200,11 @@ describe('useChatWorkspaceState', () => {
     { existing: true, text: '' },
     { existing: true, text: 'Review this code' }
   ])(
-    'sends documents with text "$text" in an existing=$existing session',
+    'user sends documents with text "$text" when in an existing=$existing session, then the request carries them',
     async ({ existing, text }) => {
-      const api = new FakeChatAPI()
-      exposeApi(api)
-      const { result } = renderHook(() => useChatWorkspaceState())
-      if (existing) {
-        act(() => result.current.selectConversation('session-1'))
-        await waitFor(() => expect(result.current.activeChat).not.toBeNull())
-      }
+      const { api, result } = renderWorkspaceState()
+      if (existing) act(() => result.current.selectConversation('session-1'))
+      await waitFor(() => expect(Boolean(result.current.activeChat)).toBe(existing))
 
       await act(async () => {
         expect(
@@ -245,10 +232,8 @@ describe('useChatWorkspaceState', () => {
     }
   )
 
-  it('does not create a session when both text and documents are empty', async () => {
-    const api = new FakeChatAPI()
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user sends nothing when text and documents are empty, then no session is created', async () => {
+    const { api, result } = renderWorkspaceState()
 
     await act(async () => result.current.sendMessage({ text: '  ', documents: [] }))
 
@@ -256,21 +241,20 @@ describe('useChatWorkspaceState', () => {
     expect(api.startedRequests).toEqual([])
   })
 
-  it('preserves persisted documents when regenerating a loaded session', async () => {
-    const api = new FakeChatAPI()
-    const loadSession = api.sessions.load
-    api.sessions.load = async (sessionId) => ({
-      ...(await loadSession(sessionId)),
-      messages: [
-        {
-          role: 'user',
-          parts: [{ type: 'document', name: 'index.ts', text: 'export {}' }]
-        },
-        { role: 'assistant', parts: [{ type: 'text', text: 'Saved answer' }] }
-      ]
+  it('user keeps documents when regenerating, then the retry sends the original', async () => {
+    const { api, result } = renderWorkspaceState((api) => {
+      const loadSession = api.sessions.load
+      api.sessions.load = async (sessionId) => ({
+        ...(await loadSession(sessionId)),
+        messages: [
+          {
+            role: 'user',
+            parts: [{ type: 'document', name: 'index.ts', text: 'export {}' }]
+          },
+          { role: 'assistant', parts: [{ type: 'text', text: 'Saved answer' }] }
+        ]
+      })
     })
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
     act(() => result.current.selectConversation('session-1'))
     await waitFor(() => expect(result.current.activeChat).not.toBeNull())
 
@@ -289,35 +273,34 @@ describe('useChatWorkspaceState', () => {
     })
   })
 
-  it('hydrates persisted tool traces into completed tool chips', async () => {
-    const api = new FakeChatAPI()
-    api.sessions.load = async () => ({
-      id: 'session-1',
-      title: 'Saved chat',
-      defaultProfile: null,
-      createdAt: 1,
-      updatedAt: 2,
-      lastActivityAt: 2,
-      messages: [
-        { role: 'user' as const, parts: [{ type: 'text' as const, text: 'Read the file' }] },
-        {
-          role: 'assistant' as const,
-          parts: [
-            {
-              type: 'tool-trace' as const,
-              toolCallId: 'call-1',
-              toolName: 'read',
-              input: { path: 'package.json' },
-              state: 'output-available' as const,
-              output: 'Read 1 line.'
-            },
-            { type: 'text' as const, text: 'Done' }
-          ]
-        }
-      ]
+  it('user sees tool traces as chips when opening a saved session, then they appear', async () => {
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.load = async () => ({
+        id: 'session-1',
+        title: 'Saved chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2,
+        messages: [
+          { role: 'user' as const, parts: [{ type: 'text' as const, text: 'Read the file' }] },
+          {
+            role: 'assistant' as const,
+            parts: [
+              {
+                type: 'tool-trace' as const,
+                toolCallId: 'call-1',
+                toolName: 'read',
+                input: { path: 'package.json' },
+                state: 'output-available' as const,
+                output: 'Read 1 line.'
+              },
+              { type: 'text' as const, text: 'Done' }
+            ]
+          }
+        ]
+      })
     })
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
 
     act(() => result.current.selectConversation('session-1'))
 
@@ -336,7 +319,7 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('keeps streamed transcript updates out of workspace renders', async () => {
+  it('user sees the streamed text arrive when deltas stream, then the workspace stays stable', async () => {
     vi.useFakeTimers()
     const api = new FakeChatAPI()
     exposeApi(api)
@@ -394,15 +377,14 @@ describe('useChatWorkspaceState', () => {
     expect(workspaceRenderCount).toBe(rendersBeforeTextDelta)
   })
 
-  it('resets a selection that is absent from loaded capabilities', async () => {
-    const api = new FakeChatAPI()
+  it('user sees the effort reset when capabilities exclude it, then defaults are used', async () => {
     let resolveCapabilities: (capabilities: ModelReasoningCapabilities | null) => void
     const capabilities = new Promise<ModelReasoningCapabilities | null>((resolve) => {
       resolveCapabilities = resolve
     })
-    api.getCapabilities = () => capabilities
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+    const { result } = renderWorkspaceState((api) => {
+      api.getCapabilities = () => capabilities
+    })
 
     act(() => result.current.setThinkingEffort('high'))
     await act(async () => {
@@ -417,13 +399,12 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.thinkingEffort).toBe('low')
   })
 
-  it('uses default when capability loading fails without blocking a send', async () => {
-    const api = new FakeChatAPI()
-    api.getCapabilities = async () => {
-      throw new Error('offline')
-    }
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user can still send when capabilities fail to load, then the default is used', async () => {
+    const { api, result } = renderWorkspaceState((api) => {
+      api.getCapabilities = async () => {
+        throw new Error('offline')
+      }
+    })
 
     await waitFor(() => expect(result.current.reasoningCapabilities).toBeNull())
 
@@ -431,10 +412,8 @@ describe('useChatWorkspaceState', () => {
     await waitFor(() => expect(api.startedRequests[0]?.thinkingEffort).toBe('default'))
   })
 
-  it('uses the persisted session ID when sending the first message', async () => {
-    const api = new FakeChatAPI()
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user starts a new session when no chat is selected, then the message uses it', async () => {
+    const { api, result } = renderWorkspaceState()
 
     act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
 
@@ -444,18 +423,17 @@ describe('useChatWorkspaceState', () => {
     expect(api.startedRequests[0]?.sessionId).toBe('session-new')
   })
 
-  it('binds a project selected in an empty composer only when its first message is sent', async () => {
-    const api = new FakeChatAPI()
-    api.workspaceProjects = [
-      {
-        id: 'project-default',
-        name: 'Default workspace',
-        rootPath: '/projects/default',
-        isDefault: true
-      }
-    ]
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user binds a pending project when sending the first message, then it activates', async () => {
+    const { api, result } = renderWorkspaceState((api) => {
+      api.workspaceProjects = [
+        {
+          id: 'project-default',
+          name: 'Default workspace',
+          rootPath: '/projects/default',
+          isDefault: true
+        }
+      ]
+    })
 
     await waitFor(() => expect(result.current.activeProject?.id).toBe('project-default'))
 
@@ -477,21 +455,20 @@ describe('useChatWorkspaceState', () => {
     })
   })
 
-  it('restores a persisted workspace when reopening its conversation', async () => {
-    const api = new FakeChatAPI()
-    api.sessions.load = async () => ({
-      id: 'session-1',
-      title: 'Saved chat',
-      projectId: 'project-1',
-      cwd: '/projects/one',
-      defaultProfile: null,
-      createdAt: 1,
-      updatedAt: 2,
-      lastActivityAt: 2,
-      messages: []
+  it('user sees its workspace restored when reopening a chat, then the project matches', async () => {
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.load = async () => ({
+        id: 'session-1',
+        title: 'Saved chat',
+        projectId: 'project-1',
+        cwd: '/projects/one',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 2,
+        lastActivityAt: 2,
+        messages: []
+      })
     })
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
 
     act(() => result.current.selectConversation('session-1'))
 
@@ -504,19 +481,18 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('tracks concurrent responses independently when starting a new chat', async () => {
-    const api = new FakeChatAPI()
+  it('user sees independent responses when starting a new chat, then each ends alone', async () => {
     const sessionIds = ['session-one', 'session-two']
-    api.createSession.mockImplementation(async () => ({
-      id: sessionIds.shift() ?? 'unexpected-session',
-      title: 'New chat',
-      defaultProfile: null,
-      createdAt: 1,
-      updatedAt: 1,
-      lastActivityAt: 1
-    }))
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+    const { api, result } = renderWorkspaceState((api) => {
+      api.createSession.mockImplementation(async () => ({
+        id: sessionIds.shift() ?? 'unexpected-session',
+        title: 'New chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 1,
+        lastActivityAt: 1
+      }))
+    })
 
     act(() => void result.current.sendMessage({ text: 'First message', documents: [] }))
     await waitFor(() =>
@@ -539,10 +515,8 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('keeps the responding conversation set stable when only response status changes', async () => {
-    const api = new FakeChatAPI()
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user sees a stable sidebar when streaming starts, then no extra work runs per stream tick', async () => {
+    const { api, result } = renderWorkspaceState()
 
     act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
@@ -560,11 +534,9 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.respondingConversationIds).toBe(respondingConversationIds)
   })
 
-  it('batches rapid streamed text updates before committing the transcript', async () => {
+  it('user sees rapid text batched when updates outpace the throttle, then it commits', async () => {
     vi.useFakeTimers()
-    const api = new FakeChatAPI()
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+    const { api, result } = renderWorkspaceState()
 
     act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
     await act(async () => {
@@ -623,10 +595,8 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('keeps a provider error on its conversation and clears it when the next send begins', async () => {
-    const api = new FakeChatAPI()
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user sees a provider error scoped to its chat, then it clears when resending', async () => {
+    const { api, result } = renderWorkspaceState()
 
     act(() => void result.current.sendMessage({ text: 'First message', documents: [] }))
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
@@ -653,20 +623,19 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.response.status).not.toBe('error')
   })
 
-  it('hydrates a selected saved session with its persisted messages', async () => {
-    const api = new FakeChatAPI()
-    api.sessions.list = async () => [
-      {
-        id: 'session-1',
-        title: 'Saved chat',
-        defaultProfile: null,
-        createdAt: 1,
-        updatedAt: 2,
-        lastActivityAt: 2
-      }
-    ]
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user sees messages restored when selecting a chat, then the transcript matches', async () => {
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.list = async () => [
+        {
+          id: 'session-1',
+          title: 'Saved chat',
+          defaultProfile: null,
+          createdAt: 1,
+          updatedAt: 2,
+          lastActivityAt: 2
+        }
+      ]
+    })
 
     await waitFor(() =>
       expect(result.current.conversations).toEqual([{ id: 'session-1', title: 'Saved chat' }])
@@ -687,41 +656,35 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('restores the cached session model selection after opening a new chat', async () => {
-    const api = new FakeChatAPI()
-    api.sessions.list = async () => [
-      {
+  it('user sees the model selection return when reopening a chat, then effort returns', async () => {
+    const savedProfile = {
+      modelEntryId: 'ollama:qwen3',
+      providerId: 'ollama',
+      modelId: 'qwen3:8b',
+      thinkingEffort: 'high' as const,
+      configurationDigest: 'saved-configuration'
+    }
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.list = async () => [
+        {
+          id: 'session-1',
+          title: 'Saved chat',
+          defaultProfile: savedProfile,
+          createdAt: 1,
+          updatedAt: 2,
+          lastActivityAt: 2
+        }
+      ]
+      api.sessions.load = async () => ({
         id: 'session-1',
         title: 'Saved chat',
-        defaultProfile: {
-          modelEntryId: 'ollama:qwen3',
-          providerId: 'ollama',
-          modelId: 'qwen3:8b',
-          thinkingEffort: 'high',
-          configurationDigest: 'saved-configuration'
-        },
+        defaultProfile: savedProfile,
         createdAt: 1,
         updatedAt: 2,
-        lastActivityAt: 2
-      }
-    ]
-    api.sessions.load = async () => ({
-      id: 'session-1',
-      title: 'Saved chat',
-      defaultProfile: {
-        modelEntryId: 'ollama:qwen3',
-        providerId: 'ollama',
-        modelId: 'qwen3:8b',
-        thinkingEffort: 'high',
-        configurationDigest: 'saved-configuration'
-      },
-      createdAt: 1,
-      updatedAt: 2,
-      lastActivityAt: 2,
-      messages: []
+        lastActivityAt: 2,
+        messages: []
+      })
     })
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
 
     await waitFor(() => expect(result.current.conversations).toHaveLength(1))
     act(() => result.current.selectConversation('session-1'))
@@ -734,29 +697,30 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.thinkingEffort).toBe('high')
   })
 
-  it('persists a manual conversation rename before updating the sidebar title', async () => {
-    const api = new FakeChatAPI()
-    const rename = vi.fn(async ({ sessionId, title }: { sessionId: string; title: string }) => ({
-      id: sessionId,
-      title,
-      defaultProfile: null,
-      createdAt: 1,
-      updatedAt: 3,
-      lastActivityAt: 2
-    }))
-    api.sessions.rename = rename
-    api.sessions.list = async () => [
-      {
-        id: 'session-1',
-        title: 'Saved chat',
+  it('user sees a manual rename persisted when renaming, then the title updates', async () => {
+    const rename = vi.fn<SessionsAPI['rename']>(
+      async ({ sessionId, title }: { sessionId: string; title: string }) => ({
+        id: sessionId,
+        title,
         defaultProfile: null,
         createdAt: 1,
-        updatedAt: 2,
+        updatedAt: 3,
         lastActivityAt: 2
-      }
-    ]
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+      })
+    )
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.rename = rename
+      api.sessions.list = async () => [
+        {
+          id: 'session-1',
+          title: 'Saved chat',
+          defaultProfile: null,
+          createdAt: 1,
+          updatedAt: 2,
+          lastActivityAt: 2
+        }
+      ]
+    })
 
     await waitFor(() => expect(result.current.conversations).toHaveLength(1))
     act(() => result.current.renameConversation('session-1', 'Renamed chat'))
@@ -769,23 +733,24 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('updates the sidebar when the main process generates a conversation title', async () => {
-    const api = new FakeChatAPI()
-    api.sessions.list = async () => [
-      {
-        id: 'session-1',
-        title: 'New chat',
-        defaultProfile: null,
-        createdAt: 1,
-        updatedAt: 2,
-        lastActivityAt: 2
-      }
-    ]
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user sees the title update when a title is generated, then it appears', async () => {
+    const { api, result } = renderWorkspaceState((api) => {
+      api.sessions.list = async () => [
+        {
+          id: 'session-1',
+          title: 'New chat',
+          defaultProfile: null,
+          createdAt: 1,
+          updatedAt: 2,
+          lastActivityAt: 2
+        }
+      ]
+    })
 
     await waitFor(() => expect(result.current.conversations).toHaveLength(1))
-    act(() => api.emitTitleUpdated({ sessionId: 'session-1', title: 'Plan release notes' }))
+    act(() => {
+      api.emitTitleUpdated({ sessionId: 'session-1', title: 'Plan release notes' })
+    })
 
     await waitFor(() =>
       expect(result.current.conversations).toEqual([
@@ -794,22 +759,21 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('permanently deletes a persisted session after the delete request succeeds', async () => {
-    const api = new FakeChatAPI()
-    const remove = vi.fn(async (): Promise<void> => {})
-    api.sessions.delete = remove
-    api.sessions.list = async () => [
-      {
-        id: 'session-1',
-        title: 'Saved chat',
-        defaultProfile: null,
-        createdAt: 1,
-        updatedAt: 2,
-        lastActivityAt: 2
-      }
-    ]
-    exposeApi(api)
-    const { result } = renderHook(() => useChatWorkspaceState())
+  it('user permanently deletes a session when requested, then it leaves the sidebar', async () => {
+    const remove = vi.fn<SessionsAPI['delete']>(async (): Promise<void> => {})
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.delete = remove
+      api.sessions.list = async () => [
+        {
+          id: 'session-1',
+          title: 'Saved chat',
+          defaultProfile: null,
+          createdAt: 1,
+          updatedAt: 2,
+          lastActivityAt: 2
+        }
+      ]
+    })
 
     await waitFor(() => expect(result.current.conversations).toHaveLength(1))
     act(() => result.current.deleteConversation('session-1'))

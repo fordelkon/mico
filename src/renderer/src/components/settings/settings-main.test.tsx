@@ -1,8 +1,11 @@
 import '@testing-library/jest-dom/vitest'
 
 import type { ProviderLibrary as PersistedProviderLibrary } from '@shared/data/schemas/provider'
+import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
+import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { UserEvent } from '@testing-library/user-event'
 import * as React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -12,12 +15,58 @@ import {
 } from './providers/provider-library'
 import { SettingsMain } from './settings-main'
 
+type CustomProvider = PersistedProviderLibrary['customProviders'][number]
+
+const exampleAiCustomProvider: CustomProvider = {
+  apiFormat: 'openai-compatible',
+  baseUrl: 'https://api.example.com/v1',
+  enabled: true,
+  headers: {},
+  icon: 'cloud',
+  id: 'example-ai',
+  name: 'Example AI',
+  useMaxCompletionTokens: false
+}
+
 function renderSettings(): void {
   render(
     <ProviderLibraryProvider>
       <SettingsMain />
     </ProviderLibraryProvider>
   )
+}
+
+function mockLibrary(selectedProviderId: string | null): void {
+  providerApi.getLibrary.mockResolvedValueOnce({
+    configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
+    customProviders: [],
+    enabledProviderIds: ['ollama'],
+    models: [],
+    selectedModelId: null,
+    selectedProviderId
+  })
+}
+
+function mockAddExampleProvider(): void {
+  providerApi.addCustomProvider.mockImplementation(async (provider) => {
+    const saved = {
+      ...provider,
+      apiKey: 'secret',
+      headers: { 'X-Client': 'Mico' },
+      id: 'example-ai',
+      useMaxCompletionTokens: true
+    }
+    persistedLibrary = { ...persistedLibrary, customProviders: [saved] }
+    return saved
+  })
+}
+
+async function addExampleAiProvider(user: UserEvent): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
+  const dialog = screen.getByRole('dialog', { name: 'Add custom provider' })
+  await user.type(within(dialog).getByLabelText('Provider name'), 'Example AI')
+  await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.example.com/v1')
+  await user.click(within(dialog).getByRole('button', { name: 'Add Provider' }))
 }
 
 function ActionOnlyConsumer({ onRender }: { onRender: () => void }): React.JSX.Element {
@@ -36,23 +85,23 @@ async function waitForOllama(): Promise<void> {
 }
 
 const providerApi = {
-  addCustomProvider: vi.fn(),
-  addModel: vi.fn(),
-  discoverModels: vi.fn(),
-  getLibrary: vi.fn(),
-  saveLibrary: vi.fn(),
-  importModel: vi.fn(),
-  removeCustomProvider: vi.fn(),
-  removeModel: vi.fn(),
-  saveConfiguration: vi.fn(),
-  selectProvider: vi.fn(),
-  setModelEnabled: vi.fn(),
-  syncModels: vi.fn(),
-  testModel: vi.fn(),
-  updateCustomProvider: vi.fn()
+  addCustomProvider: vi.fn<ProvidersAPI['addCustomProvider']>(),
+  addModel: vi.fn<ProvidersAPI['addModel']>(),
+  discoverModels: vi.fn<ProvidersAPI['discoverModels']>(),
+  getLibrary: vi.fn<ProvidersAPI['getLibrary']>(),
+  saveLibrary: vi.fn<ProvidersAPI['saveLibrary']>(),
+  importModel: vi.fn<ProvidersAPI['importModel']>(),
+  removeCustomProvider: vi.fn<ProvidersAPI['removeCustomProvider']>(),
+  removeModel: vi.fn<ProvidersAPI['removeModel']>(),
+  saveConfiguration: vi.fn<ProvidersAPI['saveConfiguration']>(),
+  selectProvider: vi.fn<ProvidersAPI['selectProvider']>(),
+  setModelEnabled: vi.fn<ProvidersAPI['setModelEnabled']>(),
+  syncModels: vi.fn<ProvidersAPI['syncModels']>(),
+  testModel: vi.fn<ProvidersAPI['testModel']>(),
+  updateCustomProvider: vi.fn<ProvidersAPI['updateCustomProvider']>()
 }
 const windowControlsApi = {
-  onProviderDraftFlush: vi.fn(() => () => undefined)
+  onProviderDraftFlush: vi.fn<WindowControlsAPI['onProviderDraftFlush']>(() => () => undefined)
 }
 
 let persistedLibrary: PersistedProviderLibrary
@@ -142,7 +191,11 @@ beforeEach(() => {
     return configuration
   })
   providerApi.importModel.mockReset()
-  providerApi.importModel.mockImplementation(async (model) => ({ id: 'saved-model', ...model }))
+  providerApi.importModel.mockImplementation(async (model) => ({
+    id: 'saved-model',
+    enabled: false,
+    ...model
+  }))
   providerApi.removeModel.mockReset()
   providerApi.removeModel.mockResolvedValue(undefined)
   providerApi.syncModels.mockReset()
@@ -189,27 +242,16 @@ beforeEach(() => {
 })
 
 describe('SettingsMain', () => {
-  it('renders the Appearance settings page', () => {
+  it('user lands on the Appearance page when opening it, then the heading is visible', () => {
     render(<SettingsMain page="appearance" />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Appearance' })).toBeVisible()
   })
 
-  it('does not replace the persisted library while Strict Mode hydrates settings', async () => {
+  it('user keeps the library intact when Strict Mode hydrates, then saves never run', async () => {
     persistedLibrary = {
       ...persistedLibrary,
-      customProviders: [
-        {
-          apiFormat: 'openai-compatible',
-          baseUrl: 'https://api.example.com/v1',
-          enabled: true,
-          headers: {},
-          icon: 'cloud',
-          id: 'example-ai',
-          name: 'Example AI',
-          useMaxCompletionTokens: false
-        }
-      ],
+      customProviders: [exampleAiCustomProvider],
       enabledProviderIds: ['ollama', 'example-ai']
     }
 
@@ -225,16 +267,16 @@ describe('SettingsMain', () => {
     expect(providerApi.saveLibrary).not.toHaveBeenCalled()
   })
 
-  it('does not render manual save controls', () => {
+  it('user sees no save controls when settings render, then no Save button exists', () => {
     renderSettings()
 
     expect(screen.queryByText('All changes saved')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
   })
 
-  it('keeps action-only consumers isolated from provider state updates', async () => {
+  it('user sees unrelated consumers stay still when selecting a provider, then no extra work runs', async () => {
     const user = userEvent.setup()
-    const onRender = vi.fn()
+    const onRender = vi.fn<() => void>()
     render(
       <ProviderLibraryProvider>
         <ActionOnlyConsumer onRender={onRender} />
@@ -251,48 +293,31 @@ describe('SettingsMain', () => {
     expect(onRender).toHaveBeenCalledTimes(1)
   })
 
-  it('selects the first provider in sidebar order after loading the library', async () => {
-    providerApi.getLibrary.mockResolvedValueOnce({
-      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
-      customProviders: [],
-      models: [],
-      selectedModelId: null
-    })
+  it('user lands on the first provider when nothing is saved, then it is selected', async () => {
+    mockLibrary(null)
 
     renderSettings()
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
-  it('restores the last visited provider after loading the library', async () => {
-    providerApi.getLibrary.mockResolvedValueOnce({
-      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
-      customProviders: [],
-      models: [],
-      selectedModelId: null,
-      selectedProviderId: 'ollama'
-    })
+  it('user returns to the last provider when a selection is saved, then it is restored', async () => {
+    mockLibrary('ollama')
 
     renderSettings()
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
-  it('falls back from a missing saved provider to the first provider', async () => {
-    providerApi.getLibrary.mockResolvedValueOnce({
-      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
-      customProviders: [],
-      models: [],
-      selectedModelId: null,
-      selectedProviderId: 'missing-custom-provider'
-    })
+  it('user falls back to the first provider when the selection is gone, then it opens', async () => {
+    mockLibrary('missing-custom-provider')
 
     renderSettings()
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
-  it('restores the last visited provider after returning to settings', async () => {
+  it('user sees the last provider when returning to settings, then it is restored', async () => {
     const { rerender } = render(
       <ProviderLibraryProvider>
         <SettingsMain />
@@ -314,7 +339,7 @@ describe('SettingsMain', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
-  it('loads persisted custom providers into the sidebar', async () => {
+  it('user sees custom providers when the library loads, then they appear as buttons', async () => {
     providerApi.getLibrary.mockResolvedValue({
       configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
       customProviders: [
@@ -329,8 +354,10 @@ describe('SettingsMain', () => {
           useMaxCompletionTokens: false
         }
       ],
+      enabledProviderIds: ['ollama'],
       models: [],
-      selectedModelId: null
+      selectedModelId: null,
+      selectedProviderId: null
     })
 
     renderSettings()
@@ -338,7 +365,7 @@ describe('SettingsMain', () => {
     expect(await screen.findByRole('button', { name: 'Example AI' })).toBeVisible()
   })
 
-  it('keeps connection and model controls visible while a provider is disabled', async () => {
+  it('user sees provider and model controls when disabled, then fetching reveals them', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -352,28 +379,17 @@ describe('SettingsMain', () => {
     expect(screen.getByLabelText('Ollama fetched models')).toBeVisible()
   })
 
-  it('does not show manual model controls for built-in providers', async () => {
+  it('user sees no Model ID when a built-in provider is chosen, then it stays absent', async () => {
     renderSettings()
 
     await waitForOllama()
     expect(screen.queryByLabelText('Model ID for Ollama')).not.toBeInTheDocument()
   })
 
-  it('adds a disabled manual model for a custom provider and clears the form', async () => {
+  it('user adds a manual model when submitting, then it is saved disabled and cleared', async () => {
     persistedLibrary = {
       ...persistedLibrary,
-      customProviders: [
-        {
-          apiFormat: 'openai-compatible',
-          baseUrl: 'https://api.example.com/v1',
-          enabled: true,
-          headers: {},
-          icon: 'cloud',
-          id: 'example-ai',
-          name: 'Example AI',
-          useMaxCompletionTokens: false
-        }
-      ],
+      customProviders: [exampleAiCustomProvider],
       selectedProviderId: 'example-ai'
     }
     const user = userEvent.setup()
@@ -401,7 +417,7 @@ describe('SettingsMain', () => {
     )
   })
 
-  it('keeps enabled models and their order after refreshing a provider', async () => {
+  it('user keeps enabled models in order when refreshing, then none are disabled', async () => {
     persistedLibrary = {
       ...persistedLibrary,
       models: [
@@ -448,7 +464,7 @@ describe('SettingsMain', () => {
     })
   })
 
-  it('keeps provider rail order after enabling a model', async () => {
+  it('user keeps the rail order when enabling a model, then it toggles on in place', async () => {
     const user = userEvent.setup()
     persistedLibrary = {
       configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }],
@@ -485,7 +501,7 @@ describe('SettingsMain', () => {
     })
   })
 
-  it('allows testing a fetched disabled model', async () => {
+  it('user tests a disabled model when choosing it, then it reports ready to use', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -502,7 +518,7 @@ describe('SettingsMain', () => {
     expect(await screen.findByText('granite4.2:3b is ready to use.')).toBeVisible()
   })
 
-  it('disables model testing until the provider models are fetched', async () => {
+  it('user cannot test models when none are fetched, then the control stays disabled', async () => {
     renderSettings()
 
     await waitForOllama()
@@ -510,7 +526,7 @@ describe('SettingsMain', () => {
     expect(screen.getByRole('button', { name: 'Test Ollama model' })).toBeDisabled()
   })
 
-  it('filters fetched models through the models search input', async () => {
+  it('user filters fetched models when typing in search, then only matches remain', async () => {
     const user = userEvent.setup()
     providerApi.discoverModels.mockResolvedValue([
       { modelId: 'granite4.2:3b', displayName: 'granite4.2:3b' },
@@ -527,7 +543,7 @@ describe('SettingsMain', () => {
     expect(screen.queryByText('granite4.2:3b')).not.toBeInTheDocument()
   })
 
-  it('shows the provider error when model fetching fails', async () => {
+  it('user sees the provider error when model fetching fails, then it is displayed', async () => {
     const user = userEvent.setup()
     providerApi.discoverModels.mockRejectedValue(new Error('Ollama is not running.'))
 
@@ -539,7 +555,7 @@ describe('SettingsMain', () => {
     expect(await screen.findByText('Ollama is not running.')).toBeVisible()
   })
 
-  it('shows the provider error when a selected model cannot run', async () => {
+  it('user sees the provider error when a model test fails, then the failure is shown', async () => {
     const user = userEvent.setup()
     providerApi.testModel.mockRejectedValue(new Error('The model is unavailable.'))
 
@@ -554,7 +570,7 @@ describe('SettingsMain', () => {
     expect(screen.getByLabelText('Ollama model test failed')).toBeVisible()
   })
 
-  it('shows the model test lifecycle in the test control', async () => {
+  it('user sees the test control when a test runs, then it shows testing and success', async () => {
     const user = userEvent.setup()
     let finishTest: (() => void) | undefined
     providerApi.testModel.mockImplementation(
@@ -578,7 +594,7 @@ describe('SettingsMain', () => {
     expect(await screen.findByLabelText('Ollama model test succeeded')).toBeVisible()
   })
 
-  it('filters the expanded provider rail by the entered provider name', async () => {
+  it('user filters the provider rail when entering a name, then matches stay visible', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -589,7 +605,7 @@ describe('SettingsMain', () => {
     expect(screen.getByRole('button', { name: 'Ollama' })).toBeVisible()
   })
 
-  it('opens the provider search only after the search control is clicked', async () => {
+  it('user opens the search when clicking it, then hovering does not reveal it', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -603,7 +619,7 @@ describe('SettingsMain', () => {
     expect(screen.getByRole('searchbox', { hidden: true, name: 'Search providers' })).toBeVisible()
   })
 
-  it('collapses the provider rail after its search loses focus outside the rail', async () => {
+  it('user collapses the rail when its search loses focus, then the search box goes', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -618,7 +634,7 @@ describe('SettingsMain', () => {
     })
   })
 
-  it('opens the custom provider form', async () => {
+  it('user opens the custom form when clicking Add custom provider, then fields appear', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -637,7 +653,7 @@ describe('SettingsMain', () => {
     expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeVisible()
   })
 
-  it('shows an example JSON header without pre-filling the custom provider form', async () => {
+  it('user sees a JSON placeholder when opening the form, then headers stay empty', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -651,40 +667,22 @@ describe('SettingsMain', () => {
     )
   })
 
-  it('adds a custom provider without headers when the headers field is left empty', async () => {
+  it('user adds a custom provider with no headers when empty, then the dialog closes', async () => {
     const user = userEvent.setup()
 
     renderSettings()
 
-    await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
-    const dialog = screen.getByRole('dialog', { name: 'Add custom provider' })
-    await user.type(within(dialog).getByLabelText('Provider name'), 'Example AI')
-    await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.example.com/v1')
-    await user.click(within(dialog).getByRole('button', { name: 'Add Provider' }))
+    await addExampleAiProvider(user)
 
     expect(screen.queryByRole('dialog', { name: 'Add custom provider' })).not.toBeInTheDocument()
   })
 
-  it('selects a newly added custom provider and displays its fetched models', async () => {
+  it('user lands on the new custom provider when adding it, then its models appear', async () => {
     const user = userEvent.setup()
-    providerApi.addCustomProvider.mockImplementation(async (provider) => {
-      const saved = {
-        ...provider,
-        apiKey: 'secret',
-        headers: { 'X-Client': 'Mico' },
-        id: 'example-ai',
-        useMaxCompletionTokens: true
-      }
-      persistedLibrary = { ...persistedLibrary, customProviders: [saved] }
-      return saved
-    })
+    mockAddExampleProvider()
     renderSettings()
 
-    await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
-    const dialog = screen.getByRole('dialog', { name: 'Add custom provider' })
-    await user.type(within(dialog).getByLabelText('Provider name'), 'Example AI')
-    await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.example.com/v1')
-    await user.click(within(dialog).getByRole('button', { name: 'Add Provider' }))
+    await addExampleAiProvider(user)
 
     expect(await screen.findByRole('button', { name: 'Example AI' })).toHaveAttribute(
       'aria-current',
@@ -696,26 +694,12 @@ describe('SettingsMain', () => {
     expect(await screen.findByText('granite4.2:3b')).toBeVisible()
   })
 
-  it('edits a custom provider configuration from its details', async () => {
+  it('user edits a custom provider when opening it, then the API key can be revealed', async () => {
     const user = userEvent.setup()
-    providerApi.addCustomProvider.mockImplementation(async (provider) => {
-      const saved = {
-        ...provider,
-        apiKey: 'secret',
-        headers: { 'X-Client': 'Mico' },
-        id: 'example-ai',
-        useMaxCompletionTokens: true
-      }
-      persistedLibrary = { ...persistedLibrary, customProviders: [saved] }
-      return saved
-    })
+    mockAddExampleProvider()
     renderSettings()
 
-    await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
-    const dialog = screen.getByRole('dialog', { name: 'Add custom provider' })
-    await user.type(within(dialog).getByLabelText('Provider name'), 'Example AI')
-    await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.example.com/v1')
-    await user.click(within(dialog).getByRole('button', { name: 'Add Provider' }))
+    await addExampleAiProvider(user)
 
     const apiKey = screen.getByLabelText('API Key (Optional)')
     expect(apiKey).toHaveAttribute('type', 'password')
@@ -728,16 +712,12 @@ describe('SettingsMain', () => {
     expect(apiKey).toHaveAttribute('type', 'text')
   })
 
-  it('removes a custom provider after confirmation', async () => {
+  it('user removes a provider when confirming, then it disappears from the sidebar', async () => {
     const user = userEvent.setup()
 
     renderSettings()
 
-    await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
-    const dialog = screen.getByRole('dialog', { name: 'Add custom provider' })
-    await user.type(within(dialog).getByLabelText('Provider name'), 'Example AI')
-    await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.example.com/v1')
-    await user.click(within(dialog).getByRole('button', { name: 'Add Provider' }))
+    await addExampleAiProvider(user)
 
     await user.click(screen.getByRole('button', { name: 'Delete Example AI' }))
     await user.click(screen.getByRole('button', { name: 'Delete provider' }))
@@ -745,7 +725,7 @@ describe('SettingsMain', () => {
     expect(screen.queryByRole('button', { name: 'Example AI' })).not.toBeInTheDocument()
   })
 
-  it('selects a custom provider icon from the icon menu', async () => {
+  it('user selects a provider icon when choosing from the menu, then it is applied', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -761,7 +741,7 @@ describe('SettingsMain', () => {
     expect(screen.getByRole('button', { name: 'LM Studio' })).toBeVisible()
   })
 
-  it('selects a custom provider API format from its menu', async () => {
+  it('user selects an API format when choosing from its menu, then it is applied', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -773,7 +753,7 @@ describe('SettingsMain', () => {
     expect(screen.getByRole('button', { name: 'Responses (/responses)' })).toBeVisible()
   })
 
-  it('shows max completion tokens only for the Chat Completions API format', async () => {
+  it('user sees max tokens when the format is Chat Completions, then they hide', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -790,7 +770,7 @@ describe('SettingsMain', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('reveals a provider icon name when its icon is hovered', async () => {
+  it('user sees an icon name when hovering it, then a tooltip reveals the name', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -805,7 +785,7 @@ describe('SettingsMain', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent('OpenAI')
   })
 
-  it('expands the custom provider action into a labeled button with the provider rail', async () => {
+  it('user sees the custom action labeled when the rail expands, then the label shows', async () => {
     const user = userEvent.setup()
 
     renderSettings()
@@ -815,7 +795,7 @@ describe('SettingsMain', () => {
     expect(screen.getByText('Custom Provider')).toBeVisible()
   })
 
-  it('opens the custom provider dialog from the expanded rail action', async () => {
+  it('user opens the custom dialog when clicking the expanded action, then it appears', async () => {
     const user = userEvent.setup()
 
     renderSettings()

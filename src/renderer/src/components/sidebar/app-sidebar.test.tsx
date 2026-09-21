@@ -14,12 +14,13 @@ const sidebarProps = {
     { id: 'conversation-1', title: 'First conversation' },
     { id: 'conversation-2', title: 'Second conversation' }
   ],
-  onBackFromSettings: vi.fn(),
-  onDeleteConversation: vi.fn(),
-  onNewChat: vi.fn(),
-  onOpenSettings: vi.fn(),
-  onRenameConversation: vi.fn(),
-  onSelectConversation: vi.fn(),
+  onBackFromSettings: vi.fn<() => void>(),
+  onDeleteConversation: vi.fn<(conversationId: string) => void>(),
+  onNewChat: vi.fn<() => void>(),
+  onOpenSettings: vi.fn<() => void>(),
+  onRenameConversation: vi.fn<(conversationId: string, title: string) => void>(),
+  onSelectConversation:
+    vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
   respondingConversationIds: new Set<string>(),
   settingsActive: false
 }
@@ -48,7 +49,7 @@ describe('AppSidebar', () => {
     )
   }
 
-  it('shows command-number shortcuts while the command key is held', () => {
+  it('user sees command shortcuts when holding the meta key, then they hide on release', () => {
     renderSidebar()
 
     fireEvent.keyDown(window, { key: 'Meta', metaKey: true })
@@ -63,8 +64,9 @@ describe('AppSidebar', () => {
     expect(screen.getAllByRole('button', { name: 'More actions' })).toHaveLength(2)
   })
 
-  it('selects a conversation with its command-number shortcut', () => {
-    const onSelectConversation = vi.fn()
+  it('user selects a conversation when pressing its command shortcut, then it opens', () => {
+    const onSelectConversation =
+      vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>()
     renderSidebar({ onSelectConversation })
 
     fireEvent.keyDown(window, { key: '2', metaKey: true })
@@ -72,7 +74,7 @@ describe('AppSidebar', () => {
     expect(onSelectConversation).toHaveBeenCalledWith('conversation-2')
   })
 
-  it('does not revisit an unchanged conversation when another response status changes', () => {
+  it('user does not see rows re-render when a status changes, then they are skipped', () => {
     let stableTitleReads = 0
     const stableConversation = {
       id: 'conversation-1',
@@ -85,18 +87,7 @@ describe('AppSidebar', () => {
       stableConversation,
       { id: 'conversation-2', title: 'Streaming conversation' }
     ]
-    const props = {
-      activeConversationId: 'conversation-1',
-      conversations,
-      onBackFromSettings: vi.fn(),
-      onDeleteConversation: vi.fn(),
-      onNewChat: vi.fn(),
-      onOpenSettings: vi.fn(),
-      onRenameConversation: vi.fn(),
-      onSelectConversation: vi.fn(),
-      respondingConversationIds: new Set<string>(),
-      settingsActive: false
-    }
+    const props = { ...sidebarProps, conversations, respondingConversationIds: new Set<string>() }
     const { rerender } = render(
       <SidebarProvider>
         <AppSidebar {...props} />

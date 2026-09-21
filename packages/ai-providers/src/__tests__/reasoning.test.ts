@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeCapabilities, resolveThinkingSelection } from '../reasoning'
 
 describe('reasoning capabilities', () => {
-  it('keeps known distinct controls and falls back to default for a stale selection', () => {
+  it('user gets clean thinking options when the list is dirty, then stale picks revert', () => {
     const capabilities = normalizeCapabilities(['none', 'low', 'low', 'unknown'], 'low')
 
     expect(capabilities).toEqual({
@@ -14,11 +14,11 @@ describe('reasoning capabilities', () => {
     expect(resolveThinkingSelection('high', capabilities)).toBe('default')
   })
 
-  it('does not expose a menu capability for a fixed one-value model', () => {
+  it('user gets no thinking menu when a model has one value, then the result is null', () => {
     expect(normalizeCapabilities(['high'], 'high')).toBeNull()
   })
 
-  it('turns off thinking for a model with no reasoning capabilities', () => {
+  it('user gets no thinking when capabilities are missing, then the selection is none', () => {
     expect(resolveThinkingSelection('xhigh', null)).toBe('none')
   })
 })

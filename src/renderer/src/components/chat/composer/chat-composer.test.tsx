@@ -7,6 +7,7 @@ import * as React from 'react'
 
 import { ChatComposer } from './chat-composer'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 
 const props = {
   focusKey: 0,
@@ -33,17 +34,22 @@ const library = {
       enabled: true
     }
   ],
-  selectedModelId: 'ollama:qwen3'
+  // SAFETY: getLibrary mocks reuse this library with the model selected or unselected.
+  selectedModelId: 'ollama:qwen3' as string | null
 }
 
 beforeEach(() => {
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
-      attachments: { pickCodeDocuments: vi.fn().mockResolvedValue([]) },
+      attachments: {
+        pickCodeDocuments: vi.fn<() => Promise<ChatDocumentPart[]>>().mockResolvedValue([])
+      },
       providers: {
-        getLibrary: vi.fn().mockResolvedValue(library),
-        selectModel: vi.fn().mockResolvedValue('ollama:qwen3')
+        getLibrary: vi.fn<() => Promise<typeof library>>().mockResolvedValue(library),
+        selectModel: vi
+          .fn<(modelId: string | null) => Promise<string | null>>()
+          .mockResolvedValue('ollama:qwen3')
       }
     }
   })
@@ -118,16 +124,36 @@ function ModelSelectionHarness(): React.JSX.Element {
   )
 }
 
+async function waitForModelButton(name: string | RegExp): Promise<void> {
+  await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled())
+}
+
+function renderWorkspaceComposer(
+  overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {}
+): void {
+  const { onProjectSelected, projects = [], ...rest } = overrides
+  render(
+    <ChatComposer
+      {...props}
+      canAddProject
+      onAddProject={async (): Promise<void> => undefined}
+      onProjectSelected={onProjectSelected ?? ((): void => undefined)}
+      projects={projects}
+      {...rest}
+    />
+  )
+}
+
 describe('ChatComposer', () => {
   it.each(['', 'Explain this file'])(
-    'sends documents with draft %j and clears them after the callback',
+    'user sends documents with draft %j when pressing Send message, then attachments clear',
     async (text) => {
       const user = userEvent.setup()
       const document: ChatDocumentPart = { type: 'document', name: 'index.ts', text: 'export {}' }
       vi.mocked(window.api.attachments.pickCodeDocuments).mockResolvedValue([document])
-      const onSend = vi.fn(async () => true)
+      const onSend = vi.fn<() => Promise<boolean>>(async () => true)
       render(<ChatComposer {...props} onSend={onSend} />)
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeEnabled())
+      await waitForModelButton('Qwen 3 8B')
       await user.click(screen.getByRole('button', { name: 'Add attachment' }))
       await user.click(screen.getByRole('menuitem', { name: 'Attach files' }))
       expect(await screen.findByText('index.ts')).toBeVisible()
@@ -142,57 +168,76 @@ describe('ChatComposer', () => {
     }
   )
 
-  it.each(['busy', 'failed'] as const)(
-    'retains the draft and documents when sending is %s',
-    async (outcome) => {
-      const user = userEvent.setup()
-      vi.mocked(window.api.attachments.pickCodeDocuments).mockResolvedValue([
-        { type: 'document', name: 'index.ts', text: 'export {}' }
-      ])
-      let rejectSend: ((reason: Error) => void) | undefined
-      let acceptSend: ((accepted: boolean) => void) | undefined
-      const onSend = vi.fn(
-        () =>
-          new Promise<boolean>((resolve, reject) => {
-            acceptSend = resolve
-            rejectSend = reject
-          })
-      )
-      render(<ChatComposer {...props} onSend={onSend} />)
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeEnabled())
-      await user.click(screen.getByRole('button', { name: 'Add attachment' }))
-      await user.click(screen.getByRole('menuitem', { name: 'Attach files' }))
-      await screen.findByText('index.ts')
-      await user.type(screen.getByRole('textbox'), 'Review this file')
-      await user.click(screen.getByRole('button', { name: 'Send message' }))
+  async function renderPendingSend(): Promise<{
+    acceptSend: (accepted: boolean) => void
+    rejectSend: (reason: Error) => void
+  }> {
+    const user = userEvent.setup()
+    vi.mocked(window.api.attachments.pickCodeDocuments).mockResolvedValue([
+      { type: 'document', name: 'index.ts', text: 'export {}' }
+    ])
+    let resolveSend!: (accepted: boolean) => void
+    let rejectSend!: (reason: Error) => void
+    const onSend = vi.fn<() => Promise<boolean>>(
+      () =>
+        new Promise<boolean>((resolve, reject) => {
+          resolveSend = resolve
+          rejectSend = reject
+        })
+    )
+    render(<ChatComposer {...props} onSend={onSend} />)
+    await waitForModelButton('Qwen 3 8B')
+    await user.click(screen.getByRole('button', { name: 'Add attachment' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Attach files' }))
+    await screen.findByText('index.ts')
+    await user.type(screen.getByRole('textbox'), 'Review this file')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-      expect(screen.getByRole('textbox')).toHaveValue('Review this file')
-      expect(screen.getByText('index.ts')).toBeVisible()
-      expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.getByRole('textbox')).toHaveValue('Review this file')
+    expect(screen.getByText('index.ts')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
 
-      await act(async () => {
-        if (outcome === 'failed') rejectSend?.(new Error('Could not create the conversation.'))
-        else acceptSend?.(false)
-      })
+    return {
+      acceptSend: (accepted: boolean): void => resolveSend(accepted),
+      rejectSend: (reason: Error): void => rejectSend(reason)
+    }
+  }
 
-      expect(screen.getByRole('textbox')).toHaveValue('Review this file')
-      expect(screen.getByText('index.ts')).toBeVisible()
-      expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
-      if (outcome === 'failed')
-        expect(screen.getByRole('alert')).toHaveTextContent('Could not create the conversation.')
+  it('user keeps the draft and documents when the send is rejected, then the composer resets', async () => {
+    const { acceptSend } = await renderPendingSend()
+
+    await act(async () => acceptSend(false))
+
+    expect(screen.getByRole('textbox')).toHaveValue('Review this file')
+    expect(screen.getByText('index.ts')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('user sees an alert when the send fails, then the draft and documents remain', async () => {
+    const { rejectSend } = await renderPendingSend()
+
+    await act(async () => rejectSend(new Error('Could not create the conversation.')))
+
+    expect(screen.getByRole('textbox')).toHaveValue('Review this file')
+    expect(screen.getByText('index.ts')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not create the conversation.')
+  })
+
+  it.each(['stop', 'disabled'] as const)(
+    'user cannot add attachments when the mode is %s, then the picker stays disabled',
+    (mode) => {
+      render(<ChatComposer {...props} mode={mode} />)
+      expect(screen.getByRole('button', { name: 'Add attachment' })).toBeDisabled()
     }
   )
 
-  it.each(['stop', 'disabled'] as const)('disables attachment selection in %s mode', (mode) => {
-    render(<ChatComposer {...props} mode={mode} />)
-    expect(screen.getByRole('button', { name: 'Add attachment' })).toBeDisabled()
-  })
-
-  it('submits a non-empty draft', async () => {
+  it('user submits a draft when pressing Send message, then the sent content is shown', async () => {
     const user = userEvent.setup()
     render(<ComposerHarness />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeEnabled())
+    await waitForModelButton('Qwen 3 8B')
 
     await user.type(screen.getByRole('textbox'), 'A multi-line draft.')
 
@@ -201,7 +246,7 @@ describe('ChatComposer', () => {
     expect(screen.getByText('A multi-line draft.')).toBeVisible()
   })
 
-  it('offers workspace selection as an icon control only while starting a new chat', async () => {
+  it('user gets a workspace control when starting a new chat, then adding one binds it', async () => {
     const user = userEvent.setup()
     const { rerender } = render(<WorkspaceComposerHarness />)
 
@@ -214,16 +259,8 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('button', { name: 'Workspace: Project one' })).toBeVisible()
   })
 
-  it('shows the bound workspace path without allowing another workspace selection', () => {
-    render(
-      <ChatComposer
-        {...props}
-        canAddProject
-        onAddProject={async (): Promise<void> => undefined}
-        projectLabel="Project one"
-        projectPath="/projects/one"
-      />
-    )
+  it('user sees the bound workspace when one is already set, then no other option is offered', () => {
+    renderWorkspaceComposer({ projectLabel: 'Project one', projectPath: '/projects/one' })
 
     expect(screen.queryByRole('button', { name: 'Choose workspace' })).toBeNull()
     expect(
@@ -232,21 +269,16 @@ describe('ChatComposer', () => {
     expect(screen.getByText('Project one')).toBeVisible()
   })
 
-  it('lets a new chat select a remembered workspace from the project menu', async () => {
+  it('user selects the remembered workspace when opening the menu, then the parent receives it', async () => {
     const user = userEvent.setup()
-    const onProjectSelected = vi.fn()
-    render(
-      <ChatComposer
-        {...props}
-        canAddProject
-        onAddProject={async (): Promise<void> => undefined}
-        onProjectSelected={onProjectSelected}
-        projects={[
-          { id: 'project-1', name: 'Project one', rootPath: '/projects/one', isDefault: false },
-          { id: 'project-2', name: 'Project two', rootPath: '/projects/two', isDefault: false }
-        ]}
-      />
-    )
+    const onProjectSelected = vi.fn<(project: WorkspaceProject) => void>()
+    renderWorkspaceComposer({
+      onProjectSelected,
+      projects: [
+        { id: 'project-1', name: 'Project one', rootPath: '/projects/one', isDefault: false },
+        { id: 'project-2', name: 'Project two', rootPath: '/projects/two', isDefault: false }
+      ]
+    })
 
     await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
     expect(screen.getByText('/projects/two')).toBeVisible()
@@ -256,20 +288,14 @@ describe('ChatComposer', () => {
     expect(onProjectSelected).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-2' }))
   })
 
-  it('filters new-chat workspaces by name and path', async () => {
+  it('user sees only name or path matches when typing in the search box, then others drop out', async () => {
     const user = userEvent.setup()
-    render(
-      <ChatComposer
-        {...props}
-        canAddProject
-        onAddProject={async (): Promise<void> => undefined}
-        onProjectSelected={() => undefined}
-        projects={[
-          { id: 'project-1', name: 'Frontend', rootPath: '/projects/web', isDefault: false },
-          { id: 'project-2', name: 'Backend', rootPath: '/projects/api', isDefault: false }
-        ]}
-      />
-    )
+    renderWorkspaceComposer({
+      projects: [
+        { id: 'project-1', name: 'Frontend', rootPath: '/projects/web', isDefault: false },
+        { id: 'project-2', name: 'Backend', rootPath: '/projects/api', isDefault: false }
+      ]
+    })
 
     await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
     const search = screen.getByPlaceholderText('Search workspaces')
@@ -279,7 +305,7 @@ describe('ChatComposer', () => {
     expect(screen.queryByRole('option', { name: 'Frontend' })).toBeNull()
   })
 
-  it('refreshes workspace names when the project menu opens', async () => {
+  it('user sees refreshed workspace names when the menu opens, then stale entries disappear', async () => {
     const user = userEvent.setup()
     function RefreshingWorkspaceComposer(): React.JSX.Element {
       const [projects, setProjects] = React.useState([
@@ -317,43 +343,34 @@ describe('ChatComposer', () => {
     expect(screen.queryByRole('option', { name: 'Archived workspace' })).toBeNull()
   })
 
-  it('keeps the workspace menu usable when refreshing its list fails', async () => {
+  it('user keeps the workspace menu when refreshing fails, then existing options remain', async () => {
     const user = userEvent.setup()
-    render(
-      <ChatComposer
-        {...props}
-        canAddProject
-        onAddProject={async (): Promise<void> => undefined}
-        onProjectSelected={() => undefined}
-        onProjectsRefresh={async () => {
-          throw new Error('Workspace refresh unavailable')
-        }}
-        projects={[
-          {
-            id: 'project-1',
-            name: 'Existing workspace',
-            rootPath: '/projects/one',
-            isDefault: true
-          }
-        ]}
-      />
-    )
+    renderWorkspaceComposer({
+      onProjectsRefresh: async () => {
+        throw new Error('Workspace refresh unavailable')
+      },
+      projects: [
+        {
+          id: 'project-1',
+          name: 'Existing workspace',
+          rootPath: '/projects/one',
+          isDefault: true
+        }
+      ]
+    })
 
     await user.click(screen.getByRole('button', { name: 'Choose workspace' }))
 
     expect(screen.getByRole('option', { name: 'Existing workspace' })).toBeVisible()
   })
 
-  it('explains that a workspace is locked after a conversation starts', async () => {
+  it('user cannot add a workspace when a conversation has started, then the control is absent', async () => {
     const user = userEvent.setup()
-    render(
-      <ChatComposer
-        {...props}
-        canAddProject={false}
-        projectLabel="Project one"
-        projectPath="/projects/one"
-      />
-    )
+    renderWorkspaceComposer({
+      canAddProject: false,
+      projectLabel: 'Project one',
+      projectPath: '/projects/one'
+    })
 
     await user.click(screen.getByRole('button', { name: 'Workspace: Project one (/projects/one)' }))
 
@@ -361,7 +378,7 @@ describe('ChatComposer', () => {
     expect(screen.queryByRole('menuitem', { name: 'Add workspace' })).toBeNull()
   })
 
-  it('rotates suggestions only for an unfocused blank composer in a new chat', async () => {
+  it('user sees rotating suggestions when the composer is blank, then focusing shows the placeholder', async () => {
     vi.useFakeTimers()
     try {
       render(<ChatComposer {...props} canAddProject />)
@@ -381,7 +398,7 @@ describe('ChatComposer', () => {
     }
   })
 
-  it('keeps the placeholder static when reduced motion is preferred', () => {
+  it('user sees a static placeholder when reduced motion is preferred, then no suggestions appear', () => {
     const originalMatchMedia = window.matchMedia
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -410,7 +427,7 @@ describe('ChatComposer', () => {
     }
   })
 
-  it('focuses the draft when typing outside an editable control', () => {
+  it('user focuses the draft when typing outside editable controls, then focus lands in the textarea', () => {
     render(
       <>
         <button type="button">Conversation action</button>
@@ -426,7 +443,7 @@ describe('ChatComposer', () => {
     expect(textarea).toHaveFocus()
   })
 
-  it('does not focus the draft for a non-text key', () => {
+  it('user keeps the draft unfocused when pressing a non-text key, then the textarea ignores it', () => {
     render(<ChatComposer {...props} />)
 
     fireEvent.keyDown(window, { key: 'ArrowDown' })
@@ -434,11 +451,11 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('textbox')).not.toHaveFocus()
   })
 
-  it('restores a sent draft to its single-line height', async () => {
+  it('user sees the textarea shrink back when sending, then the draft returns to one line', async () => {
     const user = userEvent.setup()
     render(<ComposerHarness />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeEnabled())
+    await waitForModelButton('Qwen 3 8B')
 
     // SAFETY: ChatComposer's only textbox is its textarea draft control.
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
@@ -456,7 +473,7 @@ describe('ChatComposer', () => {
     expect(textarea).toHaveStyle({ height: '56px' })
   })
 
-  it('lets a user stop an in-progress response', async () => {
+  it('user stops the response when pressing Stop response, then the stop callback runs', async () => {
     const user = userEvent.setup()
     render(<ComposerHarness mode="stop" />)
 
@@ -465,20 +482,24 @@ describe('ChatComposer', () => {
     expect(screen.getByText('Response stopped')).toBeVisible()
   })
 
-  it('prevents sending a drafted message until an enabled model is selected', async () => {
+  it('user cannot send when no model is enabled, then the send control stays disabled', async () => {
     const user = userEvent.setup()
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
         providers: {
-          getLibrary: vi.fn().mockResolvedValue({ ...library, selectedModelId: null }),
-          selectModel: vi.fn().mockResolvedValue('ollama:qwen3')
+          getLibrary: vi
+            .fn<() => Promise<typeof library>>()
+            .mockResolvedValue({ ...library, selectedModelId: null }),
+          selectModel: vi
+            .fn<(modelId: string | null) => Promise<string | null>>()
+            .mockResolvedValue('ollama:qwen3')
         }
       }
     })
     render(<ChatComposer {...props} />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
+    await waitForModelButton('Select model')
     await user.type(screen.getByRole('textbox'), 'Hello')
 
     expect(
@@ -486,54 +507,27 @@ describe('ChatComposer', () => {
     ).toBeDisabled()
   })
 
-  it('owns model selection and notifies its parent after a model is selected', async () => {
+  it('user selects a model in the composer when picking one, then the parent is notified', async () => {
     const user = userEvent.setup()
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
         providers: {
+          // SAFETY: the provider library is served with the model unselected, then selected.
           getLibrary: vi
-            .fn()
-            .mockResolvedValueOnce({
-              configurations: [
-                { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-              ],
-              customProviders: [],
-              models: [
-                {
-                  id: 'ollama:qwen3',
-                  provider: 'ollama',
-                  modelId: 'qwen3:8b',
-                  displayName: 'Qwen 3 8B',
-                  enabled: true
-                }
-              ],
-              selectedModelId: null
-            })
-            .mockResolvedValue({
-              configurations: [
-                { provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: true }
-              ],
-              customProviders: [],
-              models: [
-                {
-                  id: 'ollama:qwen3',
-                  provider: 'ollama',
-                  modelId: 'qwen3:8b',
-                  displayName: 'Qwen 3 8B',
-                  enabled: true
-                }
-              ],
-              selectedModelId: 'ollama:qwen3'
-            }),
-          selectModel: vi.fn().mockResolvedValue('ollama:qwen3')
+            .fn<() => Promise<typeof library>>()
+            .mockResolvedValueOnce({ ...library, selectedModelId: null })
+            .mockResolvedValue(library),
+          selectModel: vi
+            .fn<(modelId: string | null) => Promise<string | null>>()
+            .mockResolvedValue('ollama:qwen3')
         }
       }
     })
 
     render(<ModelSelectionHarness />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
+    await waitForModelButton('Select model')
     await user.click(screen.getByRole('button', { name: 'Select model' }))
     await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
 
@@ -541,13 +535,13 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeVisible()
   })
 
-  it('does not render a thinking menu without adjustable capabilities', () => {
+  it('user gets no thinking menu when the model has nothing adjustable, then it is absent', () => {
     render(<ChatComposer {...props} />)
 
     expect(screen.queryByRole('button', { name: 'Thinking effort' })).toBeNull()
   })
 
-  it('renders only advertised thinking-effort options', async () => {
+  it('user sees only advertised efforts when opening the thinking menu, then the rest are missing', async () => {
     const user = userEvent.setup()
     render(<ThinkingEffortHarness />)
 
@@ -558,7 +552,7 @@ describe('ChatComposer', () => {
     expect(screen.queryByRole('menuitemradio', { name: /^Medium/ })).toBeNull()
   })
 
-  it('commits the selected thinking effort', async () => {
+  it('user commits the chosen effort when selecting an option, then the parent receives it', async () => {
     const user = userEvent.setup()
     render(<ThinkingEffortHarness />)
 
@@ -570,7 +564,7 @@ describe('ChatComposer', () => {
   })
 
   it.each(['stop', 'disabled'] as const)(
-    'disables the thinking menu while composer mode is %s',
+    'user cannot adjust thinking when the mode is %s, then the menu stays disabled',
     (mode) => {
       render(
         <ChatComposer

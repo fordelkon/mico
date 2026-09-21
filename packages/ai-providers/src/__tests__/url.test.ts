@@ -15,11 +15,14 @@ describe('provider API URL resolution', () => {
       'chat/completions',
       'https://gateway.example.com/proxy/v2/chat/completions'
     ]
-  ])('resolves a versioned API endpoint from %s', (baseUrl, endpoint, expectedUrl) => {
-    expect(getVersionedApiUrl(baseUrl, endpoint)).toBe(expectedUrl)
-  })
+  ])(
+    'user gets a versioned endpoint when the base URL is %s, then no version repeats',
+    (baseUrl, endpoint, expectedUrl) => {
+      expect(getVersionedApiUrl(baseUrl, endpoint)).toBe(expectedUrl)
+    }
+  )
 
-  it('resolves discovery beside a fully specified API endpoint while retaining query parameters', () => {
+  it('user gets a sibling endpoint when the URL is complete, then the query is kept', () => {
     expect(
       getVersionedSiblingApiUrl(
         'https://gateway.example.com/proxy/v3/responses?tenant=university',
@@ -29,7 +32,7 @@ describe('provider API URL resolution', () => {
     ).toBe('https://gateway.example.com/proxy/v3/models?tenant=university')
   })
 
-  it('appends native endpoints below a gateway path prefix without a version fallback', () => {
+  it('user gets native endpoints when no version applies, then the gateway path holds', () => {
     expect(getNativeApiUrl('https://gateway.example.com/ollama/', 'api/tags')).toBe(
       'https://gateway.example.com/ollama/api/tags'
     )

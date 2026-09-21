@@ -1,5 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -7,19 +6,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createEditTool } from './edit-tool'
 import { createReadTool } from './read-tool'
 import { createWriteTool } from './write-tool'
+import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('workspace file tools', () => {
-  const temporaryPaths: string[] = []
-
-  afterEach(async () => {
-    await Promise.all(
-      temporaryPaths.splice(0).map((path) => rm(path, { force: true, recursive: true }))
-    )
-  })
+  afterEach(() => removeTemporaryPaths())
 
   async function createContext() {
-    const cwd = await mkdtemp(join(tmpdir(), 'mico-file-tool-'))
-    temporaryPaths.push(cwd)
+    const cwd = await createTemporaryWorkspace('mico-file-tool-')
     return { cwd, signal: new AbortController().signal }
   }
 
@@ -33,7 +26,7 @@ describe('workspace file tools', () => {
     }
   }
 
-  it('returns a line-bounded read result with a continuation offset', async () => {
+  it('user reads a window when offset and limit are set, then it offers a continuation', async () => {
     const context = await createContext()
     await writeFile(join(context.cwd, 'a.txt'), 'one\ntwo\nthree\n')
 
@@ -42,7 +35,7 @@ describe('workspace file tools', () => {
     expect(result.output).toBe('two\n\n[More content available. Use offset=3.]')
   })
 
-  it('emits the selected read content as a preview', async () => {
+  it('user sees a preview when a read is bounded, then only the selection is emitted', async () => {
     const context = await createStreamingContext()
     await writeFile(join(context.cwd, 'a.txt'), 'one\ntwo\nthree\n')
 
@@ -53,7 +46,7 @@ describe('workspace file tools', () => {
     ])
   })
 
-  it('rejects an edit when oldText matches more than one location', async () => {
+  it('user gets an error when an edit is ambiguous, then the file is unchanged', async () => {
     const context = await createContext()
     await writeFile(join(context.cwd, 'a.txt'), 'same\nsame\n')
 
@@ -65,7 +58,7 @@ describe('workspace file tools', () => {
     ).rejects.toThrow('must match exactly once')
   })
 
-  it('creates a nested file inside the workspace', async () => {
+  it('user creates a nested file when writing a new path, then a rewrite replaces it', async () => {
     const context = await createContext()
 
     await expect(
@@ -82,7 +75,7 @@ describe('workspace file tools', () => {
     })
   })
 
-  it('emits write content before reporting a successful write', async () => {
+  it('user sees the content preview when a write starts, then the write succeeds', async () => {
     const context = await createStreamingContext()
 
     await createWriteTool().execute({ path: 'nested/a.txt', content: 'const value = 1\n' }, context)
@@ -90,7 +83,7 @@ describe('workspace file tools', () => {
     expect(context.deltas).toEqual([{ stream: 'preview', delta: 'const value = 1\n' }])
   })
 
-  it('emits a diff-style preview for a validated edit', async () => {
+  it('user sees what changed when an edit runs, then a diff-style preview is emitted', async () => {
     const context = await createStreamingContext()
     await writeFile(join(context.cwd, 'a.txt'), 'before\n')
 

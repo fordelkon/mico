@@ -31,7 +31,7 @@ function createFetch(response: Response): RecordingFetch {
 }
 
 describe('discoverModels', () => {
-  it('lists Ollama models and ignores malformed rows', async () => {
+  it('user sees only valid Ollama models when rows are malformed, then bad rows drop', async () => {
     const client = createFetch(
       jsonResponse({ models: [{ name: 'llama3.2:latest' }, {}, { name: ' ' }] })
     )
@@ -47,7 +47,7 @@ describe('discoverModels', () => {
   })
 
   it.each(['openai-responses', 'openai-compatible'] as const)(
-    'lists %s models from the OpenAI model endpoint',
+    'user sees %s models when listing from OpenAI, then the request is authorized',
     async (provider) => {
       const client = createFetch(jsonResponse({ data: [{ id: 'gpt-5.6' }] }))
 
@@ -63,7 +63,7 @@ describe('discoverModels', () => {
     }
   )
 
-  it('lists Anthropic-compatible models with provider display names', async () => {
+  it('user sees Anthropic display names when listing models, then x-api-key is used', async () => {
     const client = createFetch(
       jsonResponse({ data: [{ id: 'claude-sonnet', display_name: 'Claude Sonnet' }] })
     )
@@ -84,7 +84,7 @@ describe('discoverModels', () => {
     expect(client.request().headers.get('anthropic-version')).toBe('2023-06-01')
   })
 
-  it('preserves an explicitly versioned Anthropic-compatible API root', async () => {
+  it('user keeps a custom version root when listing models, then /models is appended', async () => {
     const client = createFetch(jsonResponse({ data: [{ id: 'claude-sonnet' }] }))
 
     await expect(
@@ -101,7 +101,7 @@ describe('discoverModels', () => {
     expect(client.request().url).toBe('https://gateway.example.com/proxy/v2/models')
   })
 
-  it('retries Anthropic-compatible discovery with bearer authentication after x-api-key is rejected', async () => {
+  it('user gets models when x-api-key is rejected, then discovery retries bearer auth', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 401, statusText: 'Unauthorized' }))
@@ -127,7 +127,7 @@ describe('discoverModels', () => {
     ).toBe('Bearer provider-key')
   })
 
-  it('rejects an unsuccessful model-list response', async () => {
+  it('user gets a discovery error when the list fails, then the status is reported', async () => {
     const client = createFetch(new Response(null, { status: 503, statusText: 'Unavailable' }))
 
     await expect(

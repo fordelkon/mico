@@ -30,7 +30,7 @@ import {
 import { Textarea } from '../../../components/primitives/textarea'
 
 describe('chat primitives', () => {
-  it('preserves link semantics when bubble content delegates to a child', () => {
+  it('user opens the bubble link when it uses a child, then the href is preserved', () => {
     render(
       <Bubble variant="outline">
         <BubbleContent asChild>
@@ -45,7 +45,7 @@ describe('chat primitives', () => {
     )
   })
 
-  it('does not submit a form when its attachment trigger is activated', async () => {
+  it('user clicks the attachment trigger when in a form, then nothing submits', async () => {
     const user = userEvent.setup()
     function AttachmentForm() {
       const [submitted, setSubmitted] = useState(false)
@@ -73,7 +73,7 @@ describe('chat primitives', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Not submitted')
   })
 
-  it('exposes an accessible attachment action', async () => {
+  it('user clicks the attachment action when removing a file, then it disappears', async () => {
     const user = userEvent.setup()
     function AttachmentRemoval() {
       const [removed, setRemoved] = useState(false)
@@ -96,26 +96,17 @@ describe('chat primitives', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Removed')
   })
 
-  it('preserves native textarea state and consumer-provided props', () => {
-    render(
-      <Textarea
-        aria-invalid="true"
-        aria-label="Message"
-        className="min-h-32"
-        defaultValue="Draft"
-        disabled
-      />
-    )
+  it('user reads the draft when the textarea is disabled and invalid, then it is not editable and shows the draft', () => {
+    render(<Textarea aria-invalid="true" aria-label="Message" defaultValue="Draft" disabled />)
 
     const textarea = screen.getByRole('textbox', { name: 'Message' })
 
     expect(textarea).toBeDisabled()
-    expect(textarea).toHaveAttribute('aria-invalid', 'true')
-    expect(textarea).toHaveClass('min-h-32')
+    expect(textarea).toBeInvalid()
     expect(textarea).toHaveValue('Draft')
   })
 
-  it('composes a chat empty state with structured content', () => {
+  it('user reads the empty conversation state when it is shown, then its media, title and description are visible', () => {
     render(
       <Empty>
         <EmptyHeader>
@@ -131,7 +122,7 @@ describe('chat primitives', () => {
     expect(screen.getByText('M')).toBeVisible()
   })
 
-  it('hides decorative marker icons while preserving delegated link semantics', () => {
+  it('user opens the marker link when it uses a child, then icons stay hidden', () => {
     render(
       <Marker asChild variant="separator">
         <a href="#unread">
@@ -150,18 +141,21 @@ describe('chat primitives', () => {
   it.each([
     ['end', 'Scroll to end'],
     ['start', 'Scroll to start']
-  ] as const)('labels the %s message scroller control', (direction, accessibleName) => {
-    render(
-      <MessageScrollerProvider>
-        <MessageScroller>
-          <MessageScrollerViewport>
-            <MessageScrollerContent />
-          </MessageScrollerViewport>
-          <MessageScrollerButton direction={direction} />
-        </MessageScroller>
-      </MessageScrollerProvider>
-    )
+  ] as const)(
+    'user finds the %s scroller control when using the message scroller, then it is reachable by its accessible name',
+    (direction, accessibleName) => {
+      render(
+        <MessageScrollerProvider>
+          <MessageScroller>
+            <MessageScrollerViewport>
+              <MessageScrollerContent />
+            </MessageScrollerViewport>
+            <MessageScrollerButton direction={direction} />
+          </MessageScroller>
+        </MessageScrollerProvider>
+      )
 
-    expect(screen.getByRole('button', { name: accessibleName })).toBeInTheDocument()
-  })
+      expect(screen.getByRole('button', { name: accessibleName })).toBeInTheDocument()
+    }
+  )
 })

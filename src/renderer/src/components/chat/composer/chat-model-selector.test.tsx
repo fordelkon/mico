@@ -49,10 +49,14 @@ const library: ProviderLibrary = {
   selectedProviderId: null
 }
 
+function renderSelector(): void {
+  render(<ChatModelSelector library={library} onSelect={() => undefined} />)
+}
+
 describe('ChatModelSelector', () => {
-  it('shows enabled models and their identifiers grouped by provider', async () => {
+  it('user sees provider-grouped models when opening the selector, then disabled ones stay hidden', async () => {
     const user = userEvent.setup()
-    render(<ChatModelSelector library={library} onSelect={() => undefined} />)
+    renderSelector()
 
     await user.click(screen.getByRole('button', { name: 'Qwen 3 8B' }))
 
@@ -65,9 +69,9 @@ describe('ChatModelSelector', () => {
     expect(screen.queryByText('Disabled model')).toBeNull()
   })
 
-  it('limits the menu to eligible models matching the search query', async () => {
+  it('user narrows the menu to eligible models when typing, then only matches remain', async () => {
     const user = userEvent.setup()
-    render(<ChatModelSelector library={library} onSelect={() => undefined} />)
+    renderSelector()
 
     await user.click(screen.getByRole('button', { name: 'Qwen 3 8B' }))
     const search = screen.getByPlaceholderText('Search models')
@@ -79,9 +83,9 @@ describe('ChatModelSelector', () => {
     expect(screen.queryByRole('option', { name: 'Qwen 3 8B' })).toBeNull()
   })
 
-  it('closes the selector after a model is selected', async () => {
+  it('user closes the selector when a model is chosen, then the listbox disappears', async () => {
     const user = userEvent.setup()
-    render(<ChatModelSelector library={library} onSelect={() => undefined} />)
+    renderSelector()
 
     await user.click(screen.getByRole('button', { name: 'Qwen 3 8B' }))
     await user.click(screen.getByRole('option', { name: 'Example Chat' }))

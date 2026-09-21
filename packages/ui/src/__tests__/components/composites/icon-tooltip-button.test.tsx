@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { IconTooltipButton } from '../../../components/composites/icon-tooltip-button'
 
 describe('IconTooltipButton', () => {
-  it('renders an accessible icon button and activates a consumer action', async () => {
+  it('user clicks the icon button when adding an item, then the action runs', async () => {
     const user = userEvent.setup()
     function AddAction() {
       const [added, setAdded] = useState(false)
@@ -36,14 +36,14 @@ describe('IconTooltipButton', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Added')
   })
 
-  it('uses the label as fallback tooltip content', () => {
+  it('user focuses the icon button when it has a label, then the tooltip shows', () => {
     render(<IconTooltipButton icon={<svg />} label="Add item" />)
     fireEvent.focus(screen.getByRole('button', { name: 'Add item' }))
 
     expect(screen.getByRole('tooltip')).toHaveTextContent('Add item')
   })
 
-  it('uses custom tooltip content', () => {
+  it('user focuses the button when custom content is set, then that tooltip shows', () => {
     render(
       <IconTooltipButton
         icon={<svg />}
@@ -56,7 +56,7 @@ describe('IconTooltipButton', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('Creates a new item')
   })
 
-  it('prevents activation when disabled', () => {
+  it('user clicks the icon button when it is disabled, then it stays disabled', () => {
     render(<IconTooltipButton disabled icon={<svg />} label="Add item" size="icon-lg" />)
 
     const button = screen.getByRole('button', { name: 'Add item' })

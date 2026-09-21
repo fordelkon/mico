@@ -3,24 +3,22 @@ import '@testing-library/jest-dom/vitest'
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
+
 import { WindowControls } from './window-controls'
 
 type FocusListener = (isFocused: boolean) => void
 
 let focusListener: FocusListener | undefined
 
+// Only members the component reads on mount; click handlers stay unexercised here.
 const windowControls = {
-  close: vi.fn(),
-  isFocused: vi.fn(),
-  isFullScreen: vi.fn(),
-  isMaximized: vi.fn(),
-  maximize: vi.fn(),
-  minimize: vi.fn(),
-  onFocusChange: vi.fn(),
-  onFullScreenChange: vi.fn(),
-  onMaximizedChange: vi.fn(),
-  toggleFullScreen: vi.fn(),
-  unmaximize: vi.fn()
+  isFocused: vi.fn<WindowControlsAPI['isFocused']>(),
+  isFullScreen: vi.fn<WindowControlsAPI['isFullScreen']>(),
+  isMaximized: vi.fn<WindowControlsAPI['isMaximized']>(),
+  onFocusChange: vi.fn<WindowControlsAPI['onFocusChange']>(),
+  onFullScreenChange: vi.fn<WindowControlsAPI['onFullScreenChange']>(),
+  onMaximizedChange: vi.fn<WindowControlsAPI['onMaximizedChange']>()
 }
 
 describe('WindowControls', () => {
@@ -52,7 +50,7 @@ describe('WindowControls', () => {
     })
   })
 
-  it('uses native focus changes to restore traffic-light colors after a fullscreen handoff', async () => {
+  it('user sees the controls track focus when native focus changes, then colors update', async () => {
     render(<WindowControls />)
 
     const controls = screen.getByRole('banner', { name: 'Window controls' })

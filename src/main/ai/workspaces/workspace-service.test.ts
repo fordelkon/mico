@@ -15,23 +15,23 @@ describe('WorkspaceService', () => {
     )
   })
 
-  it('creates the default workspace beneath the platform user-data directory', async () => {
+  async function createService(options: ConstructorParameters<typeof WorkspaceService>[0] = {}) {
     const userDataPath = await mkdtemp(join(tmpdir(), 'mico-workspace-'))
     userDataPaths.push(userDataPath)
-    const service = new WorkspaceService({ getUserDataPath: () => userDataPath })
-
+    const service = new WorkspaceService({ getUserDataPath: () => userDataPath, ...options })
     await service.initialize()
+    return { service, userDataPath }
+  }
+
+  it('user gets a default workspace when initializing, then it lives beneath the user-data directory', async () => {
+    const { service, userDataPath } = await createService()
 
     expect(service.getDefaultWorkspacePath()).toBe(join(userDataPath, 'workspaces', 'default'))
     expect((await stat(service.getDefaultWorkspacePath())).isDirectory()).toBe(true)
   })
 
-  it('resolves default workspace paths without allowing an escape from its root', async () => {
-    const userDataPath = await mkdtemp(join(tmpdir(), 'mico-workspace-'))
-    userDataPaths.push(userDataPath)
-    const service = new WorkspaceService({ getUserDataPath: () => userDataPath })
-
-    await service.initialize()
+  it('user gets workspace paths resolved when they are relative, then escaping the root is rejected', async () => {
+    const { service, userDataPath } = await createService()
 
     expect(service.getDefaultWorkspaceContext()).toEqual({
       kind: 'project',
@@ -46,17 +46,10 @@ describe('WorkspaceService', () => {
     ).toThrow('Workspace path must remain within its root.')
   })
 
-  it('restores an archived path without changing historical access to it', async () => {
-    const userDataPath = await mkdtemp(join(tmpdir(), 'mico-workspace-'))
+  it('user can re-add an archived project when adding its path again, then its rootPath is preserved', async () => {
+    const { service, userDataPath } = await createService({ createId: () => 'project-1' })
     const projectPath = join(userDataPath, 'project')
-    userDataPaths.push(userDataPath)
     await mkdir(projectPath)
-    const service = new WorkspaceService({
-      createId: () => 'project-1',
-      getUserDataPath: () => userDataPath
-    })
-
-    await service.initialize()
     const project = await service.addProject(projectPath)
     await service.archiveProject(project.id)
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createTaggedThinkingExtractor } from '../../streaming/tagged-thinking'
 
 describe('tagged thinking extractor', () => {
-  it('separates a thinking tag split across input deltas', () => {
+  it('user sees thinking split from text when a tag spans deltas, then text resumes', () => {
     const extractor = createTaggedThinkingExtractor()
 
     expect(extractor.push('Before <think>inspect')).toEqual([

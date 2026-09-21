@@ -4,14 +4,14 @@ import { describe, expect, it } from 'vitest'
 import { describeChatError } from './chat-error'
 
 describe('describeChatError', () => {
-  it('gives a connection remedy without exposing the upstream exception', () => {
+  it('user sees a connection remedy when the fetch fails, then details stay generic', () => {
     expect(describeChatError(new TypeError('fetch failed'))).toEqual({
       message: "Couldn't connect to the API endpoint. Check the API URL, network, VPN, or proxy.",
       retryable: true
     })
   })
 
-  it('explains an authentication failure without exposing credentials', () => {
+  it('user sees an authentication error when credentials fail, then no secret is exposed', () => {
     expect(
       describeChatError(
         new APICallError({
@@ -29,7 +29,7 @@ describe('describeChatError', () => {
     })
   })
 
-  it('identifies a temporarily unavailable provider as retryable', () => {
+  it('user sees an unavailable message when the provider returns 503, then retry is offered', () => {
     expect(
       describeChatError(
         new APICallError({

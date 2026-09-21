@@ -1,37 +1,31 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { resolveWorkspacePath } from './workspace-path-policy'
+import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('resolveWorkspacePath', () => {
-  const temporaryPaths: string[] = []
+  afterEach(() => removeTemporaryPaths())
 
-  afterEach(async () => {
-    await Promise.all(
-      temporaryPaths.splice(0).map((path) => rm(path, { force: true, recursive: true }))
-    )
-  })
-
-  it('rejects a lexical path outside the session cwd', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'mico-tool-path-'))
-    temporaryPaths.push(root)
-    const workspace = join(root, 'workspace')
+  async function createWorkspace(): Promise<string> {
+    const workspace = join(await createTemporaryWorkspace('mico-tool-path-'), 'workspace')
     await mkdir(workspace)
+    return workspace
+  }
+
+  it('user cannot read a file when a path escapes the workspace, then it is rejected', async () => {
+    const workspace = await createWorkspace()
 
     await expect(resolveWorkspacePath(workspace, '../secret.txt')).rejects.toThrow(
       'Path must be inside the session workspace.'
     )
   })
 
-  it('rejects a symlink that resolves outside the session cwd', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'mico-tool-path-'))
-    temporaryPaths.push(root)
-    const workspace = join(root, 'workspace')
-    const outside = join(root, 'outside.txt')
-    await mkdir(workspace)
+  it('user cannot read a symlink when it escapes the workspace, then it is rejected', async () => {
+    const workspace = await createWorkspace()
+    const outside = join(workspace, '..', 'outside.txt')
     await writeFile(outside, 'secret')
     await symlink(outside, join(workspace, 'outside-link'))
 
@@ -40,12 +34,9 @@ describe('resolveWorkspacePath', () => {
     )
   })
 
-  it('rejects a new file beneath a symlinked parent outside the session cwd', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'mico-tool-path-'))
-    temporaryPaths.push(root)
-    const workspace = join(root, 'workspace')
-    const outsideDirectory = join(root, 'outside')
-    await mkdir(workspace)
+  it('user cannot create a file when a parent symlink escapes, then it is rejected', async () => {
+    const workspace = await createWorkspace()
+    const outsideDirectory = join(workspace, '..', 'outside')
     await mkdir(outsideDirectory)
     await symlink(outsideDirectory, join(workspace, 'linked-directory'))
 

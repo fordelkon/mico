@@ -16,7 +16,7 @@ function createProvider(): ResolvedProvider {
 async function* emptyStream(): AsyncIterable<UIMessageChunk> {}
 
 describe('createChatProviderResolver', () => {
-  it('uses the requested model entry and stops resolving after it is cleared', () => {
+  it('user gets a provider when the model entry is configured, then it clears once removed', () => {
     const firstProvider = createProvider()
     const secondProvider = createProvider()
     let selection: ChatProviderConfiguration | null = {

@@ -4,17 +4,36 @@ import { IpcChannel } from '@shared/IpcChannel'
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
+import type { ReadOptions } from 'node:fs'
+import type { TurnExecutor } from './ai/chat/turn-executor'
+import type { ProviderService } from './ai/providers/provider-service'
+import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
+import type { WorkspaceService } from './ai/workspaces/workspace-service'
 import { registerIpc } from './ipc'
+import type { MainWindowService } from './services/main-window-service'
+import type { PreferenceService } from './services/preference-service'
 
 type Handler = Parameters<IpcMain['handle']>[1]
+// SAFETY: structural subset of the fs FileHandle that the IPC attachment handlers consume;
+// the offset union mirrors both fs read overloads so the double stays assignable to the real handle.
+type IpcFileHandle = {
+  close: () => Promise<void>
+  read: (
+    buffer: Uint8Array,
+    offset?: number | ReadOptions | null,
+    length?: number,
+    position?: number
+  ) => Promise<{ bytesRead: number; buffer: Uint8Array }>
+}
 
 function createFileHandle(bytes: Uint8Array, maxChunkSize = bytes.byteLength) {
   return {
-    close: vi.fn().mockResolvedValue(undefined),
-    read: vi.fn(async (buffer: Uint8Array, offset: number, length: number, position: number) => {
-      const chunk = bytes.subarray(position, position + Math.min(length, maxChunkSize))
-      buffer.set(chunk, offset)
-      return { bytesRead: chunk.byteLength }
+    close: vi.fn<IpcFileHandle['close']>().mockResolvedValue(undefined),
+    read: vi.fn<IpcFileHandle['read']>(async (buffer, offset, length, position) => {
+      const from = position ?? 0
+      const chunk = bytes.subarray(from, from + Math.min(length ?? bytes.byteLength, maxChunkSize))
+      buffer.set(chunk, Number(offset ?? 0))
+      return { buffer, bytesRead: chunk.byteLength }
     })
   }
 }
@@ -24,73 +43,75 @@ function createHarness() {
   // SAFETY: The test double is only passed through to assert the IPC handler delegates correctly.
   const window = Object.create(null) as BrowserWindow
   const turnExecutor = {
-    abortTurn: vi.fn(),
-    abortAllTurns: vi.fn(),
-    getModelCapabilities: vi.fn(),
-    startTurn: vi.fn(),
-    updateSessionModelEntry: vi.fn(),
-    updateSessionThinkingEffort: vi.fn()
+    abortTurn: vi.fn<TurnExecutor['abortTurn']>(),
+    abortAllTurns: vi.fn<TurnExecutor['abortAllTurns']>(),
+    getModelCapabilities: vi.fn<TurnExecutor['getModelCapabilities']>(),
+    startTurn: vi.fn<TurnExecutor['startTurn']>(),
+    updateSessionModelEntry: vi.fn<TurnExecutor['updateSessionModelEntry']>(),
+    updateSessionThinkingEffort: vi.fn<TurnExecutor['updateSessionThinkingEffort']>()
   }
   const mainWindow = {
-    close: vi.fn(),
-    isFocused: vi.fn(),
-    isFullscreen: vi.fn(),
-    isMaximized: vi.fn(),
-    isTrustedRendererUrl: vi.fn(() => true),
-    maximize: vi.fn(),
-    minimize: vi.fn(),
-    toggleFullscreen: vi.fn(),
-    unmaximize: vi.fn()
+    close: vi.fn<MainWindowService['close']>(),
+    isFocused: vi.fn<MainWindowService['isFocused']>(),
+    isFullscreen: vi.fn<MainWindowService['isFullscreen']>(),
+    isMaximized: vi.fn<MainWindowService['isMaximized']>(),
+    isTrustedRendererUrl: vi.fn<MainWindowService['isTrustedRendererUrl']>(() => true),
+    maximize: vi.fn<MainWindowService['maximize']>(),
+    minimize: vi.fn<MainWindowService['minimize']>(),
+    toggleFullscreen: vi.fn<MainWindowService['toggleFullscreen']>(),
+    unmaximize: vi.fn<MainWindowService['unmaximize']>()
   }
   const preference = {
-    getAppearancePreference: vi.fn(),
-    getResolvedAppearance: vi.fn(),
-    getThemeState: vi.fn(),
-    setAppearancePreference: vi.fn(),
-    setThemePreferences: vi.fn()
+    getAppearancePreference: vi.fn<PreferenceService['getAppearancePreference']>(),
+    getResolvedAppearance: vi.fn<PreferenceService['getResolvedAppearance']>(),
+    getThemeState: vi.fn<PreferenceService['getThemeState']>(),
+    setAppearancePreference: vi.fn<PreferenceService['setAppearancePreference']>(),
+    setThemePreferences: vi.fn<PreferenceService['setThemePreferences']>()
   }
   const provider = {
-    addModel: vi.fn(),
-    addCustomProvider: vi.fn(),
-    updateCustomProvider: vi.fn(),
-    discoverModels: vi.fn(),
-    getLibrary: vi.fn(),
-    importModel: vi.fn(),
-    setModelEnabled: vi.fn(),
-    syncModels: vi.fn(),
-    removeCustomProvider: vi.fn(),
-    removeModel: vi.fn(),
-    saveConfiguration: vi.fn(),
-    saveLibrary: vi.fn(),
-    selectModel: vi.fn(),
-    selectProvider: vi.fn(),
-    testModel: vi.fn()
+    addModel: vi.fn<ProviderService['addModel']>(),
+    addCustomProvider: vi.fn<ProviderService['addCustomProvider']>(),
+    updateCustomProvider: vi.fn<ProviderService['updateCustomProvider']>(),
+    discoverModels: vi.fn<ProviderService['discoverModels']>(),
+    getLibrary: vi.fn<ProviderService['getLibrary']>(),
+    importModel: vi.fn<ProviderService['importModel']>(),
+    setModelEnabled: vi.fn<ProviderService['setModelEnabled']>(),
+    syncModels: vi.fn<ProviderService['syncModels']>(),
+    removeCustomProvider: vi.fn<ProviderService['removeCustomProvider']>(),
+    removeModel: vi.fn<ProviderService['removeModel']>(),
+    saveConfiguration: vi.fn<ProviderService['saveConfiguration']>(),
+    saveLibrary: vi.fn<ProviderService['saveLibrary']>(),
+    selectModel: vi.fn<ProviderService['selectModel']>(),
+    selectProvider: vi.fn<ProviderService['selectProvider']>(),
+    testModel: vi.fn<ProviderService['testModel']>()
   }
   const session = {
-    createSession: vi.fn(),
-    deleteSession: vi.fn(),
-    listSessions: vi.fn(),
-    loadSession: vi.fn(),
-    renameSession: vi.fn()
+    createSession: vi.fn<SessionRuntimeService['createSession']>(),
+    deleteSession: vi.fn<SessionRuntimeService['deleteSession']>(),
+    listSessions: vi.fn<SessionRuntimeService['listSessions']>(),
+    loadSession: vi.fn<SessionRuntimeService['loadSession']>(),
+    renameSession: vi.fn<SessionRuntimeService['renameSession']>()
   }
   const workspace = {
-    addProject: vi.fn(),
-    archiveProject: vi.fn(),
-    getActiveProjectContext: vi.fn(),
-    getDefaultWorkspaceContext: vi.fn(() => ({
+    addProject: vi.fn<WorkspaceService['addProject']>(),
+    archiveProject: vi.fn<WorkspaceService['archiveProject']>(),
+    getActiveProjectContext: vi.fn<WorkspaceService['getActiveProjectContext']>(),
+    getDefaultWorkspaceContext: vi.fn<WorkspaceService['getDefaultWorkspaceContext']>(() => ({
       kind: 'project' as const,
       projectId: 'default',
       rootPath: '/workspaces/default'
     })),
-    getProjectContext: vi.fn(),
-    listProjects: vi.fn(),
-    renameProject: vi.fn(),
-    setDefaultProject: vi.fn()
+    getProjectContext: vi.fn<WorkspaceService['getProjectContext']>(),
+    listProjects: vi.fn<WorkspaceService['listProjects']>(),
+    renameProject: vi.fn<WorkspaceService['renameProject']>(),
+    setDefaultProject: vi.fn<WorkspaceService['setDefaultProject']>()
   }
-  const openPath = vi.fn().mockResolvedValue('')
-  const pickCodeDocuments = vi.fn().mockResolvedValue({ canceled: true, filePaths: [] })
-  const openFile = vi.fn()
-  const stat = vi.fn()
+  const openPath = vi.fn<(fullPath: string) => Promise<string>>().mockResolvedValue('')
+  const pickCodeDocuments =
+    vi.fn<(window: BrowserWindow) => Promise<{ canceled: boolean; filePaths: string[] }>>()
+  pickCodeDocuments.mockResolvedValue({ canceled: true, filePaths: [] })
+  const openFile = vi.fn<(filePath: string) => Promise<IpcFileHandle>>()
+  const stat = vi.fn<(filePath: string) => Promise<{ size: number }>>()
 
   registerIpc(
     { mainWindow, preference, turnExecutor, provider, session, workspace },
@@ -118,8 +139,27 @@ function createHarness() {
     openFile,
     stat,
     window,
-    workspace
+    workspace,
+    event: createEvent({ id: 42 }).event
   }
+}
+
+async function createAttachmentHarness({
+  filePaths = [],
+  file,
+  chunkSize,
+  size
+}: {
+  filePaths?: string[]
+  file?: Uint8Array
+  chunkSize?: number
+  size?: number
+} = {}) {
+  const harness = createHarness()
+  harness.pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths })
+  if (size !== undefined) harness.stat.mockResolvedValue({ size })
+  if (file) harness.openFile.mockResolvedValue(createFileHandle(file, chunkSize))
+  return harness
 }
 
 function createEvent({
@@ -134,15 +174,15 @@ function createEvent({
   trusted?: boolean
 }) {
   const destroyedListeners: Array<() => void> = []
-  const senderFrame = { isDestroyed: vi.fn(() => frameDestroyed) }
+  const senderFrame = { isDestroyed: vi.fn<() => boolean>(() => frameDestroyed) }
   const sender = {
     id,
     mainFrame: senderFrame,
-    isDestroyed: vi.fn(() => false),
-    once: vi.fn((event: string, listener: () => void) => {
+    isDestroyed: vi.fn<() => boolean>(() => false),
+    once: vi.fn<(event: string, listener: () => void) => void>((event, listener) => {
       if (event === 'destroyed') destroyedListeners.push(listener)
     }),
-    send: vi.fn()
+    send: vi.fn<(channel: string, ...args: unknown[]) => void>()
   }
   const invokingFrame = isMainFrame ? sender.mainFrame : {}
 
@@ -155,10 +195,15 @@ function createEvent({
   return { destroyedListeners, event, sender, trusted }
 }
 
+const startTurnRequest = {
+  sessionId: 'session-1',
+  requestId: 'request-1',
+  userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
+}
+
 describe('registerIpc window control handlers', () => {
-  it('returns native focus state for the invoking window', () => {
-    const { handlers, mainWindow, window } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user gets the focus state when the renderer asks, then it reflects that window', () => {
+    const { handlers, mainWindow, window, event } = createHarness()
     mainWindow.isFocused.mockReturnValue(true)
 
     expect(handlers.get(IpcChannel.WindowControls_IsFocused)?.(event)).toBe(true)
@@ -167,12 +212,12 @@ describe('registerIpc window control handlers', () => {
 })
 
 describe('registerIpc attachment handlers', () => {
-  it('returns selected UTF-8 code documents without exposing their paths', async () => {
-    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/a.ts'] })
-    stat.mockResolvedValue({ size: 22 })
-    openFile.mockResolvedValue(createFileHandle(new TextEncoder().encode('export const value = 1')))
+  it('user gets document text when picking files, then only name and content come back', async () => {
+    const { handlers, openFile, event } = await createAttachmentHarness({
+      filePaths: ['/tmp/a.ts'],
+      size: 22,
+      file: new TextEncoder().encode('export const value = 1')
+    })
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).resolves.toEqual([
       { type: 'document', name: 'a.ts', text: 'export const value = 1' }
@@ -180,10 +225,10 @@ describe('registerIpc attachment handlers', () => {
     expect(openFile).toHaveBeenCalledWith('/tmp/a.ts')
   })
 
-  it('rejects unsupported extensions before reading a document', async () => {
-    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/archive.zip'] })
+  it('user cannot attach an unsupported file type when picked, then no file is read', async () => {
+    const { handlers, openFile, stat, event } = await createAttachmentHarness({
+      filePaths: ['/tmp/archive.zip']
+    })
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
       'Only code and text documents can be attached.'
@@ -192,11 +237,11 @@ describe('registerIpc attachment handlers', () => {
     expect(openFile).not.toHaveBeenCalled()
   })
 
-  it('rejects a file larger than 256 KiB before reading it', async () => {
-    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/large.ts'] })
-    stat.mockResolvedValue({ size: 256 * 1024 + 1 })
+  it('user learns a file is too large when it exceeds 256 KiB, then it is never read', async () => {
+    const { handlers, openFile, event } = await createAttachmentHarness({
+      filePaths: ['/tmp/large.ts'],
+      size: 256 * 1024 + 1
+    })
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
       'larger than 256 KiB'
@@ -204,25 +249,24 @@ describe('registerIpc attachment handlers', () => {
     expect(openFile).not.toHaveBeenCalled()
   })
 
-  it('rejects documents that are not valid UTF-8', async () => {
-    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/binary.ts'] })
-    stat.mockResolvedValue({ size: 2 })
-    openFile.mockResolvedValue(createFileHandle(Uint8Array.from([0xc3, 0x28])))
+  it('user cannot attach binary data when a file is not UTF-8, then it is rejected', async () => {
+    const { handlers, event } = await createAttachmentHarness({
+      filePaths: ['/tmp/binary.ts'],
+      size: 2,
+      file: Uint8Array.from([0xc3, 0x28])
+    })
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
       'not valid UTF-8'
     )
   })
 
-  it('rejects a batch larger than 1 MiB', async () => {
-    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    const paths = Array.from({ length: 5 }, (_, index) => `/tmp/${index}.ts`)
-    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: paths })
-    stat.mockResolvedValue({ size: 256 * 1024 })
-    openFile.mockResolvedValue(createFileHandle(new Uint8Array(256 * 1024)))
+  it('user is stopped when the batch exceeds 1 MiB, then it is rejected', async () => {
+    const { handlers, openFile, event } = await createAttachmentHarness({
+      filePaths: Array.from({ length: 5 }, (_, index) => `/tmp/${index}.ts`),
+      size: 256 * 1024,
+      file: new Uint8Array(256 * 1024)
+    })
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
       'exceed the 1 MiB total limit'
@@ -230,41 +274,33 @@ describe('registerIpc attachment handlers', () => {
     expect(openFile).toHaveBeenCalledTimes(4)
   })
 
-  it('returns no documents when the native picker is cancelled', async () => {
-    const { handlers } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user gets no documents when the picker is cancelled, then an empty list resolves', async () => {
+    const { handlers, event } = createHarness()
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).resolves.toEqual(
       []
     )
   })
 
-  it('reads through short filesystem reads before decoding a document', async () => {
-    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user still gets full text when the filesystem reads short, then it is complete', async () => {
     const source = new TextEncoder().encode('export {}')
-    const fileHandle = {
-      close: vi.fn().mockResolvedValue(undefined),
-      read: vi.fn(async (buffer: Uint8Array, offset: number, length: number, position: number) => {
-        const chunk = source.subarray(position, position + Math.min(2, length))
-        buffer.set(chunk, offset)
-        return { bytesRead: chunk.byteLength }
-      })
-    }
-    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: ['/tmp/short.ts'] })
-    stat.mockResolvedValue({ size: source.byteLength })
-    openFile.mockResolvedValue(fileHandle)
+    const { handlers, event } = await createAttachmentHarness({
+      filePaths: ['/tmp/short.ts'],
+      size: source.byteLength,
+      file: source,
+      chunkSize: 2
+    })
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).resolves.toEqual([
       { type: 'document', name: 'short.ts', text: 'export {}' }
     ])
   })
 
-  it('asks the user to shorten an overlong document name', async () => {
-    const { handlers, openFile, pickCodeDocuments, stat } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user is asked to shorten the name when it is too long, then no file is read', async () => {
     const name = `${'a'.repeat(198)}.ts`
-    pickCodeDocuments.mockResolvedValue({ canceled: false, filePaths: [`/tmp/${name}`] })
+    const { handlers, openFile, stat, event } = await createAttachmentHarness({
+      filePaths: [`/tmp/${name}`]
+    })
 
     await expect(handlers.get(IpcChannel.Attachments_PickCodeDocuments)?.(event)).rejects.toThrow(
       'Shorten or rename'
@@ -275,32 +311,35 @@ describe('registerIpc attachment handlers', () => {
 })
 
 describe('registerIpc chat handlers', () => {
-  it('returns capabilities only to a trusted renderer', async () => {
-    const { turnExecutor, handlers, mainWindow } = createHarness()
+  it('user gets model capabilities when the renderer asks, then they are returned', async () => {
+    const { turnExecutor, handlers, mainWindow, event } = createHarness()
     const capabilities: ModelReasoningCapabilities = {
       selectableEfforts: ['medium', 'high'],
       defaultEffort: 'medium'
     }
     turnExecutor.getModelCapabilities.mockResolvedValue(capabilities)
-    const trusted = createEvent({ id: 42 })
-    const untrusted = createEvent({ id: 43, trusted: false })
-    mainWindow.isTrustedRendererUrl.mockReturnValueOnce(true).mockReturnValueOnce(false)
+    mainWindow.isTrustedRendererUrl.mockReturnValue(true)
 
-    await expect(handlers.get(IpcChannel.Chat_GetCapabilities)?.(trusted.event)).resolves.toEqual(
+    await expect(handlers.get(IpcChannel.Chat_GetCapabilities)?.(event)).resolves.toEqual(
       capabilities
     )
     expect(turnExecutor.getModelCapabilities).toHaveBeenCalledOnce()
-    expect(() => handlers.get(IpcChannel.Chat_GetCapabilities)?.(untrusted.event)).toThrow()
   })
 
-  it('starts a trusted turn under its sender ID and sends events only to that sender', () => {
+  it('user cannot get model capabilities when the sender is untrusted, then nothing is delegated', () => {
+    const { turnExecutor, handlers, mainWindow } = createHarness()
+    mainWindow.isTrustedRendererUrl.mockReturnValue(false)
+    const { event } = createEvent({ id: 43, trusted: false })
+
+    expect(() => handlers.get(IpcChannel.Chat_GetCapabilities)?.(event)).toThrow(
+      'Untrusted window control sender'
+    )
+    expect(turnExecutor.getModelCapabilities).not.toHaveBeenCalled()
+  })
+
+  it('user sees turn events when a turn runs, then they go only to the starting sender', () => {
     const { turnExecutor, handlers } = createHarness()
     const { event, sender } = createEvent({ id: 42 })
-    const request = {
-      sessionId: 'session-1',
-      requestId: 'request-1',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
-    }
     let emit: ((event: TurnStreamEvent) => void) | undefined
     let emitTitleUpdated: ((update: { sessionId: string; title: string }) => void) | undefined
     turnExecutor.startTurn.mockImplementation((_input, sink, titleSink) => {
@@ -308,12 +347,12 @@ describe('registerIpc chat handlers', () => {
       emitTitleUpdated = titleSink
     })
 
-    handlers.get(IpcChannel.Chat_StartTurn)?.(event, request)
+    handlers.get(IpcChannel.Chat_StartTurn)?.(event, startTurnRequest)
     emit?.({ type: 'finish', requestId: 'request-1' })
     emitTitleUpdated?.({ sessionId: 'session-1', title: 'Greet the user' })
 
     expect(turnExecutor.startTurn).toHaveBeenCalledWith(
-      { ownerId: '42', request },
+      { ownerId: '42', request: startTurnRequest },
       expect.any(Function),
       expect.any(Function)
     )
@@ -327,9 +366,8 @@ describe('registerIpc chat handlers', () => {
     })
   })
 
-  it('rejects a trusted turn request without a user message', () => {
-    const { turnExecutor, handlers } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user cannot start a turn when the user message is missing, then it is rejected', () => {
+    const { turnExecutor, handlers, event } = createHarness()
 
     expect(() =>
       handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
@@ -341,9 +379,8 @@ describe('registerIpc chat handlers', () => {
     expect(turnExecutor.startTurn).not.toHaveBeenCalled()
   })
 
-  it('rejects the legacy conversation ID field in a turn request', () => {
-    const { turnExecutor, handlers } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user cannot start a turn when the conversation ID is legacy, then it is rejected', () => {
+    const { turnExecutor, handlers, event } = createHarness()
 
     expect(() =>
       handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
@@ -355,9 +392,8 @@ describe('registerIpc chat handlers', () => {
     expect(turnExecutor.startTurn).not.toHaveBeenCalled()
   })
 
-  it('aborts a validated turn under the invoking sender ID', () => {
-    const { turnExecutor, handlers } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user aborts a turn when requested, then the abort is scoped to that sender', () => {
+    const { turnExecutor, handlers, event } = createHarness()
 
     handlers.get(IpcChannel.Chat_AbortTurn)?.(event, 'request-1')
 
@@ -368,10 +404,9 @@ describe('registerIpc chat handlers', () => {
   })
 
   it.each([undefined, '', { requestId: 'request-1' }])(
-    'rejects an invalid turn abort request',
+    'user cannot abort a turn when the request is invalid, then nothing is delegated',
     (input) => {
-      const { turnExecutor, handlers } = createHarness()
-      const { event } = createEvent({ id: 42 })
+      const { turnExecutor, handlers, event } = createHarness()
 
       expect(() => handlers.get(IpcChannel.Chat_AbortTurn)?.(event, input)).toThrow(
         'Invalid turn request'
@@ -383,43 +418,34 @@ describe('registerIpc chat handlers', () => {
   it.each([
     { isMainFrame: false, trusted: true },
     { isMainFrame: true, trusted: false }
-  ])('rejects untrusted senders before starting a turn', ({ isMainFrame, trusted }) => {
-    const { turnExecutor, handlers, mainWindow } = createHarness()
-    mainWindow.isTrustedRendererUrl.mockReturnValue(trusted)
-    const { event } = createEvent({ id: 42, isMainFrame, trusted })
+  ])(
+    'user cannot start a turn when the sender is untrusted, then it is rejected',
+    ({ isMainFrame, trusted }) => {
+      const { turnExecutor, handlers, mainWindow } = createHarness()
+      mainWindow.isTrustedRendererUrl.mockReturnValue(trusted)
+      const { event } = createEvent({ id: 42, isMainFrame, trusted })
 
-    expect(() =>
-      handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
-        sessionId: 'session-1',
-        requestId: 'request-1',
-        userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
-      })
-    ).toThrow()
-    expect(turnExecutor.startTurn).not.toHaveBeenCalled()
-  })
+      expect(() => handlers.get(IpcChannel.Chat_StartTurn)?.(event, startTurnRequest)).toThrow(
+        'Untrusted window control sender'
+      )
+      expect(turnExecutor.startTurn).not.toHaveBeenCalled()
+    }
+  )
 
-  it('aborts all runs only when the invoking sender is destroyed', () => {
+  it('user has runs aborted when their window is destroyed, then others are unaffected', () => {
     const { turnExecutor, handlers } = createHarness()
     const first = createEvent({ id: 42 })
     const second = createEvent({ id: 43 })
 
-    handlers.get(IpcChannel.Chat_StartTurn)?.(first.event, {
-      sessionId: 'session-1',
-      requestId: 'request-1',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
-    })
-    handlers.get(IpcChannel.Chat_StartTurn)?.(second.event, {
-      sessionId: 'session-1',
-      requestId: 'request-1',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
-    })
+    handlers.get(IpcChannel.Chat_StartTurn)?.(first.event, startTurnRequest)
+    handlers.get(IpcChannel.Chat_StartTurn)?.(second.event, startTurnRequest)
     first.destroyedListeners.forEach((listener) => listener())
 
     expect(turnExecutor.abortAllTurns).toHaveBeenCalledWith('42')
     expect(turnExecutor.abortAllTurns).not.toHaveBeenCalledWith('43')
   })
 
-  it('stops the owner run instead of sending to a disposed renderer frame', () => {
+  it('user has the run aborted when the frame is destroyed, then no events reach it', () => {
     const { turnExecutor, handlers } = createHarness()
     const { event, sender } = createEvent({ id: 42, frameDestroyed: true })
     let emit: ((event: TurnStreamEvent) => void) | undefined
@@ -427,11 +453,7 @@ describe('registerIpc chat handlers', () => {
       emit = sink
     })
 
-    handlers.get(IpcChannel.Chat_StartTurn)?.(event, {
-      sessionId: 'session-1',
-      requestId: 'request-1',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
-    })
+    handlers.get(IpcChannel.Chat_StartTurn)?.(event, startTurnRequest)
     emit?.({ type: 'finish', requestId: 'request-1' })
 
     expect(sender.send).not.toHaveBeenCalled()
@@ -440,9 +462,8 @@ describe('registerIpc chat handlers', () => {
 })
 
 describe('registerIpc session profile handlers', () => {
-  it('delegates validated session model and thinking updates', () => {
-    const { turnExecutor, handlers } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user sets model and thinking effort when the input is valid, then both apply', () => {
+    const { turnExecutor, handlers, event } = createHarness()
 
     handlers.get(IpcChannel.Sessions_SetModelEntry)?.(event, {
       sessionId: 'session-1',
@@ -461,20 +482,23 @@ describe('registerIpc session profile handlers', () => {
     [IpcChannel.Sessions_SetModelEntry, { sessionId: 'session-1', modelEntryId: '' }],
     [IpcChannel.Sessions_SetThinkingEffort, { sessionId: '', thinkingEffort: 'high' }],
     [IpcChannel.Sessions_SetThinkingEffort, { sessionId: 'session-1', thinkingEffort: 'invalid' }]
-  ])('rejects an invalid session profile update', (channel, input) => {
-    const { turnExecutor, handlers } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  ])(
+    'user cannot update the profile when the input is invalid, then nothing applies',
+    (channel, input) => {
+      const { turnExecutor, handlers, event } = createHarness()
 
-    expect(() => handlers.get(channel)?.(event, input)).toThrow()
-    expect(turnExecutor.updateSessionModelEntry).not.toHaveBeenCalled()
-    expect(turnExecutor.updateSessionThinkingEffort).not.toHaveBeenCalled()
-  })
+      expect(() => handlers.get(channel)?.(event, input)).toThrow(
+        /Invalid session (model|thinking effort)/
+      )
+      expect(turnExecutor.updateSessionModelEntry).not.toHaveBeenCalled()
+      expect(turnExecutor.updateSessionThinkingEffort).not.toHaveBeenCalled()
+    }
+  )
 })
 
 describe('registerIpc session handlers', () => {
-  it('captures the selected project root when creating a session', () => {
-    const { handlers, session, workspace } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user starts in the chosen project when creating a session, then it seeds the cwd', () => {
+    const { handlers, session, workspace, event } = createHarness()
     workspace.getActiveProjectContext.mockReturnValue({
       kind: 'project',
       projectId: 'project-1',
@@ -493,10 +517,8 @@ describe('registerIpc session handlers', () => {
       cwd: '/projects/one'
     })
   })
-  it('returns session summaries only to a trusted renderer', () => {
-    const { handlers, mainWindow, session } = createHarness()
-    const trusted = createEvent({ id: 42 })
-    const untrusted = createEvent({ id: 43 })
+  it('user sees the saved sessions when listing them, then each summary returns', () => {
+    const { handlers, session, event } = createHarness()
     const summaries = [
       {
         id: 'session-1',
@@ -508,15 +530,24 @@ describe('registerIpc session handlers', () => {
       }
     ]
     session.listSessions.mockReturnValue(summaries)
-    mainWindow.isTrustedRendererUrl.mockReturnValueOnce(true).mockReturnValueOnce(false)
 
-    expect(handlers.get(IpcChannel.Sessions_List)?.(trusted.event)).toEqual(summaries)
-    expect(() => handlers.get(IpcChannel.Sessions_List)?.(untrusted.event)).toThrow('Untrusted')
+    expect(handlers.get(IpcChannel.Sessions_List)?.(event)).toEqual(summaries)
+    expect(session.listSessions).toHaveBeenCalledOnce()
   })
 
-  it('validates and delegates session mutations for a trusted renderer', () => {
-    const { handlers, session } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user cannot list sessions when the sender is untrusted, then nothing is delegated', () => {
+    const { handlers, mainWindow, session } = createHarness()
+    mainWindow.isTrustedRendererUrl.mockReturnValue(false)
+    const { event } = createEvent({ id: 43, trusted: false })
+
+    expect(() => handlers.get(IpcChannel.Sessions_List)?.(event)).toThrow(
+      'Untrusted window control sender'
+    )
+    expect(session.listSessions).not.toHaveBeenCalled()
+  })
+
+  it('user creates a session when providing a title, then it is created in the default workspace', () => {
+    const { handlers, session, event } = createHarness()
     const summary = {
       id: 'session-1',
       title: 'Saved chat',
@@ -525,36 +556,66 @@ describe('registerIpc session handlers', () => {
       updatedAt: 2,
       lastActivityAt: 2
     }
-    const persisted = { ...summary, messages: [] }
     session.createSession.mockReturnValue(summary)
-    session.loadSession.mockReturnValue(persisted)
-    session.renameSession.mockReturnValue(summary)
 
     expect(handlers.get(IpcChannel.Sessions_Create)?.(event, { title: 'Saved chat' })).toEqual(
       summary
     )
-    expect(handlers.get(IpcChannel.Sessions_Load)?.(event, 'session-1')).toEqual(persisted)
-    expect(handlers.get(IpcChannel.Sessions_Delete)?.(event, 'session-1')).toBeUndefined()
-    expect(
-      handlers.get(IpcChannel.Sessions_Rename)?.(event, {
-        sessionId: 'session-1',
-        title: 'Renamed chat'
-      })
-    ).toEqual(summary)
     expect(session.createSession).toHaveBeenCalledWith({
       title: 'Saved chat',
       defaultProfile: null,
       projectId: 'default',
       cwd: '/workspaces/default'
     })
+  })
+
+  it('user gets the persisted transcript when loading a session, then it is returned by ID', () => {
+    const { handlers, session, event } = createHarness()
+    const persisted = {
+      id: 'session-1',
+      title: 'Saved chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 2,
+      lastActivityAt: 2,
+      messages: []
+    }
+    session.loadSession.mockReturnValue(persisted)
+
+    expect(handlers.get(IpcChannel.Sessions_Load)?.(event, 'session-1')).toEqual(persisted)
     expect(session.loadSession).toHaveBeenCalledWith('session-1')
+  })
+
+  it('user deletes a session when requesting its removal, then the deletion is delegated by ID', () => {
+    const { handlers, session, event } = createHarness()
+
+    expect(handlers.get(IpcChannel.Sessions_Delete)?.(event, 'session-1')).toBeUndefined()
     expect(session.deleteSession).toHaveBeenCalledWith('session-1')
+  })
+
+  it('user renames a session when providing a new title, then the updated summary returns', () => {
+    const { handlers, session, event } = createHarness()
+    const summary = {
+      id: 'session-1',
+      title: 'Renamed chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 2,
+      lastActivityAt: 2
+    }
+    session.renameSession.mockReturnValue(summary)
+
+    expect(
+      handlers.get(IpcChannel.Sessions_Rename)?.(event, {
+        sessionId: 'session-1',
+        title: 'Renamed chat'
+      })
+    ).toEqual(summary)
     expect(session.renameSession).toHaveBeenCalledWith('session-1', 'Renamed chat')
   })
 
-  it('rejects invalid session input before delegation', () => {
-    const { handlers, session } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user gets an error when session input is invalid, then no mutation is delegated', () => {
+    const { handlers, session, event } = createHarness()
 
     expect(() => handlers.get(IpcChannel.Sessions_Create)?.(event, { title: '' })).toThrow(
       'Invalid session title'
@@ -574,9 +635,10 @@ describe('registerIpc session handlers', () => {
 })
 
 describe('registerIpc workspace handlers', () => {
-  it('opens only the active workspace directory for a trusted renderer', async () => {
-    const { handlers, openPath, workspace } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  const project = { id: 'project-1', name: 'One', rootPath: '/projects/one', isDefault: false }
+
+  it('user sees the project folder open when revealing it, then only its root opens', async () => {
+    const { handlers, openPath, workspace, event } = createHarness()
     workspace.getActiveProjectContext.mockReturnValue({
       kind: 'project',
       projectId: 'project-1',
@@ -591,19 +653,15 @@ describe('registerIpc workspace handlers', () => {
     expect(openPath).toHaveBeenCalledWith('/projects/one')
   })
 
-  it('lists projects for a trusted renderer', () => {
-    const { handlers, workspace } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    const project = { id: 'project-1', name: 'One', rootPath: '/projects/one', isDefault: false }
+  it('user sees registered projects when listing workspaces, then the list is returned', () => {
+    const { handlers, workspace, event } = createHarness()
     workspace.listProjects.mockReturnValue([project])
 
     expect(handlers.get(IpcChannel.Workspaces_List)?.(event)).toEqual([project])
   })
 
-  it('sets a validated project as the default for a trusted renderer', async () => {
-    const { handlers, workspace } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    const project = { id: 'project-1', name: 'One', rootPath: '/projects/one', isDefault: false }
+  it('user sets a default project when the ID is valid, then the updated one returns', async () => {
+    const { handlers, workspace, event } = createHarness()
     workspace.setDefaultProject.mockResolvedValue({ ...project, isDefault: true })
 
     await expect(
@@ -611,10 +669,8 @@ describe('registerIpc workspace handlers', () => {
     ).resolves.toEqual({ ...project, isDefault: true })
   })
 
-  it('renames a validated project for a trusted renderer', async () => {
-    const { handlers, workspace } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    const project = { id: 'project-1', name: 'One', rootPath: '/projects/one', isDefault: false }
+  it('user renames a project when the name is valid, then the renamed one is returned', async () => {
+    const { handlers, workspace, event } = createHarness()
     workspace.renameProject.mockResolvedValue(project)
 
     await expect(
@@ -625,9 +681,8 @@ describe('registerIpc workspace handlers', () => {
     ).resolves.toEqual(project)
   })
 
-  it('rejects an invalid project ID before archiving for a trusted renderer', () => {
-    const { handlers } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user cannot archive a project when the ID is invalid, then it is rejected', () => {
+    const { handlers, event } = createHarness()
 
     expect(() => handlers.get(IpcChannel.Workspaces_Archive)?.(event, '')).toThrow(
       'Invalid workspace project ID'
@@ -636,9 +691,8 @@ describe('registerIpc workspace handlers', () => {
 })
 
 describe('registerIpc provider handlers', () => {
-  it('rejects an untrusted sender before provider discovery', async () => {
-    const { handlers, mainWindow, provider } = createHarness()
-    const { event } = createEvent({ id: 42, trusted: false })
+  it('user cannot discover models when the sender is untrusted, then nothing runs', async () => {
+    const { handlers, mainWindow, provider, event } = createHarness()
     mainWindow.isTrustedRendererUrl.mockReturnValue(false)
 
     expect(() =>
@@ -650,25 +704,19 @@ describe('registerIpc provider handlers', () => {
     expect(provider.discoverModels).not.toHaveBeenCalled()
   })
 
-  it('validates and delegates a trusted configuration save', async () => {
-    const { handlers, provider } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user saves a provider configuration when valid, then it is passed through', async () => {
+    const { handlers, provider, event } = createHarness()
     const configuration = { provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }
-    provider.saveConfiguration.mockImplementation(async (input) => {
-      if (JSON.stringify(input) !== JSON.stringify(configuration)) {
-        throw new Error('Provider configuration was not forwarded.')
-      }
-      return configuration
-    })
+    provider.saveConfiguration.mockResolvedValue(configuration)
 
     await expect(
       handlers.get(IpcChannel.Providers_SaveConfiguration)?.(event, configuration)
     ).resolves.toEqual(configuration)
+    expect(provider.saveConfiguration).toHaveBeenCalledWith(configuration)
   })
 
-  it('validates and delegates a trusted provider-library snapshot', async () => {
-    const { handlers, provider } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user saves the provider library when valid, then it is passed through', async () => {
+    const { handlers, provider, event } = createHarness()
     const library = {
       configurations: [{ provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }],
       customProviders: [],
@@ -682,24 +730,21 @@ describe('registerIpc provider handlers', () => {
     await expect(handlers.get(IpcChannel.Providers_SaveLibrary)?.(event, library)).resolves.toEqual(
       library
     )
+    expect(provider.saveLibrary).toHaveBeenCalledWith(library)
   })
 
-  it('validates and delegates a trusted provider selection', async () => {
-    const { handlers, provider } = createHarness()
-    const { event } = createEvent({ id: 42 })
-    provider.selectProvider.mockImplementation(async (providerId) => {
-      if (providerId !== 'ollama') throw new Error('Provider selection was not forwarded.')
-      return providerId
-    })
+  it('user selects a provider when the ID is valid, then the selection is delegated', async () => {
+    const { handlers, provider, event } = createHarness()
+    provider.selectProvider.mockResolvedValue('ollama')
 
     await expect(
       handlers.get(IpcChannel.Providers_SelectProvider)?.(event, 'ollama')
     ).resolves.toEqual('ollama')
+    expect(provider.selectProvider).toHaveBeenCalledWith('ollama')
   })
 
-  it('rejects an invalid provider selection before delegation', () => {
-    const { handlers, provider } = createHarness()
-    const { event } = createEvent({ id: 42 })
+  it('user cannot select a provider when the ID is empty, then nothing is delegated', () => {
+    const { handlers, provider, event } = createHarness()
 
     expect(() => handlers.get(IpcChannel.Providers_SelectProvider)?.(event, '')).toThrow(
       'Invalid provider ID'
@@ -723,28 +768,36 @@ describe('registerIpc theme handlers', () => {
     shikiThemes: { dark: 'dracula', light: 'github-light' }
   }
 
-  it('returns the complete theme state only to a trusted renderer', () => {
-    const { handlers, mainWindow, preference } = createHarness()
+  it('user gets the full theme state when requesting it, then the resolved state returns', () => {
+    const { handlers, preference, event } = createHarness()
     preference.getThemeState.mockReturnValue(themeState)
-    const trusted = createEvent({ id: 42 })
-    const untrusted = createEvent({ id: 43, trusted: false })
-    mainWindow.isTrustedRendererUrl.mockReturnValueOnce(true).mockReturnValueOnce(false)
 
-    expect(handlers.get(IpcChannel.Appearance_GetThemeState)?.(trusted.event)).toEqual(themeState)
-    expect(() => handlers.get(IpcChannel.Appearance_GetThemeState)?.(untrusted.event)).toThrow(
-      'Untrusted'
-    )
+    expect(handlers.get(IpcChannel.Appearance_GetThemeState)?.(event)).toEqual(themeState)
   })
 
-  it('validates and persists trusted theme preferences', async () => {
-    const { handlers, preference } = createHarness()
+  it('user cannot get the theme state when the sender is untrusted, then it is rejected', () => {
+    const { handlers, mainWindow, preference } = createHarness()
+    mainWindow.isTrustedRendererUrl.mockReturnValue(false)
+    const { event } = createEvent({ id: 43, trusted: false })
+
+    expect(() => handlers.get(IpcChannel.Appearance_GetThemeState)?.(event)).toThrow(
+      'Untrusted window control sender'
+    )
+    expect(preference.getThemeState).not.toHaveBeenCalled()
+  })
+
+  it('user saves theme preferences when submitting them, then the saved state returns', async () => {
+    const { handlers, preference, event } = createHarness()
     preference.setThemePreferences.mockResolvedValue(themeState)
-    const { event } = createEvent({ id: 42 })
 
     await expect(
       handlers.get(IpcChannel.Appearance_SetThemePreferences)?.(event, themePreferences)
     ).resolves.toEqual(themeState)
     expect(preference.setThemePreferences).toHaveBeenCalledWith(themePreferences)
+  })
+
+  it('user cannot save theme preferences when a code theme is unsupported, then nothing is persisted', async () => {
+    const { handlers, preference, event } = createHarness()
 
     await expect(
       handlers.get(IpcChannel.Appearance_SetThemePreferences)?.(event, {
@@ -752,6 +805,6 @@ describe('registerIpc theme handlers', () => {
         codeThemeLight: 'unsupported'
       })
     ).rejects.toThrow('Invalid theme preferences')
-    expect(preference.setThemePreferences).toHaveBeenCalledOnce()
+    expect(preference.setThemePreferences).not.toHaveBeenCalled()
   })
 })

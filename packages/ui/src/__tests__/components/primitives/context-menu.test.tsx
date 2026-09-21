@@ -12,7 +12,7 @@ import {
 } from '../../../components/primitives/context-menu'
 
 describe('ContextMenu', () => {
-  it('opens a custom menu on right-click and exposes its selected action', () => {
+  it('user opens the menu when right-clicking, then the item action runs', () => {
     function RenameAction() {
       const [renamed, setRenamed] = useState(false)
 

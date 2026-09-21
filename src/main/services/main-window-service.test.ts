@@ -36,7 +36,7 @@ class TestWindow {
 }
 
 describe('registerWindowClosingHandlers', () => {
-  it('handles closed after the native window is destroyed', () => {
+  it('user sees safe cleanup when the window is destroyed, then the closing set clears', () => {
     const window = new TestWindow()
     const closingWindowIds = new Set([1])
     registerWindowClosingHandlers({

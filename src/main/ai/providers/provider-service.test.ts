@@ -8,6 +8,14 @@ import { describe, expect, it } from 'vitest'
 import { ProviderDatabase } from '../../data/provider-database'
 import { ProviderService } from './provider-service'
 
+async function enableOllama(service: ProviderService, enabled = true): Promise<void> {
+  await service.saveConfiguration({
+    provider: 'ollama',
+    baseUrl: 'http://localhost:11434',
+    enabled
+  })
+}
+
 type CreateServiceOptions = {
   database?: ProviderDatabase
   userDataPath?: string
@@ -39,13 +47,9 @@ async function createPersistentService(userDataPath: string) {
 }
 
 describe('ProviderService', () => {
-  it('resolves an enabled model entry without consulting the global selected model', async () => {
+  it('user gets the entry configuration when resolving a model entry, then the global selection is ignored', async () => {
     const service = await createService()
-    await service.saveConfiguration({
-      provider: 'ollama',
-      baseUrl: 'http://localhost:11434',
-      enabled: true
-    })
+    await enableOllama(service)
     const first = await service.importModel({
       provider: 'ollama',
       modelId: 'first-model',
@@ -64,7 +68,7 @@ describe('ProviderService', () => {
     })
   })
 
-  it('seeds only Ollama as a disabled built-in provider in an empty SQLite library', async () => {
+  it('user sees only a disabled Ollama built-in when opening an empty library, then nothing else exists', async () => {
     const service = await createService()
 
     expect(service.getLibrary()).toEqual({
@@ -77,7 +81,7 @@ describe('ProviderService', () => {
     })
   })
 
-  it('stores provider configuration including API keys, headers, and enabled state', async () => {
+  it('user gets the configuration stored when saving it, then reading it back returns the same values', async () => {
     const service = await createService()
 
     const configuration = await service.saveConfiguration({
@@ -99,7 +103,7 @@ describe('ProviderService', () => {
     })
   })
 
-  it('replaces the persisted library with one snapshot', async () => {
+  it('user gets the whole library replaced when saving a snapshot, then the state matches it exactly', async () => {
     const service = await createService()
     await service.addModel({ provider: 'ollama', modelId: 'stale-model' })
 
@@ -160,7 +164,7 @@ describe('ProviderService', () => {
     })
   })
 
-  it('preserves provider activation order across model changes and restart', async () => {
+  it('user sees provider activation preserved when the library reopens, then enabled order stays', async () => {
     const userDataPath = await mkdtemp(join(tmpdir(), 'mico-provider-enabled-order-'))
     let initial: Awaited<ReturnType<typeof createPersistentService>> | undefined
     let restarted: Awaited<ReturnType<typeof createPersistentService>> | undefined
@@ -192,7 +196,7 @@ describe('ProviderService', () => {
     }
   })
 
-  it('persists the last visited provider after reopening the SQLite library', async () => {
+  it('user returns to the last visited provider when reopening the library, then the selection is restored', async () => {
     const userDataPath = await mkdtemp(join(tmpdir(), 'mico-provider-selection-'))
     let initial: Awaited<ReturnType<typeof createPersistentService>> | undefined
     let restarted: Awaited<ReturnType<typeof createPersistentService>> | undefined
@@ -212,7 +216,7 @@ describe('ProviderService', () => {
     }
   })
 
-  it('clears the last visited provider when that custom provider is removed', async () => {
+  it('user sees the custom provider removed when it is deleted, then the selection is cleared', async () => {
     const service = await createService()
     const provider = await service.addCustomProvider({
       apiFormat: 'openai-compatible',
@@ -231,7 +235,7 @@ describe('ProviderService', () => {
     expect(service.getLibrary().selectedProviderId).toBeNull()
   })
 
-  it('keeps the original model when the provider and model ID already exist', async () => {
+  it('user keeps the original model when importing a duplicate, then the changed display name is ignored', async () => {
     const service = await createService()
     await service.importModel({ provider: 'ollama', modelId: 'llama3.2', displayName: 'Llama 3.2' })
     await service.importModel({ provider: 'ollama', modelId: 'llama3.2', displayName: 'Changed' })
@@ -247,7 +251,7 @@ describe('ProviderService', () => {
     ])
   })
 
-  it('persists fetched models and retains the enabled state of existing models', async () => {
+  it('user sees fetched models added when syncing, then existing models stay enabled', async () => {
     const service = await createService()
     await service.importModel({ provider: 'ollama', modelId: 'llama3.2', displayName: 'Llama 3.2' })
 
@@ -277,13 +281,9 @@ describe('ProviderService', () => {
     ])
   })
 
-  it('clears selection when its selected model is removed', async () => {
+  it('user sees the model removed when it is deleted, then the selection is cleared', async () => {
     const service = await createService()
-    await service.saveConfiguration({
-      provider: 'ollama',
-      baseUrl: 'http://localhost:11434',
-      enabled: true
-    })
+    await enableOllama(service)
     await service.addModel({ provider: 'ollama', modelId: 'llama3.2' })
     await service.setModelEnabled({ enabled: true, modelId: 'entry-1' })
     await service.selectModel('entry-1')
@@ -292,7 +292,7 @@ describe('ProviderService', () => {
     expect(service.getLibrary()).toMatchObject({ models: [], selectedModelId: null })
   })
 
-  it('returns the committed model after changing its enabled state', async () => {
+  it('user gets the committed model when changing its enabled state, then the entry reflects it', async () => {
     const service = await createService()
     await service.addModel({ provider: 'ollama', modelId: 'llama3.2' })
 
@@ -307,7 +307,7 @@ describe('ProviderService', () => {
     })
   })
 
-  it('adds manual models as disabled entries before other inactive models without duplicating them', async () => {
+  it('user sees manual models added when the library is synced, then they are disabled, first, and unique', async () => {
     const service = await createService()
     await service.syncModels({
       provider: 'ollama',
@@ -338,13 +338,9 @@ describe('ProviderService', () => {
     ])
   })
 
-  it('resolves only an enabled selected model from an enabled built-in provider', async () => {
+  it('user gets a chat configuration when the model is enabled, then disabled states resolve to null', async () => {
     const service = await createService()
-    await service.saveConfiguration({
-      provider: 'ollama',
-      baseUrl: 'http://localhost:11434',
-      enabled: true
-    })
+    await enableOllama(service)
     await service.addModel({ provider: 'ollama', modelId: 'qwen3:8b' })
 
     await service.setModelEnabled({ modelId: 'entry-1', enabled: false })
@@ -368,16 +364,12 @@ describe('ProviderService', () => {
     await service.setModelEnabled({ modelId: 'entry-1', enabled: true })
     await service.selectModel('entry-1')
 
-    await service.saveConfiguration({
-      provider: 'ollama',
-      baseUrl: 'http://localhost:11434',
-      enabled: false
-    })
+    await enableOllama(service, false)
 
     expect(service.getSelectedChatConfiguration()).toBeNull()
   })
 
-  it('resolves an enabled selected model from an enabled custom provider', async () => {
+  it('user gets a chat configuration when selecting from a custom provider, then baseUrl and headers apply', async () => {
     const service = await createService()
     const provider = await service.addCustomProvider({
       apiFormat: 'openai-compatible',
@@ -403,7 +395,7 @@ describe('ProviderService', () => {
     })
   })
 
-  it('deletes the legacy JSON without importing it after initializing SQLite', async () => {
+  it('user sees the legacy JSON deleted when the library initializes, then its providers are not imported', async () => {
     const userDataPath = await mkdtemp(join(tmpdir(), 'mico-provider-legacy-'))
     const legacyPath = join(userDataPath, 'providers.json')
     try {
@@ -414,7 +406,7 @@ describe('ProviderService', () => {
 
       const service = await createService({ userDataPath })
 
-      await expect(access(legacyPath)).rejects.toThrow()
+      await expect(access(legacyPath)).rejects.toThrow(/ENOENT/)
       expect(service.getLibrary().configurations).not.toContainEqual(
         expect.objectContaining({ provider: 'openai-responses' })
       )

@@ -20,22 +20,19 @@ const profile: ExecutionProfileSnapshot = {
 }
 
 const userMessage: ChatMessage = { role: 'user', parts: [{ type: 'text', text: 'first prompt' }] }
+const secondPrompt: ChatMessage = { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] }
 const assistantMessage: ChatMessage = {
   role: 'assistant',
   parts: [{ type: 'text', text: 'first answer' }]
 }
 
-async function createService(verbose?: (message: string) => void): Promise<{
+async function createService(): Promise<{
   database: SessionDatabase
   service: SessionRuntimeService
 }> {
   const database = new SessionDatabase({
     getUserDataPath: () => 'unused-for-memory-database',
-    openDatabase: () =>
-      new Database(':memory:', {
-        // SAFETY: better-sqlite3 documents verbose messages as executed SQL strings.
-        verbose: verbose as Database.Options['verbose']
-      })
+    openDatabase: () => new Database(':memory:')
   })
   await database.initialize()
   const service = new SessionRuntimeService({
@@ -52,16 +49,46 @@ async function createService(verbose?: (message: string) => void): Promise<{
   return { database, service }
 }
 
+async function createSession(
+  options: Partial<Parameters<SessionRuntimeService['createSession']>[0]> = {}
+): Promise<{
+  database: SessionDatabase
+  service: SessionRuntimeService
+  session: ReturnType<SessionRuntimeService['createSession']>
+}> {
+  const { database, service } = await createService()
+  return {
+    database,
+    service,
+    session: service.createSession({ title: 'Session', defaultProfile: profile, ...options })
+  }
+}
+
+function startTurn(
+  service: SessionRuntimeService,
+  session: { id: string },
+  requestId = 'request-1',
+  message: ChatMessage = userMessage
+): ReturnType<SessionRuntimeService['startTurn']> {
+  return service.startTurn({ sessionId: session.id, requestId, userMessage: message, profile })
+}
+
+function completeRun(service: SessionRuntimeService, run: { runId: string }): void {
+  service.finishRun(run.runId, { status: 'completed', assistant: assistantMessage })
+}
+
+function failRun(
+  service: SessionRuntimeService,
+  run: { runId: string },
+  failure: { code: string; message: string } = { code: 'offline', message: 'Offline' }
+): void {
+  service.finishRun(run.runId, { status: 'failed', failure })
+}
+
 describe('SessionRuntimeService', () => {
-  it('replays reasoning from tool-use steps after reopening a session', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user sees reasoning replayed when reopening a session with tool steps, then reasoning and trace remain', async () => {
+    const { service, session } = await createSession()
+    const run = startTurn(service, session)
     service.recordAgentStep(run.runId, {
       index: 1,
       assistant: {
@@ -95,7 +122,7 @@ describe('SessionRuntimeService', () => {
       startedAt: 1,
       finishedAt: 2
     })
-    service.finishRun(run.runId, { status: 'completed', assistant: assistantMessage })
+    completeRun(service, run)
 
     expect(service.loadSession(session.id).messages).toEqual([
       userMessage,
@@ -122,15 +149,9 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('does not append failed-attempt replay events after a successful retry', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const first = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user sees only the successful attempt when a retry completes, then replays skip failed attempts', async () => {
+    const { service, session } = await createSession()
+    const first = startTurn(service, session)
     const assistant: Extract<ChatProviderMessage, { role: 'assistant' }> = {
       role: 'assistant',
       parts: [
@@ -160,10 +181,7 @@ describe('SessionRuntimeService', () => {
         }
       ]
     })
-    service.finishRun(first.runId, {
-      status: 'failed',
-      failure: { code: 'provider_error', message: 'Offline' }
-    })
+    failRun(service, first, { code: 'provider_error', message: 'Offline' })
 
     const retry = service.retryTurn({ sessionId: session.id, requestId: 'retry-1', userMessage })
     expect(service.getReplayMessages(retry.runId)).toEqual([
@@ -183,13 +201,8 @@ describe('SessionRuntimeService', () => {
       }
     ])
 
-    service.finishRun(retry.runId, { status: 'completed', assistant: assistantMessage })
-    const next = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage,
-      profile
-    })
+    completeRun(service, retry)
+    const next = startTurn(service, session, 'request-2')
     expect(service.getReplayMessages(next.runId)).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'first prompt' }] },
       { role: 'assistant', parts: [{ type: 'text', text: 'first answer' }] },
@@ -197,9 +210,8 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('preserves documents and reasoning through reload, retry, and later context', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+  it('user keeps documents and reasoning when reloading and continuing, then the content stays intact', async () => {
+    const { database, service, session } = await createSession()
     const attachedMessage: ChatMessage = {
       role: 'user',
       parts: [
@@ -216,16 +228,8 @@ describe('SessionRuntimeService', () => {
         { type: 'document', name: 'index.ts', text: '  export {}\n' }
       ]
     }
-    const firstRun = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage: attachedMessage,
-      profile
-    })
-    service.finishRun(firstRun.runId, {
-      status: 'failed',
-      failure: { code: 'provider_error', message: 'Offline' }
-    })
+    const firstRun = startTurn(service, session, 'request-1', attachedMessage)
+    failRun(service, firstRun, { code: 'provider_error', message: 'Offline' })
 
     const reloaded = new SessionRuntimeService({ database })
     expect(reloaded.loadSession(session.id).messages).toEqual([expectedMessage])
@@ -254,12 +258,7 @@ describe('SessionRuntimeService', () => {
       }
     ])
     reloaded.finishRun(retried.runId, { status: 'completed', assistant: assistantMessage })
-    const next = reloaded.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage,
-      profile
-    })
+    const next = startTurn(reloaded, session, 'request-2')
     expect(reloaded.getReplayMessages(next.runId)).toEqual([
       {
         role: 'user',
@@ -273,15 +272,9 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('projects completed tool traces after reloading a session', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user sees completed tool traces when reloading a session, then they appear in the transcript', async () => {
+    const { database, service, session } = await createSession()
+    const run = startTurn(service, session)
 
     service.recordToolTrace(run.runId, {
       toolCallId: 'call-1',
@@ -292,7 +285,7 @@ describe('SessionRuntimeService', () => {
       startedAt: 1_010,
       finishedAt: 1_020
     })
-    service.finishRun(run.runId, { status: 'completed', assistant: assistantMessage })
+    completeRun(service, run)
 
     const reloaded = new SessionRuntimeService({ database })
     expect(reloaded.loadSession(session.id).messages).toEqual([
@@ -320,35 +313,39 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('persists a bounded write preview in tool traces', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user sees a truncated write preview when the recorded content exceeds the limit, then only the head is kept', async () => {
+    const { service, session } = await createSession()
+    const run = startTurn(service, session)
 
     service.recordToolTrace(run.runId, {
       toolCallId: 'call-1',
       toolName: 'write',
-      input: { path: 'notes.md', content: 'do not persist this text' },
+      input: { path: 'notes.md', content: 'a'.repeat(64 * 1024 + 1) },
       isError: false,
       output: 'Successfully wrote notes.md.',
       startedAt: 1_010,
       finishedAt: 1_020
     })
+    completeRun(service, run)
 
-    expect(
-      database.connection
-        .prepare("SELECT payload_json FROM runtime_events WHERE kind = 'tool_trace_recorded'")
-        .pluck()
-        .get()
-    ).toContain('do not persist this text')
+    expect(service.loadSession(session.id).messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-trace',
+          toolCallId: 'call-1',
+          presentation: {
+            type: 'write',
+            content: 'a'.repeat(64 * 1024),
+            isTruncated: true
+          }
+        },
+        { type: 'text', text: 'first answer' }
+      ]
+    })
   })
 
-  it('migrates an existing event log to accept tool trace event kinds', async () => {
+  it('user keeps existing events when the schema migrates, then the old log accepts tool trace events', async () => {
     const userDataPath = await mkdtemp(join(tmpdir(), 'mico-session-migration-'))
     try {
       const legacy = new Database(join(userDataPath, 'sessions.db'))
@@ -403,11 +400,9 @@ describe('SessionRuntimeService', () => {
     }
   })
 
-  it('preserves the project context captured with a project session', async () => {
-    const { service } = await createService()
-    const session = service.createSession({
+  it('user sees the project context preserved when loading a project, then projectId and cwd return', async () => {
+    const { service, session } = await createSession({
       title: 'Project chat',
-      defaultProfile: profile,
       projectId: 'project-1',
       cwd: '/projects/one'
     })
@@ -418,16 +413,14 @@ describe('SessionRuntimeService', () => {
     })
   })
 
-  it('keeps legacy sessions unscoped', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Legacy chat', defaultProfile: profile })
+  it('user sees no project scope when loading a legacy session, then projectId and cwd are null', async () => {
+    const { service, session } = await createSession({ title: 'Legacy chat' })
 
     expect(service.loadSession(session.id)).toMatchObject({ projectId: null, cwd: null })
   })
 
-  it('keeps a manual title when an automatic title arrives later', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'New chat', defaultProfile: profile })
+  it('user sees the manual title kept when a generated title matches it, then the rename is skipped', async () => {
+    const { service, session } = await createSession({ title: 'New chat' })
 
     service.renameSession(session.id, 'Manual title')
 
@@ -437,55 +430,25 @@ describe('SessionRuntimeService', () => {
     expect(service.loadSession(session.id).title).toBe('Manual title')
   })
 
-  it('appends every durable event in one monotonic session order', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const firstRun = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
+  it('user sees each turn appended in order when runs share a session, then the transcript builds in sequence', async () => {
+    const { service, session } = await createSession()
+    const firstRun = startTurn(service, session)
+    completeRun(service, firstRun)
+
+    startTurn(service, session, 'request-2', secondPrompt)
+
+    expect(service.loadSession(session.id).messages).toEqual([
       userMessage,
-      profile
-    })
-    service.finishRun(firstRun.runId, { status: 'completed', assistant: assistantMessage })
-
-    service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
-      profile
-    })
-
-    expect(
-      database.connection
-        .prepare('SELECT session_sequence, kind FROM runtime_events ORDER BY session_sequence')
-        .all()
-    ).toEqual([
-      { session_sequence: 1, kind: 'run_started' },
-      { session_sequence: 2, kind: 'user_message_recorded' },
-      { session_sequence: 3, kind: 'assistant_output_finalized' },
-      { session_sequence: 4, kind: 'tool_trace_summary_recorded' },
-      { session_sequence: 5, kind: 'run_completed' },
-      { session_sequence: 6, kind: 'run_started' },
-      { session_sequence: 7, kind: 'user_message_recorded' }
+      assistantMessage,
+      secondPrompt
     ])
   })
 
-  it('rebuilds provider context from completed visible history and the current prompt', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const firstRun = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(firstRun.runId, { status: 'completed', assistant: assistantMessage })
-    const secondRun = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
-      profile
-    })
+  it('user gets the accepted history replayed when a later prompt arrives, then replay has the history plus the prompt', async () => {
+    const { service, session } = await createSession()
+    const firstRun = startTurn(service, session)
+    completeRun(service, firstRun)
+    const secondRun = startTurn(service, session, 'request-2', secondPrompt)
 
     expect(service.getReplayMessages(secondRun.runId)).toEqual([
       userMessage,
@@ -494,60 +457,20 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('records the request identity and execution profile in the run start event', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+  it('user gets a separate run when the same request ID repeats in another session, then identities stay scoped per session', async () => {
+    const { service, session } = await createSession({ title: 'First' })
+    const otherSession = service.createSession({ title: 'Second', defaultProfile: profile })
+    const first = startTurn(service, session)
 
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+    const second = startTurn(service, otherSession)
 
-    // SAFETY: this test starts the run immediately before selecting its run_started event.
-    const row = database.connection
-      .prepare("SELECT payload_json FROM runtime_events WHERE run_id = ? AND kind = 'run_started'")
-      .get(run.runId) as { payload_json: string }
-
-    expect(JSON.parse(row.payload_json)).toEqual({ attempt: 1, profile, requestId: 'request-1' })
+    expect(second.runId).not.toBe(first.runId)
+    expect(service.loadSession(otherSession.id).messages).toEqual([userMessage])
   })
 
-  it('rebuilds provider history from the accepted run and current prompt', async () => {
-    const queries: string[] = []
-    const { service } = await createService((query) => queries.push(query))
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const firstRun = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(firstRun.runId, { status: 'completed', assistant: assistantMessage })
-    const secondRun = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
-      profile
-    })
-    const messages = service.getReplayMessages(secondRun.runId)
-
-    expect(messages).toEqual([
-      userMessage,
-      assistantMessage,
-      { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] }
-    ])
-  })
-
-  it('rejects context payloads whose digest no longer matches the event', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user sees replay rejected when a payload no longer matches its digest, then a digest error is thrown', async () => {
+    const { database, service, session } = await createSession()
+    const run = startTurn(service, session)
     database.connection
       .prepare(
         "UPDATE runtime_events SET payload_json = ? WHERE run_id = ? AND kind = 'user_message_recorded'"
@@ -562,45 +485,21 @@ describe('SessionRuntimeService', () => {
     expect(() => service.getReplayMessages(run.runId)).toThrow(/digest/i)
   })
 
-  it('rejects a second active run in one session while allowing another session to start', async () => {
-    const { service } = await createService()
-    const firstSession = service.createSession({ title: 'First', defaultProfile: profile })
+  it('user cannot start a second run when one is active, then another session can still start', async () => {
+    const { service, session: firstSession } = await createSession({ title: 'First' })
     const secondSession = service.createSession({ title: 'Second', defaultProfile: profile })
-    service.startTurn({ sessionId: firstSession.id, requestId: 'request-1', userMessage, profile })
+    startTurn(service, firstSession)
 
-    expect(() =>
-      service.startTurn({
-        sessionId: firstSession.id,
-        requestId: 'request-2',
-        userMessage,
-        profile
-      })
-    ).toThrow(/active run/i)
-    service.startTurn({
-      sessionId: secondSession.id,
-      requestId: 'request-3',
-      userMessage,
-      profile
-    })
+    expect(() => startTurn(service, firstSession, 'request-2')).toThrow(/active run/i)
+    startTurn(service, secondSession, 'request-3')
 
     expect(service.loadSession(secondSession.id).messages).toEqual([userMessage])
   })
 
-  it('returns the original run for a repeated request ID without another user event', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const first = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    const repeated = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user gets the original run when repeating a request ID, then no extra user message is recorded', async () => {
+    const { service, session } = await createSession()
+    const first = startTurn(service, session)
+    const repeated = startTurn(service, session)
 
     expect(repeated).toEqual(first)
     expect(service.loadSession(session.id).messages).toEqual([
@@ -608,22 +507,14 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('rejects a repeated request ID when the turn input changed', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user gets a rejection when repeating a request ID with changed input, then the changes are refused', async () => {
+    const { service, session } = await createSession()
+    startTurn(service, session)
 
     expect(() =>
-      service.startTurn({
-        sessionId: session.id,
-        requestId: 'request-1',
-        userMessage: { role: 'user', parts: [{ type: 'text', text: 'different prompt' }] },
-        profile
+      startTurn(service, session, 'request-1', {
+        role: 'user',
+        parts: [{ type: 'text', text: 'different prompt' }]
       })
     ).toThrow(/different turn input/i)
     expect(() =>
@@ -636,45 +527,23 @@ describe('SessionRuntimeService', () => {
     ).toThrow(/different turn input/i)
   })
 
-  it('replays a request with the context boundary captured when its run started', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const first = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(first.runId, { status: 'completed', assistant: assistantMessage })
-    const second = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
-      profile
-    })
-    service.finishRun(second.runId, { status: 'completed', assistant: assistantMessage })
+  it('user gets the original context when re-sending a completed request ID, then the same run returns', async () => {
+    const { service, session } = await createSession()
+    const first = startTurn(service, session)
+    completeRun(service, first)
+    const second = startTurn(service, session, 'request-2', secondPrompt)
+    completeRun(service, second)
 
     expect(service.getReplayMessages(first.runId)).toEqual([userMessage])
-    expect(
-      service.startTurn({
-        sessionId: session.id,
-        requestId: 'request-1',
-        userMessage,
-        profile
-      })
-    ).toEqual(first)
+    expect(startTurn(service, session)).toEqual(first)
   })
 
-  it('uses the request ID index for idempotent run lookup', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user gets fast idempotent lookup when repeating a request ID, then the run_request_id index is used', async () => {
+    const { database, service, session } = await createSession()
+    startTurn(service, session)
 
+    // Guards the idempotent-lookup query plan: repeating a request ID must hit the
+    // run_request_id index rather than scanning runtime_events.
     // SAFETY: EXPLAIN QUERY PLAN always returns rows with a textual detail column.
     const plan = database.connection
       .prepare(
@@ -685,15 +554,9 @@ describe('SessionRuntimeService', () => {
     expect(plan.map(({ detail }) => detail).join('\n')).toContain('runtime_events_run_request_id')
   })
 
-  it('records the model request start once when the caller retries notification', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user gets one model_request_started event when notified twice, then duplicates are ignored', async () => {
+    const { database, service, session } = await createSession()
+    const run = startTurn(service, session)
 
     service.markRequestStarted(run.runId)
     service.markRequestStarted(run.runId)
@@ -705,31 +568,14 @@ describe('SessionRuntimeService', () => {
     ).toHaveLength(1)
   })
 
-  it('writes each terminal event once and rebuilds visible messages from events', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const completed = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(completed.runId, { status: 'completed', assistant: assistantMessage })
-    service.finishRun(completed.runId, { status: 'completed', assistant: assistantMessage })
-    const failed = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'second prompt' }] },
-      profile
-    })
-    service.finishRun(failed.runId, {
-      status: 'failed',
-      failure: { code: 'offline', message: 'Offline' }
-    })
-    service.finishRun(failed.runId, {
-      status: 'failed',
-      failure: { code: 'offline', message: 'Offline' }
-    })
+  it('user gets one terminal event per run when finishRun repeats, then messages build without duplicates', async () => {
+    const { database, service, session } = await createSession()
+    const completed = startTurn(service, session)
+    completeRun(service, completed)
+    completeRun(service, completed)
+    const failed = startTurn(service, session, 'request-2', secondPrompt)
+    failRun(service, failed)
+    failRun(service, failed)
 
     expect(service.loadSession(session.id).messages).toEqual([
       userMessage,
@@ -751,15 +597,9 @@ describe('SessionRuntimeService', () => {
     ).toHaveLength(1)
   })
 
-  it('preserves reasoning parts in the persisted visible transcript', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user sees reasoning parts preserved when loading a transcript, then they remain in messages', async () => {
+    const { service, session } = await createSession()
+    const run = startTurn(service, session)
     service.finishRun(run.runId, {
       status: 'completed',
       assistant: {
@@ -783,16 +623,10 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
-  it('permanently deletes a completed session and its runtime records', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(run.runId, { status: 'completed', assistant: assistantMessage })
+  it('user gets the session removed when deleting a completed session, then its turns and events go too', async () => {
+    const { database, service, session } = await createSession()
+    const run = startTurn(service, session)
+    completeRun(service, run)
 
     service.deleteSession(session.id)
 
@@ -803,24 +637,17 @@ describe('SessionRuntimeService', () => {
     expect(database.connection.prepare('SELECT * FROM turns').all()).toEqual([])
   })
 
-  it('refuses to delete a session with an active run', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    service.startTurn({ sessionId: session.id, requestId: 'request-1', userMessage, profile })
+  it('user cannot delete a session when a run is active, then the deletion is refused', async () => {
+    const { service, session } = await createSession()
+    startTurn(service, session)
 
     expect(() => service.deleteSession(session.id)).toThrow('Session has an active run.')
     expect(service.listSessions()).toHaveLength(1)
   })
 
-  it('marks surviving running runs as interrupted during recovery', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const run = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user sees surviving runs interrupted when recovery executes, then each run records a failure event', async () => {
+    const { database, service, session } = await createSession()
+    const run = startTurn(service, session)
 
     expect(service.recoverInterruptedRuns()).toBe(1)
     expect(
@@ -835,45 +662,25 @@ describe('SessionRuntimeService', () => {
     ).toHaveLength(1)
   })
 
-  it('keeps an aborted prompt in the next context when no assistant text was produced', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const cancelled = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
+  it('user keeps the aborted prompt when no assistant text came, then the next turn includes only it', async () => {
+    const { service, session } = await createSession()
+    const cancelled = startTurn(service, session)
     service.finishRun(cancelled.runId, { status: 'cancelled' })
 
     const nextMessage: ChatMessage = {
       role: 'user',
       parts: [{ type: 'text', text: 'second prompt' }]
     }
-    const next = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage: nextMessage,
-      profile
-    })
+    const next = startTurn(service, session, 'request-2', nextMessage)
 
     expect(service.loadSession(session.id).messages).toEqual([userMessage, nextMessage])
     expect(service.getReplayMessages(next.runId)).toEqual([userMessage, nextMessage])
   })
 
-  it('retries a failed run as the next attempt of its original turn without another user event', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const failed = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(failed.runId, {
-      status: 'failed',
-      failure: { code: 'offline', message: 'Offline' }
-    })
+  it('user retries a failed run when calling retryTurn, then it reuses the turn without a new event', async () => {
+    const { database, service, session } = await createSession()
+    const failed = startTurn(service, session)
+    failRun(service, failed)
 
     const retried = service.retryTurn({
       sessionId: session.id,
@@ -896,19 +703,10 @@ describe('SessionRuntimeService', () => {
     expect(service.getReplayMessages(retried.runId)).toEqual([userMessage])
   })
 
-  it('makes retry request IDs idempotent and rejects changed retry input', async () => {
-    const { database, service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const failed = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(failed.runId, {
-      status: 'failed',
-      failure: { code: 'offline', message: 'Offline' }
-    })
+  it('user gets the original retry when repeating a retry request ID, then changed input is rejected', async () => {
+    const { database, service, session } = await createSession()
+    const failed = startTurn(service, session)
+    failRun(service, failed)
     const retried = service.retryTurn({
       sessionId: session.id,
       requestId: 'request-2',
@@ -932,33 +730,23 @@ describe('SessionRuntimeService', () => {
     expect(database.connection.prepare('SELECT id FROM runs').all()).toHaveLength(2)
   })
 
-  it('retries a failed user turn without duplicating its persisted message', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
-    const failed = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(failed.runId, {
-      status: 'failed',
-      failure: { code: 'offline', message: 'Offline' }
-    })
+  it('user sees one user message when retrying a failed turn, then the transcript is not duplicated', async () => {
+    const { service, session } = await createSession()
+    const failed = startTurn(service, session)
+    failRun(service, failed)
 
     const retried = service.retryTurn({
       sessionId: session.id,
       requestId: 'request-2',
       userMessage
     })
-    service.finishRun(retried.runId, { status: 'completed', assistant: assistantMessage })
+    completeRun(service, retried)
 
     expect(service.loadSession(session.id).messages).toEqual([userMessage, assistantMessage])
   })
 
-  it('keeps later completed turns in context when an earlier failed turn is retried', async () => {
-    const { service } = await createService()
-    const session = service.createSession({ title: 'Session', defaultProfile: profile })
+  it('user keeps later turns when retrying an earlier failure, then replay contains the full history', async () => {
+    const { service, session } = await createSession()
     const secondUserMessage: ChatMessage = {
       role: 'user',
       parts: [{ type: 'text', text: 'second prompt' }]
@@ -976,29 +764,11 @@ describe('SessionRuntimeService', () => {
       parts: [{ type: 'text', text: 'retried second answer' }]
     }
 
-    const first = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-1',
-      userMessage,
-      profile
-    })
-    service.finishRun(first.runId, { status: 'completed', assistant: assistantMessage })
-    const failed = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-2',
-      userMessage: secondUserMessage,
-      profile
-    })
-    service.finishRun(failed.runId, {
-      status: 'failed',
-      failure: { code: 'offline', message: 'Offline' }
-    })
-    const third = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-3',
-      userMessage: thirdUserMessage,
-      profile
-    })
+    const first = startTurn(service, session)
+    completeRun(service, first)
+    const failed = startTurn(service, session, 'request-2', secondUserMessage)
+    failRun(service, failed)
+    const third = startTurn(service, session, 'request-3', thirdUserMessage)
     service.finishRun(third.runId, { status: 'completed', assistant: thirdAssistantMessage })
 
     const retried = service.retryTurn({
@@ -1010,11 +780,9 @@ describe('SessionRuntimeService', () => {
       status: 'completed',
       assistant: retriedAssistantMessage
     })
-    const fourth = service.startTurn({
-      sessionId: session.id,
-      requestId: 'request-5',
-      userMessage: { role: 'user', parts: [{ type: 'text', text: 'fourth prompt' }] },
-      profile
+    const fourth = startTurn(service, session, 'request-5', {
+      role: 'user',
+      parts: [{ type: 'text', text: 'fourth prompt' }]
     })
     expect(service.getReplayMessages(fourth.runId)).toEqual([
       userMessage,

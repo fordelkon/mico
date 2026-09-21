@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { Button } from '../../../components/primitives/button'
 
 describe('Button', () => {
-  it('activates the action a consumer attaches to it', async () => {
+  it('user clicks the button when it is enabled, then the action runs', async () => {
     const user = userEvent.setup()
     function SaveAction() {
       const [saved, setSaved] = useState(false)
@@ -27,7 +27,7 @@ describe('Button', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Saved')
   })
 
-  it('prevents activation when disabled', async () => {
+  it('user clicks the button when it is disabled, then the action does not run', async () => {
     const user = userEvent.setup()
     function SaveAction() {
       const [saved, setSaved] = useState(false)
@@ -50,7 +50,7 @@ describe('Button', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved')
   })
 
-  it('can delegate its semantics to a child element', () => {
+  it('user opens the settings link when the button renders a child anchor, then it presents as a link', () => {
     render(
       <Button asChild>
         <a href="/settings">Settings</a>

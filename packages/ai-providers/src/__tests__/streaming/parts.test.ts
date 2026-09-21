@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createReasoningChunkEmitter } from '../../streaming/parts'
 
 describe('reasoning chunk emitter', () => {
-  it('opens, streams, and closes one reasoning part', () => {
+  it('user sees a reasoning part open and close when deltas emit, then finish ends it', () => {
     const emitter = createReasoningChunkEmitter(() => 'reasoning-1')
 
     expect(emitter.emitDelta('Inspect the request.')).toEqual([

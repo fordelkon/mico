@@ -35,7 +35,7 @@ async function attachFiles(user: ReturnType<typeof userEvent.setup>): Promise<vo
 }
 
 describe('ComposerAttachments', () => {
-  it('shows selected file names and UTF-8 byte sizes', async () => {
+  it('user sees file names and UTF-8 byte sizes when attaching, then a remove control appears', async () => {
     const user = userEvent.setup()
     pickCodeDocuments.mockResolvedValue([{ type: 'document', name: 'index.ts', text: '你好' }])
     render(<AttachmentHarness />)
@@ -47,7 +47,7 @@ describe('ComposerAttachments', () => {
     expect(screen.getByRole('button', { name: 'Remove index.ts' })).toBeVisible()
   })
 
-  it('removes only the selected document when file names are identical', async () => {
+  it('user removes just one duplicate when names are identical, then the other stays listed', async () => {
     const user = userEvent.setup()
     render(
       <AttachmentHarness
@@ -65,7 +65,7 @@ describe('ComposerAttachments', () => {
     expect(screen.queryByText('1 byte')).toBeNull()
   })
 
-  it('keeps existing attachments when the native picker is cancelled', async () => {
+  it('user keeps attachments when the picker is cancelled, then no error alert appears', async () => {
     const user = userEvent.setup()
     render(<AttachmentHarness initial={[{ type: 'document', name: 'keep.txt', text: 'keep' }]} />)
 
@@ -75,7 +75,7 @@ describe('ComposerAttachments', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('shows the actionable picker error and allows another selection', async () => {
+  it('user sees a picker error when a selection fails, then another selection clears it', async () => {
     const user = userEvent.setup()
     pickCodeDocuments.mockRejectedValueOnce(
       new Error('Cannot attach image.png: unsupported file type. Choose a code or text file.')
@@ -93,7 +93,7 @@ describe('ComposerAttachments', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('rejects a new batch that exceeds the combined turn byte limit', async () => {
+  it('user sees a batch rejected when it exceeds the byte limit, then existing attachments remain', async () => {
     const user = userEvent.setup()
     render(
       <AttachmentHarness
@@ -113,7 +113,7 @@ describe('ComposerAttachments', () => {
     expect(screen.getByText('0.txt')).toBeVisible()
   })
 
-  it('prevents opening another picker while a selection is pending', async () => {
+  it('user cannot reopen the picker when a selection is pending, then the control re-enables', async () => {
     const user = userEvent.setup()
     let resolvePicker: (documents: ChatDocumentPart[]) => void = () => undefined
     pickCodeDocuments.mockReturnValue(
@@ -131,7 +131,7 @@ describe('ComposerAttachments', () => {
     )
   })
 
-  it('does not restore a removed attachment when a pending picker completes', async () => {
+  it('user sees the removal stick when the pending picker completes, then only the new file remains', async () => {
     const user = userEvent.setup()
     let resolvePicker: (documents: ChatDocumentPart[]) => void = () => undefined
     pickCodeDocuments.mockReturnValue(

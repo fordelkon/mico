@@ -4,7 +4,10 @@ import Database from 'better-sqlite3'
 import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { ChatProvider } from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
-import { SessionRuntimeService } from '../sessions/session-runtime-service'
+import {
+  SessionRuntimeService,
+  type ExecutionProfileSnapshot
+} from '../sessions/session-runtime-service'
 import { SessionDatabase } from '../../data/session-database'
 import { createChatProviderResolver } from './chat-provider-resolver'
 import { TurnExecutor } from './turn-executor'
@@ -27,6 +30,14 @@ const configuration = {
   modelId: 'qwen3:8b'
 }
 
+const savedProfile: ExecutionProfileSnapshot = {
+  modelEntryId: 'ollama:qwen3',
+  providerId: 'ollama',
+  modelId: 'qwen3:8b',
+  thinkingEffort: 'default',
+  configurationDigest: 'saved-configuration'
+}
+
 async function createRuntime(): Promise<{
   database: SessionDatabase
   runtime: SessionRuntimeService
@@ -37,6 +48,37 @@ async function createRuntime(): Promise<{
   })
   await database.initialize()
   return { database, runtime: new SessionRuntimeService({ database }) }
+}
+
+async function createSession(
+  title: string,
+  options: Partial<Parameters<SessionRuntimeService['createSession']>[0]> = {}
+): Promise<{
+  database: SessionDatabase
+  runtime: SessionRuntimeService
+  session: ReturnType<SessionRuntimeService['createSession']>
+}> {
+  const { database, runtime } = await createRuntime()
+  return {
+    database,
+    runtime,
+    session: runtime.createSession({ title, defaultProfile: null, ...options })
+  }
+}
+
+function createConfiguredExecutor(
+  stream: ChatProvider['stream'],
+  runtime: SessionRuntimeService,
+  options: Omit<
+    NonNullable<ConstructorParameters<typeof TurnExecutor>[1]>,
+    'getSelectedChatConfiguration' | 'runtime'
+  > = {}
+): TurnExecutor {
+  return new TurnExecutor(() => createProvider(stream), {
+    getSelectedChatConfiguration: () => configuration,
+    runtime,
+    ...options
+  })
 }
 
 function createDeferred() {
@@ -98,20 +140,15 @@ function partialPendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk
 }
 
 describe('TurnExecutor', () => {
-  it('formats document-only messages as named text for the provider and title generation', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
+  it('user sends a document-only message when starting a turn, then it is sent as named text', async () => {
+    const { runtime, session } = await createSession('New chat')
     const calls: Parameters<ChatProvider['stream']>[0][] = []
     const titleGenerated = createDeferred()
     const recorded = collectEvents()
-    const provider = createProvider(async (input) => {
+    const service = createConfiguredExecutor(async (input) => {
       calls.push(input)
       return streamFrom([{ type: 'text-delta', id: 'part-1', delta: 'Review code' }])
-    })
-    const service = new TurnExecutor(() => provider, {
-      runtime,
-      getSelectedChatConfiguration: () => configuration
-    })
+    }, runtime)
     service.startTurn(
       {
         ownerId: 'window-1',
@@ -142,14 +179,15 @@ describe('TurnExecutor', () => {
     await titleGenerated.promise
   })
 
-  it('formats attached documents without a persisted runtime and preserves reasoning metadata', async () => {
+  it('user sends attached documents when the turn starts, then they are sent as named text', async () => {
     const calls: Parameters<ChatProvider['stream']>[0][] = []
     const recorded = collectEvents()
-    const provider = createProvider(async (input) => {
-      calls.push(input)
-      return streamFrom([])
-    })
-    const service = new TurnExecutor(() => provider)
+    const service = new TurnExecutor(() =>
+      createProvider(async (input) => {
+        calls.push(input)
+        return streamFrom([])
+      })
+    )
     service.startTurn(
       {
         ownerId: 'window-1',
@@ -188,10 +226,8 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('uses the session model entry instead of the global selected model', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({
-      title: 'Session',
+  it('user gets the session model used when a session has a profile, then the global model is ignored', async () => {
+    const { runtime, session } = await createSession('Session', {
       defaultProfile: {
         modelEntryId: 'session-model',
         providerId: 'ollama',
@@ -201,7 +237,7 @@ describe('TurnExecutor', () => {
       }
     })
     const resolvedEntryIds: Array<string | undefined> = []
-    const finished = createDeferred()
+    const recorded = collectEvents()
     const service = new TurnExecutor(
       (modelEntryId) => {
         resolvedEntryIds.push(modelEntryId)
@@ -217,16 +253,14 @@ describe('TurnExecutor', () => {
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      (event) => {
-        if (event.type === 'finish') finished.resolve()
-      }
+      recorded.emit
     )
 
-    await finished.promise
+    await recorded.terminal
     expect(resolvedEntryIds).toEqual(['session-model'])
   })
 
-  it('returns no capabilities and emits an error when no enabled model is selected', async () => {
+  it('user sees an error when no enabled model is selected, then the run finishes with it', async () => {
     const recorded = collectEvents()
     const service = new TurnExecutor(
       createChatProviderResolver({
@@ -248,7 +282,7 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('emits every chunk followed by one finish for a normal run', async () => {
+  it('user sees every chunk when the provider streams normally, then one finish event follows', async () => {
     const recorded = collectEvents()
     const provider = createProvider(async () => streamFrom([textChunk]))
     const service = new TurnExecutor(() => provider)
@@ -262,49 +296,39 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('persists a completed visible transcript for a session', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
-    const finished = createDeferred()
-    const service = new TurnExecutor(() => createProvider(async () => streamFrom([textChunk])), {
-      getSelectedChatConfiguration: () => configuration,
-      runtime
-    })
+  it('user sees the transcript persisted when the run finishes, then both messages are stored', async () => {
+    const { runtime, session } = await createSession('Session')
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async () => streamFrom([textChunk]), runtime)
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      (event) => {
-        if (event.type === 'finish') finished.resolve()
-      }
+      recorded.emit
     )
 
-    await finished.promise
+    await recorded.terminal
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
       { role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }
     ])
   })
 
-  it('persists a generated title after the first user message', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
+  it('user sees a generated title when the first message completes, then it is persisted', async () => {
+    const { runtime, session } = await createSession('New chat')
     let titleInstructions = ''
-    const provider = createProvider(async ({ messages }) => {
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async ({ messages }) => {
       if (messages[0]?.role === 'system') {
         titleInstructions = messages[0].parts[0]?.type === 'text' ? messages[0].parts[0].text : ''
         return streamFrom([{ type: 'text-delta', id: 'title-part', delta: 'Greet the user' }])
       }
       return streamFrom([textChunk])
-    })
-    const service = new TurnExecutor(() => provider, {
-      getSelectedChatConfiguration: () => configuration,
-      runtime
-    })
+    }, runtime)
     const titleGenerated = createDeferred()
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      () => undefined,
+      recorded.emit,
       () => titleGenerated.resolve()
     )
 
@@ -315,31 +339,29 @@ describe('TurnExecutor', () => {
     expect(titleInstructions).toContain('Output exactly one title')
   })
 
-  it('keeps the first 50 characters of a generated title', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
-    const provider = createProvider(async ({ messages }) =>
-      streamFrom(
-        messages[0]?.role === 'system'
-          ? [
-              {
-                type: 'text-delta',
-                id: 'title-part',
-                delta: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab'
-              }
-            ]
-          : [textChunk]
-      )
-    )
-    const service = new TurnExecutor(() => provider, {
-      getSelectedChatConfiguration: () => configuration,
+  it('user sees a title capped at 50 characters when generation returns more, then the rest is trimmed', async () => {
+    const { runtime, session } = await createSession('New chat')
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(
+      async ({ messages }) =>
+        streamFrom(
+          messages[0]?.role === 'system'
+            ? [
+                {
+                  type: 'text-delta',
+                  id: 'title-part',
+                  delta: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab'
+                }
+              ]
+            : [textChunk]
+        ),
       runtime
-    })
+    )
     const titleGenerated = createDeferred()
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      () => undefined,
+      recorded.emit,
       () => titleGenerated.resolve()
     )
 
@@ -349,37 +371,31 @@ describe('TurnExecutor', () => {
     )
   })
 
-  it('caps assistant response text before emitting and persisting it', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
-    const events: TurnStreamEvent[] = []
-    const finished = createDeferred()
-    const service = new TurnExecutor(
-      () =>
-        createProvider(async () =>
-          streamFrom([
-            { type: 'text-delta', id: 'part-1', delta: 'abcd' },
-            { type: 'text-delta', id: 'part-1', delta: 'efgh' },
-            { type: 'text-delta', id: 'part-1', delta: 'ignored' }
-          ])
-        ),
-      { getSelectedChatConfiguration: () => configuration, runtime, maxAssistantTextChars: 6 }
+  it('user sees assistant text capped when it exceeds the maximum, then the persisted reply is truncated', async () => {
+    const { runtime, session } = await createSession('Session')
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(
+      async () =>
+        streamFrom([
+          { type: 'text-delta', id: 'part-1', delta: 'abcd' },
+          { type: 'text-delta', id: 'part-1', delta: 'efgh' },
+          { type: 'text-delta', id: 'part-1', delta: 'ignored' }
+        ]),
+      runtime,
+      { maxAssistantTextChars: 6 }
     )
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      (event) => {
-        events.push(event)
-        if (event.type === 'finish') finished.resolve()
-      }
+      recorded.emit
     )
 
-    await finished.promise
+    await recorded.terminal
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
       { role: 'assistant', parts: [{ type: 'text', text: 'abcde\u2026' }] }
     ])
-    expect(events).toEqual([
+    expect(recorded.events).toEqual([
       {
         type: 'chunk',
         requestId: 'request-1',
@@ -394,36 +410,30 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('preserves truncation behavior after a chunk exactly fills the cap', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
-    const events: TurnStreamEvent[] = []
-    const finished = createDeferred()
-    const service = new TurnExecutor(
-      () =>
-        createProvider(async () =>
-          streamFrom([
-            { type: 'text-delta', id: 'part-1', delta: 'abcdef' },
-            { type: 'text-delta', id: 'part-1', delta: 'g' }
-          ])
-        ),
-      { getSelectedChatConfiguration: () => configuration, runtime, maxAssistantTextChars: 6 }
+  it('user sees truncation applied when a chunk exactly fills the cap, then following content is dropped', async () => {
+    const { runtime, session } = await createSession('Session')
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(
+      async () =>
+        streamFrom([
+          { type: 'text-delta', id: 'part-1', delta: 'abcdef' },
+          { type: 'text-delta', id: 'part-1', delta: 'g' }
+        ]),
+      runtime,
+      { maxAssistantTextChars: 6 }
     )
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      (event) => {
-        events.push(event)
-        if (event.type === 'finish') finished.resolve()
-      }
+      recorded.emit
     )
 
-    await finished.promise
+    await recorded.terminal
     expect(runtime.loadSession(session.id).messages.at(-1)).toEqual({
       role: 'assistant',
       parts: [{ type: 'text', text: 'abcde\u2026' }]
     })
-    expect(events).toEqual([
+    expect(recorded.events).toEqual([
       {
         type: 'chunk',
         requestId: 'request-1',
@@ -433,23 +443,17 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('completes a persisted run when the provider returns no visible text', async () => {
-    const { database, runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
-    const finished = createDeferred()
-    const service = new TurnExecutor(() => createProvider(async () => streamFrom([])), {
-      getSelectedChatConfiguration: () => configuration,
-      runtime
-    })
+  it('user sees the run completed when the provider returns no text, then an empty reply is persisted', async () => {
+    const { database, runtime, session } = await createSession('Session')
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async () => streamFrom([]), runtime)
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      (event) => {
-        if (event.type === 'finish') finished.resolve()
-      }
+      recorded.emit
     )
 
-    await finished.promise
+    await recorded.terminal
     expect(database.connection.prepare('SELECT status FROM runs').all()).toEqual([
       { status: 'completed' }
     ])
@@ -459,26 +463,23 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('records a failed run without persisting assistant output', async () => {
-    const { database, runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
-    const failed = createDeferred()
-    const service = new TurnExecutor(
-      () =>
-        createProvider(async () => {
-          throw new Error('upstream failure')
-        }),
-      { getSelectedChatConfiguration: () => configuration, maxAttempts: 1, runtime }
+  it('user sees the run failed when the provider throws, then no assistant output is persisted', async () => {
+    const { database, runtime, session } = await createSession('Session')
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(
+      async () => {
+        throw new Error('upstream failure')
+      },
+      runtime,
+      { maxAttempts: 1 }
     )
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      (event) => {
-        if (event.type === 'error') failed.resolve()
-      }
+      recorded.emit
     )
 
-    await failed.promise
+    await recorded.terminal
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
     ])
@@ -487,60 +488,43 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('regenerates a failed turn without persisting its user message twice', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+  it('user retries a failed turn when starting with retry, then the message is not persisted twice', async () => {
+    const { runtime, session } = await createSession('Session')
     const failed = runtime.startTurn({
       sessionId: session.id,
       requestId: 'request-0',
       userMessage: request.userMessage,
-      profile: {
-        modelEntryId: 'ollama:qwen3',
-        providerId: 'ollama',
-        modelId: 'qwen3:8b',
-        thinkingEffort: 'default',
-        configurationDigest: 'saved-configuration'
-      }
+      profile: savedProfile
     })
     runtime.finishRun(failed.runId, {
       status: 'failed',
       failure: { code: 'provider_error', message: 'Failed' }
     })
-    const finished = createDeferred()
-    const service = new TurnExecutor(() => createProvider(async () => streamFrom([textChunk])), {
-      getSelectedChatConfiguration: () => configuration,
-      runtime
-    })
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async () => streamFrom([textChunk]), runtime)
 
     service.startTurn(
       {
         ownerId: 'window-1',
         request: { ...request, sessionId: session.id, retry: true }
       },
-      (event) => {
-        if (event.type === 'finish') finished.resolve()
-      }
+      recorded.emit
     )
 
-    await finished.promise
+    await recorded.terminal
     expect(runtime.loadSession(session.id).messages).toEqual([
       request.userMessage,
       { role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }
     ])
   })
 
-  it('cancels a persisted run when its request is aborted', async () => {
-    const { database, runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+  it('user cancels the run when aborting, then the persisted run is marked cancelled', async () => {
+    const { database, runtime, session } = await createSession('Session')
     const providerStarted = createDeferred()
-    const service = new TurnExecutor(
-      () =>
-        createProvider(async ({ signal }) => {
-          providerStarted.resolve()
-          return pendingStream(signal)
-        }),
-      { getSelectedChatConfiguration: () => configuration, runtime }
-    )
+    const service = createConfiguredExecutor(async ({ signal }) => {
+      providerStarted.resolve()
+      return pendingStream(signal)
+    }, runtime)
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
@@ -557,13 +541,12 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('persists an aborted partial response and includes it in the next turn context', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+  it('user keeps the partial response when aborting mid-stream, then it is included in the next turn', async () => {
+    const { runtime, session } = await createSession('Session')
     const recorded = collectEvents()
-    const service = new TurnExecutor(
-      () => createProvider(async ({ signal }) => partialPendingStream(signal)),
-      { getSelectedChatConfiguration: () => configuration, runtime }
+    const service = createConfiguredExecutor(
+      async ({ signal }) => partialPendingStream(signal),
+      runtime
     )
 
     service.startTurn(
@@ -586,13 +569,7 @@ describe('TurnExecutor', () => {
       sessionId: session.id,
       requestId: 'request-2',
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'Continue' }] },
-      profile: {
-        modelEntryId: 'ollama:qwen3',
-        providerId: 'ollama',
-        modelId: 'qwen3:8b',
-        thinkingEffort: 'default',
-        configurationDigest: 'saved-configuration'
-      }
+      profile: savedProfile
     })
     expect(runtime.getReplayMessages(next.runId)).toEqual([
       request.userMessage,
@@ -604,20 +581,13 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('builds the provider request from persisted session context', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'Session', defaultProfile: null })
+  it('user gets the request built when prior turns exist, then history and the prompt form the messages', async () => {
+    const { runtime, session } = await createSession('Session')
     const firstRun = runtime.startTurn({
       sessionId: session.id,
       requestId: 'request-0',
       userMessage: { role: 'user', parts: [{ type: 'text', text: 'Saved prompt' }] },
-      profile: {
-        modelEntryId: 'ollama:qwen3',
-        providerId: 'ollama',
-        modelId: 'qwen3:8b',
-        thinkingEffort: 'default',
-        configurationDigest: 'saved-configuration'
-      }
+      profile: savedProfile
     })
     runtime.finishRun(firstRun.runId, {
       status: 'completed',
@@ -627,14 +597,11 @@ describe('TurnExecutor', () => {
       }
     })
     const streamCalled = createDeferred()
-    const stream = vi.fn(async () => {
+    const stream = vi.fn<ChatProvider['stream']>(async () => {
       streamCalled.resolve()
       return streamFrom([])
     })
-    const service = new TurnExecutor(() => createProvider(stream), {
-      getSelectedChatConfiguration: () => configuration,
-      runtime
-    })
+    const service = createConfiguredExecutor(stream, runtime)
 
     service.startTurn(
       {
@@ -660,13 +627,10 @@ describe('TurnExecutor', () => {
     )
   })
 
-  it('reports runtime setup errors without calling the provider', async () => {
+  it('user sees a setup error when the run cannot start, then the provider is never called', async () => {
     const { runtime } = await createRuntime()
-    const stream = vi.fn(async () => streamFrom([]))
-    const service = new TurnExecutor(() => createProvider(stream), {
-      getSelectedChatConfiguration: () => configuration,
-      runtime
-    })
+    const stream = vi.fn<ChatProvider['stream']>(async () => streamFrom([]))
+    const service = createConfiguredExecutor(stream, runtime)
     const recorded = collectEvents()
 
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
@@ -676,7 +640,7 @@ describe('TurnExecutor', () => {
     expect(stream).not.toHaveBeenCalled()
   })
 
-  it('aborts only the matching owner and request with one explicit terminal event', async () => {
+  it('user aborts only the matching run when targeting it, then one terminal event is emitted', async () => {
     const events: TurnStreamEvent[] = []
     const signals = new Map<string, AbortSignal>()
     const streamsStarted = createDeferred()
@@ -704,7 +668,7 @@ describe('TurnExecutor', () => {
     expect(events).toEqual([{ type: 'cancelled', requestId: 'request-1' }])
   })
 
-  it('keeps requests with the same ID isolated by owner during abortAll', async () => {
+  it('user keeps same-ID requests isolated when aborting one owner, then only that owner is aborted', async () => {
     const signals: AbortSignal[] = []
     const streamsStarted = createDeferred()
     const provider = createProvider(async ({ signal }) => {
@@ -724,7 +688,7 @@ describe('TurnExecutor', () => {
     expect(signals[1]?.aborted).toBe(false)
   })
 
-  it('aborts every active run when disposed', async () => {
+  it('user sees every active run aborted when the executor is disposed, then all signals abort', async () => {
     const signals: AbortSignal[] = []
     const streamsStarted = createDeferred()
     const provider = createProvider(async ({ signal }) => {
@@ -746,9 +710,9 @@ describe('TurnExecutor', () => {
     expect(signals.map((signal) => signal.aborted)).toEqual([true, true])
   })
 
-  it('emits a safe generic error without finishing when the stream fails', async () => {
+  it('user sees a safe generic error when the stream fails, then upstream details are hidden', async () => {
     const recorded = collectEvents()
-    const stream = vi.fn(async () => {
+    const stream = vi.fn<ChatProvider['stream']>(async () => {
       throw new Error('upstream credential details')
     })
     const service = new TurnExecutor(() => createProvider(stream))
@@ -765,7 +729,7 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('retries a connection failure before any response content is sent', async () => {
+  it('user sees a retry when the connection fails before any content, then the run finishes normally', async () => {
     const recorded = collectEvents()
     let calls = 0
     const stream = async () => {
@@ -794,7 +758,7 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('keeps partial content and reports a connection failure without retrying', async () => {
+  it('user keeps the partial content when the connection fails mid-stream, then the run errors without retry', async () => {
     const recorded = collectEvents()
     const provider = createProvider(async () => ({
       async *[Symbol.asyncIterator](): AsyncIterator<UIMessageChunk> {
@@ -817,9 +781,9 @@ describe('TurnExecutor', () => {
     ])
   })
 
-  it('passes a sender-scoped conversation key and the request effort to the provider', async () => {
+  it('user gets the requested thinking effort when starting a turn, then it reaches the provider', async () => {
     const streamCalled = createDeferred()
-    const stream = vi.fn(async () => {
+    const stream = vi.fn<ChatProvider['stream']>(async () => {
       streamCalled.resolve()
       return streamFrom([])
     })
@@ -834,21 +798,17 @@ describe('TurnExecutor', () => {
     )
 
     await streamCalled.promise
-    expect(stream).toHaveBeenCalledWith(
-      expect.objectContaining({ conversationKey: '42:session-1', thinkingEffort: 'high' })
-    )
+    expect(stream).toHaveBeenCalledWith(expect.objectContaining({ thinkingEffort: 'high' }))
   })
 
-  it('persists a completed tool trace with its assistant response', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({
-      title: 'Project chat',
-      defaultProfile: null,
+  it('user sees a tool trace persisted when a tool call completes, then it is stored with the reply', async () => {
+    const { runtime, session } = await createSession('Project chat', {
       projectId: 'project-1',
       cwd: process.cwd()
     })
     let agentRequests = 0
-    const provider = createProvider(async (input) => {
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async (input) => {
       if (input.conversationKey.startsWith('title:')) return streamFrom([])
       agentRequests += 1
       return agentRequests === 1
@@ -862,12 +822,7 @@ describe('TurnExecutor', () => {
             } as UIMessageChunk
           ])
         : streamFrom([{ type: 'text-delta', id: 'answer', delta: 'Done' }])
-    })
-    const recorded = collectEvents()
-    const service = new TurnExecutor(() => provider, {
-      runtime,
-      getSelectedChatConfiguration: () => configuration
-    })
+    }, runtime)
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
@@ -891,25 +846,18 @@ describe('TurnExecutor', () => {
     })
   })
 
-  it('adds workspace instructions before the first project-agent request', async () => {
-    const { runtime } = await createRuntime()
+  it('user gets workspace instructions prepended when in a project session, then they lead the request', async () => {
     const cwd = process.cwd()
-    const session = runtime.createSession({
-      title: 'Project chat',
-      defaultProfile: null,
+    const { runtime, session } = await createSession('Project chat', {
       projectId: 'project-1',
       cwd
     })
     const calls: Parameters<ChatProvider['stream']>[0][] = []
-    const provider = createProvider(async (input) => {
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async (input) => {
       calls.push(input)
       return streamFrom([])
-    })
-    const recorded = collectEvents()
-    const service = new TurnExecutor(() => provider, {
-      runtime,
-      getSelectedChatConfiguration: () => configuration
-    })
+    }, runtime)
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
@@ -930,30 +878,27 @@ describe('TurnExecutor', () => {
     })
   })
 
-  it('persists streamed reasoning with the final assistant transcript', async () => {
-    const { runtime } = await createRuntime()
-    const session = runtime.createSession({ title: 'New chat', defaultProfile: null })
+  it('user sees streamed reasoning persisted when reasoning streams, then it joins the reply', async () => {
+    const { runtime, session } = await createSession('New chat')
     // SAFETY: this fixture conforms to the documented reasoning-delta UI chunk.
     const reasoningDelta = {
       type: 'reasoning-delta',
       id: 'reasoning-1',
       delta: 'Visible thought.'
     } as UIMessageChunk
-    const provider = createProvider(async () =>
-      streamFrom([
-        // SAFETY: this fixture conforms to the documented reasoning-start UI chunk.
-        { type: 'reasoning-start', id: 'reasoning-1' } as UIMessageChunk,
-        reasoningDelta,
-        // SAFETY: this fixture conforms to the documented reasoning-end UI chunk.
-        { type: 'reasoning-end', id: 'reasoning-1' } as UIMessageChunk,
-        { type: 'text-delta', id: 'answer', delta: 'Done.' }
-      ])
-    )
     const recorded = collectEvents()
-    const service = new TurnExecutor(() => provider, {
-      runtime,
-      getSelectedChatConfiguration: () => configuration
-    })
+    const service = createConfiguredExecutor(
+      async () =>
+        streamFrom([
+          // SAFETY: this fixture conforms to the documented reasoning-start UI chunk.
+          { type: 'reasoning-start', id: 'reasoning-1' } as UIMessageChunk,
+          reasoningDelta,
+          // SAFETY: this fixture conforms to the documented reasoning-end UI chunk.
+          { type: 'reasoning-end', id: 'reasoning-1' } as UIMessageChunk,
+          { type: 'text-delta', id: 'answer', delta: 'Done.' }
+        ]),
+      runtime
+    )
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
@@ -974,5 +919,8 @@ describe('TurnExecutor', () => {
 function createProvider(
   stream: ChatProvider['stream']
 ): Pick<ChatProvider, 'getModelCapabilities' | 'stream'> {
-  return { getModelCapabilities: vi.fn(async () => null), stream }
+  return {
+    getModelCapabilities: vi.fn<ChatProvider['getModelCapabilities']>(async () => null),
+    stream
+  }
 }

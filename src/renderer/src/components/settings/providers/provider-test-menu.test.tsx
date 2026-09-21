@@ -7,8 +7,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { ProviderTestMenu } from './provider-test-menu'
 
 describe('ProviderTestMenu', () => {
-  it('passes the selected model identifier and closes the popover', async () => {
-    const onTestModel = vi.fn()
+  it('user passes the selected model id when picking one, then the popover closes', async () => {
+    const onTestModel = vi.fn<(modelId: string) => void>()
     const user = userEvent.setup()
     render(
       <ProviderTestMenu
@@ -37,7 +37,7 @@ describe('ProviderTestMenu', () => {
     expect(screen.queryByRole('listbox', { name: 'Ollama models' })).toBeNull()
   })
 
-  it('does not open when models are unavailable', async () => {
+  it('user cannot open the menu when no models exist, then the trigger is disabled', async () => {
     const user = userEvent.setup()
 
     render(
@@ -45,7 +45,7 @@ describe('ProviderTestMenu', () => {
         hasModels={false}
         isTesting={false}
         models={[]}
-        onTestModel={vi.fn()}
+        onTestModel={vi.fn<(modelId: string) => void>()}
         providerLabel="Ollama"
         testState="idle"
       />

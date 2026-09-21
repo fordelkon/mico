@@ -14,7 +14,7 @@ function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 describe('parseSse', () => {
-  it('parses named events split across chunks and joins multi-line data', async () => {
+  it('user gets complete events when SSE splits across chunks, then comments skip', async () => {
     const events = []
     for await (const event of parseSse(
       streamFrom([

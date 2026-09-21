@@ -1,41 +1,57 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createChatProvider, isProviderFinish, type ProviderStreamPart } from '../../index'
+import {
+  createChatProvider,
+  type ChatProviderConfiguration,
+  type ChatProviderStreamInput
+} from '../../index'
+import {
+  collect,
+  collectProtocol,
+  fetchCallRequestBody,
+  readTool,
+  streamDependencies
+} from '../test-helpers'
+
+type ProviderConfiguration = Extract<ChatProviderConfiguration, { provider: 'openai-responses' }>
+
+function providerConfig(overrides: Partial<ProviderConfiguration> = {}): ChatProviderConfiguration {
+  return {
+    provider: 'openai-responses',
+    baseUrl: 'https://api.openai.com/v1',
+    modelId: 'gpt-5.2',
+    ...overrides
+  }
+}
+
+function streamInput(
+  text = 'Continue.',
+  overrides: Partial<ChatProviderStreamInput> = {}
+): ChatProviderStreamInput {
+  return {
+    conversationKey: 'x',
+    messages: [{ role: 'user', parts: [{ type: 'text', text }] }],
+    thinkingEffort: 'none',
+    signal: new AbortController().signal,
+    ...overrides
+  }
+}
 
 function sseResponse(events: string): Response {
   return new Response(events, { headers: { 'content-type': 'text/event-stream' } })
 }
 
-async function collect(stream: AsyncIterable<ProviderStreamPart>) {
-  const chunks = []
-  for await (const chunk of stream) if (!isProviderFinish(chunk)) chunks.push(chunk)
-  return chunks
-}
-async function collectProtocol(stream: AsyncIterable<ProviderStreamPart>) {
-  const chunks: ProviderStreamPart[] = []
-  for await (const chunk of stream) chunks.push(chunk)
-  return chunks
-}
-
 describe('OpenAI Responses provider', () => {
-  it('exposes a completed response ID for native continuation', async () => {
+  it('user gets a continuation ID when streaming completes, then the finish carries it', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
         sseResponse('event: response.completed\ndata: {"response":{"id":"resp_next"}}\n\n')
       )
-    const provider = createChatProvider(
-      { provider: 'openai-responses', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.2' },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
     const parts = await collectProtocol(
-      await provider.stream({
-        conversationKey: 'x',
-        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }],
-        thinkingEffort: 'high',
-        signal: new AbortController().signal
-      })
+      await provider.stream(streamInput('Continue.', { thinkingEffort: 'high' }))
     )
 
     expect(parts).toContainEqual({
@@ -45,40 +61,35 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('uses a same-provider response ID for native continuation', async () => {
+  it('user gets a replayed response continued when its ID is present, then it resumes', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: response.completed\ndata: {}\n\n'))
-    const provider = createChatProvider(
-      { provider: 'openai-responses', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.2' },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
     await collect(
-      await provider.stream({
-        conversationKey: 'x',
-        messages: [
-          {
-            role: 'assistant',
-            parts: [{ type: 'text', text: 'Partial answer.' }],
-            replay: { provider: 'openai-responses', responseId: 'resp_previous' }
-          },
-          { role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }
-        ],
-        thinkingEffort: 'high',
-        signal: new AbortController().signal
-      })
+      await provider.stream(
+        streamInput('Continue.', {
+          thinkingEffort: 'high',
+          messages: [
+            {
+              role: 'assistant',
+              parts: [{ type: 'text', text: 'Partial answer.' }],
+              replay: { provider: 'openai-responses', responseId: 'resp_previous' }
+            },
+            { role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }
+          ]
+        })
+      )
     )
 
-    expect(
-      await new Request('https://example.test', fetchMock.mock.calls[0]?.[1]).json()
-    ).toMatchObject({
+    expect(await fetchCallRequestBody(fetchMock)).toMatchObject({
       previous_response_id: 'resp_previous',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'Continue.' }] }]
     })
   })
 
-  it('maps an incomplete max-output response into a resumable provider finish', async () => {
+  it('user sees a resumable finish when tokens run out, then continuation survives', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
@@ -86,18 +97,10 @@ describe('OpenAI Responses provider', () => {
           'event: response.incomplete\ndata: {"response":{"id":"resp_123","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":12,"output_tokens":34,"output_tokens_details":{"reasoning_tokens":21},"total_tokens":46}}}\n\n'
         )
       )
-    const provider = createChatProvider(
-      { provider: 'openai-responses', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.2' },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
     const parts = await collectProtocol(
-      await provider.stream({
-        conversationKey: 'x',
-        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }],
-        thinkingEffort: 'high',
-        signal: new AbortController().signal
-      })
+      await provider.stream(streamInput('Continue.', { thinkingEffort: 'high' }))
     )
 
     expect(parts).toContainEqual({
@@ -108,40 +111,30 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('preserves the no-tool assistant input shape', async () => {
+  it('user gets reasoning and text replayed when sent, then both become input_text', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: response.completed\ndata: {}\n\n'))
-    const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        modelId: 'gpt-5.2'
-      },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
     await collect(
-      await provider.stream({
-        conversationKey: 'x',
-        messages: [
-          {
-            role: 'assistant',
-            parts: [
-              { type: 'reasoning', text: 'Inspect.' },
-              { type: 'text', text: 'Done.' }
-            ]
-          },
-          { role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }
-        ],
-        thinkingEffort: 'none',
-        signal: new AbortController().signal
-      })
+      await provider.stream(
+        streamInput('Continue.', {
+          messages: [
+            {
+              role: 'assistant',
+              parts: [
+                { type: 'reasoning', text: 'Inspect.' },
+                { type: 'text', text: 'Done.' }
+              ]
+            },
+            { role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }
+          ]
+        })
+      )
     )
 
-    expect(
-      await new Request('https://example.test', fetchMock.mock.calls[0]?.[1]).json()
-    ).toMatchObject({
+    expect(await fetchCallRequestBody(fetchMock)).toMatchObject({
       input: [
         {
           role: 'assistant',
@@ -155,7 +148,7 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('maps tools and assembles multiple calls by output index', async () => {
+  it('user sees tool calls assembled by index when several stream, then each completes', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
@@ -163,34 +156,13 @@ describe('OpenAI Responses provider', () => {
           'event: response.output_item.added\ndata: {"output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"read","arguments":""}}\n\nevent: response.function_call_arguments.delta\ndata: {"output_index":0,"delta":"{\\"path\\":\\"a.ts\\"}"}\n\nevent: response.output_item.added\ndata: {"output_index":1,"item":{"type":"function_call","call_id":"call_2","name":"read","arguments":""}}\n\nevent: response.function_call_arguments.delta\ndata: {"output_index":1,"delta":"{\\"path\\":\\"b.ts\\"}"}\n\nevent: response.output_item.done\ndata: {"output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"read","arguments":"{\\"path\\":\\"a.ts\\"}"}}\n\nevent: response.output_item.done\ndata: {"output_index":1,"item":{"type":"function_call","call_id":"call_2","name":"read","arguments":"{\\"path\\":\\"b.ts\\"}"}}\n\nevent: response.completed\ndata: {}\n\n'
         )
       )
-    const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        modelId: 'gpt-5.2'
-      },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
     const chunks = await collect(
-      await provider.stream({
-        conversationKey: 'x',
-        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read files.' }] }],
-        tools: [
-          {
-            name: 'read',
-            description: 'Read a file.',
-            inputSchema: { type: 'object', properties: { path: { type: 'string' } } }
-          }
-        ],
-        thinkingEffort: 'none',
-        signal: new AbortController().signal
-      })
+      await provider.stream(streamInput('Read files.', { tools: [readTool] }))
     )
 
-    expect(
-      await new Request('https://example.test', fetchMock.mock.calls[0]?.[1]).json()
-    ).toMatchObject({
+    expect(await fetchCallRequestBody(fetchMock)).toMatchObject({
       tools: [{ type: 'function', name: 'read' }]
     })
     expect(chunks).toEqual([
@@ -221,56 +193,46 @@ describe('OpenAI Responses provider', () => {
     ])
   })
 
-  it('replays completed function calls and outputs as Responses input items', async () => {
+  it('user gets calls and outputs replayed when history is resent, then IDs survive', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: response.completed\ndata: {}\n\n'))
-    const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        modelId: 'gpt-5.2'
-      },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
     await collect(
-      await provider.stream({
-        conversationKey: 'x',
-        messages: [
-          {
-            role: 'assistant',
-            parts: [
-              { type: 'text', text: 'I will read it.' },
-              {
-                type: 'tool-call',
-                toolCallId: 'call_1',
-                toolName: 'read',
-                argumentsJson: '{"path":"a.ts"}'
-              }
-            ]
-          },
-          {
-            role: 'tool',
-            parts: [
-              {
-                type: 'tool-result',
-                toolCallId: 'call_1',
-                toolName: 'read',
-                output: 'export {}',
-                isError: false
-              }
-            ]
-          }
-        ],
-        thinkingEffort: 'none',
-        signal: new AbortController().signal
-      })
+      await provider.stream(
+        streamInput('Continue.', {
+          messages: [
+            {
+              role: 'assistant',
+              parts: [
+                { type: 'text', text: 'I will read it.' },
+                {
+                  type: 'tool-call',
+                  toolCallId: 'call_1',
+                  toolName: 'read',
+                  argumentsJson: '{"path":"a.ts"}'
+                }
+              ]
+            },
+            {
+              role: 'tool',
+              parts: [
+                {
+                  type: 'tool-result',
+                  toolCallId: 'call_1',
+                  toolName: 'read',
+                  output: 'export {}',
+                  isError: false
+                }
+              ]
+            }
+          ]
+        })
+      )
     )
 
-    expect(
-      await new Request('https://example.test', fetchMock.mock.calls[0]?.[1]).json()
-    ).toMatchObject({
+    expect(await fetchCallRequestBody(fetchMock)).toMatchObject({
       input: [
         {
           role: 'assistant',
@@ -287,7 +249,7 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('marks malformed completed function arguments as a tool input error', async () => {
+  it('user sees a tool input error when arguments are malformed, then raw input stays', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
@@ -295,25 +257,9 @@ describe('OpenAI Responses provider', () => {
           'event: response.output_item.added\ndata: {"output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"read","arguments":""}}\n\nevent: response.function_call_arguments.delta\ndata: {"output_index":0,"delta":"{"}\n\nevent: response.output_item.done\ndata: {"output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"read","arguments":"{"}}\n\nevent: response.completed\ndata: {}\n\n'
         )
       )
-    const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        modelId: 'gpt-5.2'
-      },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
-    await expect(
-      collect(
-        await provider.stream({
-          conversationKey: 'x',
-          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Read.' }] }],
-          thinkingEffort: 'none',
-          signal: new AbortController().signal
-        })
-      )
-    ).resolves.toContainEqual({
+    await expect(collect(await provider.stream(streamInput('Read.')))).resolves.toContainEqual({
       type: 'tool-input-error',
       toolCallId: 'call_1',
       toolName: 'read',
@@ -322,58 +268,32 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('marks a terminal incomplete response with an unknown reason', async () => {
+  it('user sees an unknown finish when a response lacks details, then streaming ends', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: response.incomplete\ndata: {}\n\n'))
-    const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        modelId: 'gpt-5.2'
-      },
-      { fetch: fetchMock, createId: () => 'part' }
-    )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
     await expect(
-      collectProtocol(
-        await provider.stream({
-          conversationKey: 'x',
-          messages: [{ role: 'user', parts: [{ type: 'text', text: 'Continue.' }] }],
-          thinkingEffort: 'none',
-          signal: new AbortController().signal
-        })
-      )
+      collectProtocol(await provider.stream(streamInput('Continue.')))
     ).resolves.toContainEqual({ type: 'provider-finish', reason: 'unknown' })
   })
 
-  it('appends Responses directly to a versioned API root', async () => {
+  it('user sees Responses on a versioned root when streaming starts, then it stays', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: response.completed\ndata: {}\n\n'))
     const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-        apiKey: 'key',
-        modelId: 'model'
-      },
-      { fetch: fetchMock, createId: () => 'part-1' }
+      providerConfig({ baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: 'key' }),
+      streamDependencies(fetchMock, () => 'part-1')
     )
 
-    await collect(
-      await provider.stream({
-        conversationKey: 'x',
-        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hi' }] }],
-        thinkingEffort: 'medium',
-        signal: new AbortController().signal
-      })
-    )
+    await collect(await provider.stream(streamInput('Hi', { thinkingEffort: 'medium' })))
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://ark.cn-beijing.volces.com/api/v3/responses')
   })
 
-  it('streams visible reasoning summaries separately from answer text', async () => {
+  it('user sees reasoning summaries stream beside text when sent, then text follows', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
@@ -382,26 +302,17 @@ describe('OpenAI Responses provider', () => {
         )
       )
     const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'key',
-        modelId: 'gpt-5.2'
-      },
-      { fetch: fetchMock, createId: () => 'part-1' }
+      providerConfig({ apiKey: 'key' }),
+      streamDependencies(fetchMock, () => 'part-1')
     )
 
     const chunks = await collect(
-      await provider.stream({
-        conversationKey: '42:chat-1',
-        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }],
-        thinkingEffort: 'high',
-        signal: new AbortController().signal
-      })
+      await provider.stream(
+        streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'high' })
+      )
     )
 
-    const body = await new Request('https://example.test', fetchMock.mock.calls[0]?.[1]).text()
-    expect(JSON.parse(body)).toMatchObject({
+    expect(await fetchCallRequestBody(fetchMock)).toMatchObject({
       reasoning: { effort: 'high', summary: 'auto' }
     })
     expect(chunks).toEqual([
@@ -414,7 +325,7 @@ describe('OpenAI Responses provider', () => {
     ])
   })
 
-  it('sends a Responses request with the documented selected effort', async () => {
+  it('user gets a documented request when the model is known, then the contract holds', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
@@ -423,22 +334,14 @@ describe('OpenAI Responses provider', () => {
         )
       )
     const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'key',
-        modelId: 'gpt-5.2'
-      },
-      { fetch: fetchMock, createId: () => 'part-1' }
+      providerConfig({ apiKey: 'key' }),
+      streamDependencies(fetchMock, () => 'part-1')
     )
 
     const chunks = await collect(
-      await provider.stream({
-        conversationKey: '42:chat-1',
-        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }],
-        thinkingEffort: 'xhigh',
-        signal: new AbortController().signal
-      })
+      await provider.stream(
+        streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'xhigh' })
+      )
     )
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -466,27 +369,19 @@ describe('OpenAI Responses provider', () => {
     ])
   })
 
-  it('optimistically sends an effort for an unknown model', async () => {
+  it('user gets an optimistic effort when the model is unknown, then it is sent', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: response.completed\ndata: {}\n\n'))
     const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com',
-        apiKey: 'key',
-        modelId: 'gpt-5.1'
-      },
-      { fetch: fetchMock, createId: () => 'part-1' }
+      providerConfig({ baseUrl: 'https://api.openai.com', apiKey: 'key', modelId: 'gpt-5.1' }),
+      streamDependencies(fetchMock, () => 'part-1')
     )
 
     await collect(
-      await provider.stream({
-        conversationKey: '42:chat-1',
-        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello' }] }],
-        thinkingEffort: 'xhigh',
-        signal: new AbortController().signal
-      })
+      await provider.stream(
+        streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'xhigh' })
+      )
     )
 
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
@@ -499,41 +394,25 @@ describe('OpenAI Responses provider', () => {
     )
   })
 
-  it('retries a rejected effort once and remembers the fallback', async () => {
+  it('user gets a retry without reasoning when rejected, then the fallback is kept', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('', { status: 400 }))
       .mockResolvedValue(new Response('event: response.completed\ndata: {}\n\n'))
     const provider = createChatProvider(
-      {
-        provider: 'openai-responses',
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'key',
-        modelId: 'model'
-      },
-      { fetch: fetchMock, createId: () => 'part-1' }
+      providerConfig({ apiKey: 'key', modelId: 'model' }),
+      streamDependencies(fetchMock, () => 'part-1')
     )
-    const input = {
-      conversationKey: '42:chat-1',
-      messages: [{ role: 'user' as const, parts: [{ type: 'text' as const, text: 'Hello' }] }],
-      thinkingEffort: 'high' as const,
-      signal: new AbortController().signal
-    }
+    const input = streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'high' })
 
     await collect(await provider.stream(input))
     await collect(await provider.stream(input))
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(
-      await new Request('https://example.test', fetchMock.mock.calls[0]?.[1]).json()
-    ).toMatchObject({
+    expect(await fetchCallRequestBody(fetchMock, 0)).toMatchObject({
       reasoning: { effort: 'high' }
     })
-    expect(
-      await new Request('https://example.test', fetchMock.mock.calls[1]?.[1]).json()
-    ).not.toHaveProperty('reasoning')
-    expect(
-      await new Request('https://example.test', fetchMock.mock.calls[2]?.[1]).json()
-    ).not.toHaveProperty('reasoning')
+    expect(await fetchCallRequestBody(fetchMock, 1)).not.toHaveProperty('reasoning')
+    expect(await fetchCallRequestBody(fetchMock, 2)).not.toHaveProperty('reasoning')
   })
 })

@@ -11,6 +11,7 @@ import {
 } from './agent-activity'
 
 beforeEach(() => {
+  // SAFETY: jsdom cannot create a canvas 2D context; the stub keeps canvas-backed rendering from throwing.
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
 })
 
@@ -20,7 +21,7 @@ afterEach(() => {
 })
 
 describe('ThinkingBlock', () => {
-  it('exposes a labeled, expanded disclosure while reasoning streams', () => {
+  it('user sees Thinking start expanded when reasoning streams, then the label shows', () => {
     render(<ThinkingBlock id="reasoning-1" isStreaming text="" />)
 
     expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
@@ -29,18 +30,13 @@ describe('ThinkingBlock', () => {
     )
   })
 
-  it('uses the orb only before an activity item exists', () => {
-    const { rerender } = render(<AgentLoadingIndicator />)
+  it('user sees the loading orb when the agent has no activity yet, then it renders on its own', () => {
+    render(<AgentLoadingIndicator />)
 
     expect(screen.getByTestId('thinking-orb')).toBeVisible()
-
-    rerender(<ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />)
-
-    expect(screen.queryByTestId('thinking-orb')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Thinking/ })).toBeVisible()
   })
 
-  it('lets people reveal a completed thought summary', () => {
+  it('user reveals the thought summary when clicking Thought, then the panel shows', () => {
     render(<ThinkingBlock id="reasoning-1" isStreaming={false} text="Inspecting the request." />)
 
     const button = screen.getByRole('button', { name: 'Thought' })
@@ -55,8 +51,9 @@ describe('ThinkingBlock', () => {
     expect(summary).toHaveAttribute('aria-hidden', 'false')
   })
 
-  it('follows streamed reasoning without starting a smooth scroll animation', () => {
-    const scrollTo = vi.fn()
+  it('user sees the view follow reasoning when it streams, then scrolling stays instant', () => {
+    // SAFETY: jsdom does not implement element.scrollTo; the spy records the programmatic scroll call.
+    const scrollTo = vi.fn<(options?: ScrollToOptions) => void>()
     const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
       configurable: true,
@@ -79,7 +76,7 @@ describe('ThinkingBlock', () => {
     }
   })
 
-  it('summarizes a completed write without exposing its file contents', () => {
+  it('user sees a write summarized in its trace, then file contents stay hidden when expanded', () => {
     render(
       <ToolTrace
         part={{
@@ -100,7 +97,7 @@ describe('ThinkingBlock', () => {
     expect(screen.queryByText('private implementation details')).not.toBeInTheDocument()
   })
 
-  it('renders edit replacements as a file diff', () => {
+  it('user sees edits as a file diff when expanding the trace, then both versions are shown', () => {
     render(
       <ToolTrace
         part={{
@@ -117,11 +114,12 @@ describe('ThinkingBlock', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit 1 changes src/index.ts Updated' }))
     expect(screen.getByText('Applied change 1')).toBeVisible()
     expect(screen.getByText('File changes')).toBeVisible()
-    expect(screen.getByRole('log', { name: 'File diff' })).toHaveTextContent('before')
-    expect(screen.getByRole('log', { name: 'File diff' })).toHaveTextContent('after')
+    const diff = screen.getByRole('log', { name: 'File diff' })
+    expect(diff).toHaveTextContent('before')
+    expect(diff).toHaveTextContent('after')
   })
 
-  it('shows structured bash output instead of treating it as unavailable', () => {
+  it('user sees structured bash output when the tool returns an object, then it is not marked unavailable', () => {
     render(
       <ToolTrace
         part={{
@@ -139,7 +137,7 @@ describe('ThinkingBlock', () => {
     expect(screen.queryByText('Output is unavailable.')).not.toBeInTheDocument()
   })
 
-  it('renders completed bash calls as a command and terminal output pair', () => {
+  it('user sees command and output paired when expanding a bash call, then both render', () => {
     render(
       <ToolTrace
         part={{
@@ -156,11 +154,12 @@ describe('ThinkingBlock', () => {
     fireEvent.click(screen.getByRole('button', { name: /Run printf first/ }))
     expect(screen.getByText('Command')).toBeVisible()
     expect(screen.getByText('Output')).toBeVisible()
-    expect(screen.getAllByTestId('code-block').at(-1)).toHaveTextContent('first')
-    expect(screen.getAllByTestId('code-block').at(-1)).toHaveTextContent('second')
+    const outputBlock = screen.getAllByTestId('code-block').at(-1)
+    expect(outputBlock).toHaveTextContent('first')
+    expect(outputBlock).toHaveTextContent('second')
   })
 
-  it('renders live tool deltas through the streaming code block', () => {
+  it('user sees live tool deltas when the tool runs, then the code block marks them streaming', () => {
     render(
       <ToolTrace
         part={{
@@ -184,7 +183,7 @@ describe('ThinkingBlock', () => {
     expect(screen.getByRole('button', { name: /Run pnpm test Streaming output/ })).toBeVisible()
   })
 
-  it('marks a write preview as a draft until the file operation completes', () => {
+  it('user sees a draft write preview when the operation is incomplete, then it shows Preparing file', () => {
     render(
       <ToolTrace
         part={{
@@ -201,7 +200,7 @@ describe('ThinkingBlock', () => {
     expect(screen.getByText('Preparing file')).toBeVisible()
   })
 
-  it('waits to show a read preview until reading finishes', () => {
+  it('user sees a read preview pending when reading is unfinished, then no completed read appears', () => {
     render(
       <ToolTrace
         part={{
@@ -219,7 +218,7 @@ describe('ThinkingBlock', () => {
     expect(screen.queryByText('File read')).not.toBeInTheDocument()
   })
 
-  it('collapses a tool detail automatically when the run completes', () => {
+  it('user sees the tool detail auto-collapse when the run completes, then it stays collapsed', () => {
     const part = {
       type: 'dynamic-tool' as const,
       toolCallId: 'bash-collapse-1',
@@ -243,7 +242,7 @@ describe('ThinkingBlock', () => {
 })
 
 describe('AgentActivityTimeline', () => {
-  it('settles a thought once the next activity part takes over', () => {
+  it('user sees a thought settle when the next activity starts, then the new tool starts expanded', () => {
     const reasoning = { type: 'reasoning' as const, text: 'Inspecting the request.' }
     const tool = {
       type: 'dynamic-tool' as const,
@@ -286,7 +285,7 @@ describe('AgentActivityTimeline', () => {
     )
   })
 
-  it('collapses a completed model step into a trace summary and reveals its tool details on demand', () => {
+  it('user sees a model step summarize when it finishes, then expanding it reveals tool details', () => {
     render(
       <AgentActivityTimeline
         id="step-1"

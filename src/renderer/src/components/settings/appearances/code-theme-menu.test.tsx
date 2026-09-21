@@ -4,11 +4,13 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { CodeThemeId } from '@shared/theme/theme-registry'
+
 import { CodeThemeMenu } from './code-theme-menu'
 
 describe('CodeThemeMenu', () => {
-  it('filters themes and commits the selected override', async () => {
-    const onValueChange = vi.fn()
+  it('user filters code themes when typing in search, then selecting one commits it', async () => {
+    const onValueChange = vi.fn<(value: CodeThemeId) => void>()
     const user = userEvent.setup()
 
     render(

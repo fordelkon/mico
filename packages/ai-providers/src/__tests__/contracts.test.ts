@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { isProviderFinish, providerFinish } from '../index'
 
 describe('provider protocol envelope', () => {
-  it('represents an incomplete Responses stream without becoming a UI chunk', () => {
+  it('user recognizes the provider-issued finish when inspecting the envelope, then ordinary parts are not marked as one', () => {
     const finish = providerFinish({
       reason: 'length',
       continuation: { provider: 'openai-responses', responseId: 'resp_123' },

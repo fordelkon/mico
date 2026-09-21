@@ -24,14 +24,14 @@ function renderTooltip(open: boolean) {
 }
 
 describe('Tooltip', () => {
-  it('renders accessible content through a portal when open', () => {
+  it('user sees the tooltip content when it is open, then it renders accessibly', () => {
     renderTooltip(true)
 
     expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument()
     expect(screen.getByRole('tooltip')).toHaveTextContent('More information')
   })
 
-  it('does not render content when closed', () => {
+  it('user sees no tooltip content when it is closed, then nothing is rendered', () => {
     renderTooltip(false)
 
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
