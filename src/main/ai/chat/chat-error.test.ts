@@ -2,6 +2,7 @@ import { APICallError } from '@ai-sdk/provider'
 import { describe, expect, it } from 'vitest'
 
 import { describeChatError } from './chat-error'
+import { AgentBudgetError } from './turn-failure'
 
 describe('describeChatError', () => {
   it('user sees a connection remedy when the fetch fails, then details stay generic', () => {
@@ -44,5 +45,27 @@ describe('describeChatError', () => {
       message: 'The provider is temporarily unavailable. Please try again shortly.',
       retryable: true
     })
+  })
+
+  it('user sees the budget limit when the agent stops itself, then the failure is not retried', () => {
+    expect(
+      describeChatError(
+        new AgentBudgetError(
+          'step_limit',
+          'The agent reached its model step limit before producing a final answer.'
+        )
+      )
+    ).toEqual({
+      message: 'The agent reached its model step limit before producing a final answer.',
+      retryable: false
+    })
+    expect(
+      describeChatError(
+        new AgentBudgetError(
+          'token_limit',
+          'The model reached its output token limit twice. Lower thinking effort or increase the model output limit and try again.'
+        )
+      ).retryable
+    ).toBe(false)
   })
 })

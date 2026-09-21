@@ -13,6 +13,7 @@ import * as z from 'zod'
 
 import { ToolRegistry, type ToolCall } from './tool-registry'
 import type { ToolExecutionTrace } from './tool-contract'
+import { AgentBudgetError } from '../chat/turn-failure'
 import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
 
 // MODEL_STEP is one provider.stream() request. The final step is reserved for
@@ -229,7 +230,8 @@ class ToolAgentRunner {
         const finalAssistant = replayAssistant
         if (finishReason !== 'length') return { assistantText, finalAssistant, displaySequence }
         if (outputTokenRecoveries >= MAX_OUTPUT_TOKEN_RECOVERIES)
-          throw new Error(
+          throw new AgentBudgetError(
+            'token_limit',
             'The model reached its output token limit twice. Lower thinking effort or increase the model output limit and try again.'
           )
         // Preserve the partial provider-visible response before asking the model
@@ -295,7 +297,10 @@ class ToolAgentRunner {
         })
       }
     }
-    throw new Error('The agent reached its model step limit before producing a final answer.')
+    throw new AgentBudgetError(
+      'step_limit',
+      'The agent reached its model step limit before producing a final answer.'
+    )
   }
 }
 

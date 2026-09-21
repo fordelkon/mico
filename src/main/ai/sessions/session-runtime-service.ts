@@ -2,6 +2,7 @@ import * as z from 'zod'
 
 import type { ChatProviderMessage } from '@mico/ai-providers'
 import { toolLabel } from '@shared/ai/tool-presentation'
+import type { TurnFailure } from '@shared/ai/turn-failure'
 import type { ChatMessage } from '@shared/data/schemas/chat'
 import type {
   ExecutionProfileSnapshot,
@@ -62,7 +63,7 @@ type StartTurnInput = {
 }
 type RunOutcome =
   | { status: 'completed'; assistant: ChatMessage }
-  | { status: 'failed'; failure: { code: string; message: string } }
+  | { status: 'failed'; failure: TurnFailure }
   | { status: 'cancelled'; assistant?: ChatMessage }
 type SessionRuntimeServiceDependencies = {
   createId?: () => string
@@ -505,7 +506,7 @@ class SessionRuntimeService {
     status: 'completed' | 'failed' | 'cancelled',
     event: 'run_completed' | 'run_failed' | 'run_cancelled',
     beforeEvent: (run: RunRow) => void,
-    failure?: { code: string; message: string }
+    failure?: TurnFailure
   ): void {
     this.dependencies.database.transaction(() => {
       const run = this.getRunRow(runId)

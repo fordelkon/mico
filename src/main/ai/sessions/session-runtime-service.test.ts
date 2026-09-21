@@ -10,6 +10,7 @@ import type { ChatProviderMessage } from '@mico/ai-providers'
 import { SessionDatabase } from '../../data/session-database'
 import { sessionMigrations } from '../../data/session-migrations'
 import { SessionRuntimeService, type ExecutionProfileSnapshot } from './session-runtime-service'
+import type { TurnFailure } from '@shared/ai/turn-failure'
 
 const profile: ExecutionProfileSnapshot = {
   modelEntryId: 'ollama:qwen3',
@@ -77,7 +78,7 @@ function completeRun(service: SessionRuntimeService, run: { runId: string }): vo
 function failRun(
   service: SessionRuntimeService,
   run: { runId: string },
-  failure: { code: string; message: string } = { code: 'offline', message: 'Offline' }
+  failure: TurnFailure = { code: 'provider_error', message: 'Offline' }
 ): void {
   service.finishRun(run.runId, { status: 'failed', failure })
 }

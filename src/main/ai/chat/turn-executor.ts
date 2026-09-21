@@ -9,7 +9,7 @@ import {
 import type { ChatDocumentPart, ChatMessage } from '@shared/data/schemas/chat'
 import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
 
-import { describeChatError } from './chat-error'
+import { NoModelSelectedError, toTurnFailure } from './turn-failure'
 import type { ChatProviderResolver } from './chat-provider-resolver'
 import { ToolAgentRunner } from '../tools/tool-agent-runner'
 import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
@@ -162,10 +162,9 @@ class TurnExecutor {
     const configuration = profile?.modelEntryId
       ? this.getChatConfigurationForModelEntry?.(profile.modelEntryId)
       : this.getSelectedChatConfiguration?.()
-    if (!configuration || !this.runtime)
-      throw new Error('Select an enabled model in Settings before chatting.')
+    if (!configuration || !this.runtime) throw new NoModelSelectedError()
     if (!profile?.modelEntryId)
-      throw new Error('Select an enabled model for this session before chatting.')
+      throw new NoModelSelectedError('Select an enabled model for this session before chatting.')
     this.runtime.updateDefaultProfile(
       sessionId,
       toExecutionProfile(configuration, profile.modelEntryId, thinkingEffort)
@@ -174,8 +173,7 @@ class TurnExecutor {
 
   updateSessionModelEntry(sessionId: string, modelEntryId: string): void {
     const configuration = this.getChatConfigurationForModelEntry?.(modelEntryId)
-    if (!configuration || !this.runtime)
-      throw new Error('Select an enabled model in Settings before chatting.')
+    if (!configuration || !this.runtime) throw new NoModelSelectedError()
     const thinkingEffort = this.runtime.getDefaultProfile(sessionId)?.thinkingEffort ?? 'default'
     this.runtime.updateDefaultProfile(
       sessionId,
@@ -246,11 +244,11 @@ class TurnExecutor {
         const configuration = defaultProfile
           ? this.getChatConfigurationForModelEntry?.(defaultProfile.modelEntryId)
           : this.getSelectedChatConfiguration?.()
-        if (!configuration) throw new Error('Select an enabled model in Settings before chatting.')
+        if (!configuration) throw new NoModelSelectedError()
         const modelEntryId =
           defaultProfile?.modelEntryId ?? selectedModelEntryId ?? configuration.modelId
         provider = this.resolveProvider(modelEntryId)
-        if (!provider) throw new Error('Select an enabled model in Settings before chatting.')
+        if (!provider) throw new NoModelSelectedError()
         const requestedThinkingEffort = request.thinkingEffort ?? 'default'
         effectiveThinkingEffort = request.retry
           ? 'default'
@@ -285,7 +283,7 @@ class TurnExecutor {
           )
         }
       } else provider = this.resolveProvider()
-      if (!provider) throw new Error('Select an enabled model in Settings before chatting.')
+      if (!provider) throw new NoModelSelectedError()
 
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
@@ -376,7 +374,7 @@ class TurnExecutor {
             !turn.controller.signal.aborted &&
             !receivedChunk &&
             attempt < this.maxAttempts &&
-            describeChatError(providerError).retryable
+            toTurnFailure(providerError).retryable
 
           if (!canRetry) throw providerError
 
@@ -393,21 +391,19 @@ class TurnExecutor {
       }
     } catch (error) {
       if (!turn.controller.signal.aborted) {
+        const { failure } = toTurnFailure(
+          error instanceof Error ? error : new Error('Unknown chat provider error')
+        )
         if (turn.runId) {
-          const described = describeChatError(
-            error instanceof Error ? error : new Error('Unknown chat provider error')
-          )
           this.runtime?.finishRun(turn.runId, {
             status: 'failed',
-            failure: { code: 'provider_error', message: described.message }
+            failure
           })
         }
         this.emitTerminal(turn, {
           type: 'error',
           requestId: request.requestId,
-          message: describeChatError(
-            error instanceof Error ? error : new Error('Unknown chat provider error')
-          ).message
+          message: failure.message
         })
       }
     } finally {

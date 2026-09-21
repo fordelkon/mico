@@ -844,6 +844,43 @@ describe('TurnExecutor', () => {
     })
   })
 
+  it('user sees the step limit recorded when the model never finishes, then the failure names the budget', async () => {
+    const { database, runtime, session } = await createSession('Project chat', {
+      projectId: 'project-1',
+      cwd: process.cwd()
+    })
+    let agentRequests = 0
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async (input) => {
+      if (input.conversationKey.startsWith('title:')) return streamFrom([])
+      agentRequests += 1
+      return streamFrom([
+        // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
+        {
+          type: 'tool-input-available',
+          toolCallId: `call-${agentRequests}`,
+          toolName: 'read',
+          input: { path: 'package.json', limit: 1 }
+        } as UIMessageChunk
+      ])
+    }, runtime)
+
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+
+    // SAFETY: runs stores exactly the failure_json column written by finishRun.
+    const run = database.connection
+      .prepare('SELECT failure_json FROM runs WHERE session_id = ?')
+      .get(session.id) as { failure_json: string } | undefined
+    expect(JSON.parse(run?.failure_json ?? '{}')).toEqual({
+      code: 'step_limit',
+      message: 'The agent reached its model step limit before producing a final answer.'
+    })
+  })
+
   it('user sees interim text between tool rounds when the turn is replayed, then the transcript keeps the stream order', async () => {
     const { runtime, session } = await createSession('Project chat', {
       projectId: 'project-1',
