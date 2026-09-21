@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import type { RenderResult } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -228,6 +228,70 @@ describe('ChatMessage', () => {
     expect(screen.getAllByTestId('answer-content').at(-1)).toHaveTextContent('Done.')
   })
 
+  it('user sees one agent run when an empty text block streams mid-step, then the run is not split', () => {
+    renderAssistantMessage(
+      [
+        { type: 'reasoning', text: 'Inspecting the request.', state: 'streaming' },
+        { type: 'text', text: '' },
+        { type: 'reasoning', text: 'Continuing the inspection.', state: 'streaming' }
+      ],
+      { isStreaming: true, id: 'assistant-empty-text' }
+    )
+
+    expect(screen.getAllByTestId('agent-activity-event')).toHaveLength(1)
+  })
+
+  it('user sees a finished thought stay settled when the next step starts, then the trace keeps its compact row', () => {
+    const tool = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'call-next-step',
+      toolName: 'read',
+      input: { path: 'src/index.ts' }
+    }
+    const { rerender } = renderAssistantMessage(
+      [{ type: 'reasoning', text: 'Inspecting the request.', state: 'streaming' }],
+      { isStreaming: true, id: 'assistant-interim' }
+    )
+
+    expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+
+    rerender(
+      <ChatMessage
+        isStreaming
+        message={{
+          id: 'assistant-interim',
+          role: 'assistant',
+          parts: [
+            { type: 'reasoning', text: 'Inspecting the request.', state: 'done' },
+            { type: 'text', text: 'I found the relevant component.' },
+            { ...tool, state: 'input-available' }
+          ]
+        }}
+      />
+    )
+
+    // The finished step settles: its summary collapses and only the next step
+    // stays live while the message keeps streaming.
+    expect(screen.getByRole('button', { name: 'Agent run' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agent run' }))
+    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+  })
+
   it('user sees a completed tool compacted when reasoning follows, then its details collapse', () => {
     const tool = {
       type: 'dynamic-tool' as const,
@@ -248,7 +312,7 @@ describe('ChatMessage', () => {
           role: 'assistant',
           parts: [
             { ...tool, state: 'output-available', output: 'sequence' },
-            { type: 'reasoning', text: 'Checking the next step.' }
+            { type: 'reasoning', text: 'Checking the next step.', state: 'streaming' }
           ]
         }}
       />

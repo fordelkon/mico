@@ -8,6 +8,7 @@ import {
   ChatMessageRoleSchema,
   ChatReasoningPartSchema,
   ChatToolTracePresentationSchema,
+  ChatToolTracePartSchema,
   type ChatMessage,
   type ChatToolTraceInput,
   type ChatToolTracePresentation,
@@ -28,6 +29,7 @@ type VisibleMessage = {
     | { type: 'text'; text: string }
     | { type: 'document'; name: string; text: string }
     | { type: 'reasoning'; text: string }
+    | ChatToolTracePart
   >
   metadata?: { completionState?: 'complete' | 'stopped' }
 }
@@ -37,7 +39,8 @@ const VisibleMessageSchema: z.ZodType<VisibleMessage> = z.object({
     z.union([
       z.object({ type: z.literal('text'), text: z.string() }),
       ChatDocumentPartSchema,
-      ChatReasoningPartSchema
+      ChatReasoningPartSchema,
+      ChatToolTracePartSchema
     ])
   ),
   metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional()
@@ -222,6 +225,9 @@ class SessionRuntimeService {
           return []
         const message = parseMessagePayload(row.payload_json).message
         if (row.kind !== 'assistant_output_finalized') return [message]
+        // Finalized outputs that embed their tool traces already carry the exact
+        // stream order; event reassembly only fills legacy or interrupted runs.
+        if (message.parts.some((part) => part.type === 'tool-trace')) return [message]
         return [
           {
             ...message,
@@ -897,6 +903,7 @@ function visibleMessage(message: ChatMessage): VisibleMessage {
     if (part.type === 'text') parts.push({ type: 'text', text: part.text })
     else if (part.type === 'document') parts.push(part)
     else if (part.type === 'reasoning') parts.push({ type: 'reasoning', text: part.text })
+    else if (part.type === 'tool-trace') parts.push(part)
   }
   const visible: VisibleMessage = {
     role: message.role,
@@ -1080,6 +1087,10 @@ function toToolTracePart(trace: StoredToolTrace): ChatToolTracePart {
     output: trace.summary
   }
 }
+/** The persisted-display form of a finished tool execution, identical to replayed traces. */
+function toDisplayToolTrace(trace: ToolExecutionTrace): ChatToolTracePart {
+  return toToolTracePart(toStoredToolTrace(trace))
+}
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -1099,7 +1110,7 @@ function canonicalJson(value: JsonValue): string {
   return JSON.stringify(value)
 }
 
-export { SessionRuntimeService }
+export { SessionRuntimeService, toDisplayToolTrace }
 export type {
   ExecutionProfileSnapshot,
   PersistedSession,

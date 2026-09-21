@@ -1,4 +1,5 @@
 import { Button } from '@mico/ui'
+import type { ReasoningUIPart } from 'ai'
 import { ChevronDownIcon, SparklesIcon } from 'lucide-react'
 import * as React from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
@@ -9,7 +10,7 @@ import { ToolTrace, type ToolActivityPart, type ToolOutputDelta } from './tools/
 const thinkingOrbStates = ['working', 'searching', 'solving'] as const
 
 type ThinkingOrbState = (typeof thinkingOrbStates)[number]
-type AgentActivityPart = { text: string; type: 'reasoning' } | ToolActivityPart
+type AgentActivityPart = ReasoningUIPart | ToolActivityPart
 
 function getCompletedSummary(parts: AgentActivityPart[]): string {
   const toolCount = parts.filter((part) => part.type === 'dynamic-tool').length
@@ -55,16 +56,19 @@ function AgentLoadingIndicator({
  */
 function AgentActivityTimeline({
   id,
-  isAnswerStreaming,
+  isSettled = false,
   isStreaming,
   parts
 }: {
   id: string
-  isAnswerStreaming: boolean
+  isSettled?: boolean
   isStreaming: boolean
   parts: AgentActivityPart[]
 }): React.JSX.Element {
-  const isLive = isStreaming && !isAnswerStreaming
+  // A step stays live for its whole run — reasoning, tools, and the gaps between
+  // parts. It settles exactly once, when interim or final text closes the step or
+  // the message stops streaming; it must not collapse between individual tools.
+  const isLive = isStreaming && !isSettled
   const [open, setOpen] = React.useState(false)
   const [hasUserToggled, setHasUserToggled] = React.useState(false)
   const viewportRef = React.useRef<HTMLDivElement>(null)
@@ -145,10 +149,10 @@ function AgentActivityTimeline({
               {part.type === 'reasoning' ? (
                 <ThinkingTrace
                   id={`${id}-${index}`}
-                  isAnswerStreaming={isAnswerStreaming}
-                  // Only the newest part is still streaming: a thought settles as
-                  // soon as the model moves on to a tool call or another part.
-                  isStreaming={isStreaming && index === parts.length - 1}
+                  // The shimmer follows the reasoning part's own lifecycle state,
+                  // not its position: a thought settles when its stream ends even
+                  // if the message keeps streaming past this step.
+                  isStreaming={isStreaming && part.state === 'streaming'}
                   text={part.text}
                 />
               ) : (

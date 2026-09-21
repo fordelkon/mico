@@ -50,6 +50,15 @@ type AgentStep = {
   assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
   toolResults: Awaited<ReturnType<ToolRegistry['execute']>>[]
 }
+/**
+ * The turn's parts in exact stream order across every model step. This is the
+ * authoritative transcript for persisted display: an agent run is the activity
+ * between two text outputs, so positions must survive persistence verbatim.
+ */
+type AgentDisplayPart =
+  | { type: 'reasoning'; text: string }
+  | { type: 'text'; textId: string; text: string }
+  | { type: 'tool-call'; toolCallId: string; toolName: string }
 
 const ToolInputAvailableChunkSchema = z.object({
   type: z.literal('tool-input-available'),
@@ -95,6 +104,7 @@ class ToolAgentRunner {
   }: ToolAgentRunnerInput): Promise<{
     assistantText: string
     finalAssistant: Extract<ChatProviderMessage, { role: 'assistant' }>
+    displaySequence: AgentDisplayPart[]
   }> {
     let history = [...messages]
     let assistantText = ''
@@ -102,6 +112,7 @@ class ToolAgentRunner {
     let outputTokenRecoveries = 0
     let toolRoundCount = 0
     let mustFinish = false
+    const displaySequence: AgentDisplayPart[] = []
     for (let modelStep = 1; modelStep <= MAX_MODEL_STEPS; modelStep += 1) {
       signal.throwIfAborted()
       const request = {
@@ -120,6 +131,10 @@ class ToolAgentRunner {
         ChatProviderReasoningPart | ChatProviderTextPart | ChatProviderToolCallPart
       > = []
       const reasoningParts = new Map<string, ChatProviderReasoningPart>()
+      // Display accumulation mirrors the renderer's part identity: text merges by
+      // chunk id, reasoning by its id, tool calls stay in stream position.
+      const displayParts: AgentDisplayPart[] = []
+      const displayTexts = new Map<string, Extract<AgentDisplayPart, { type: 'text' }>>()
       let finishReason: 'length' | 'stop' | 'tool-calls' | 'unknown' = 'stop'
       let continuation: Extract<ChatProviderMessage, { role: 'assistant' }>['replay']
       for await (const chunk of stream) {
@@ -138,6 +153,13 @@ class ToolAgentRunner {
         if (chunk.type === 'text-delta') {
           assistantText += chunk.delta
           appendTextPart(parts, chunk.delta)
+          let displayText = displayTexts.get(chunk.id)
+          if (!displayText) {
+            displayText = { type: 'text', textId: chunk.id, text: '' }
+            displayTexts.set(chunk.id, displayText)
+            displayParts.push(displayText)
+          }
+          displayText.text += chunk.delta
         }
         if (chunk.type === 'tool-input-start') {
           emit({ ...chunk, dynamic: true })
@@ -153,6 +175,7 @@ class ToolAgentRunner {
           const part: ChatProviderReasoningPart = { type: 'reasoning', text: '' }
           reasoningParts.set(reasoningStart.data.id, part)
           parts.push(part)
+          displayParts.push(part)
           emit(chunk)
           continue
         }
@@ -187,8 +210,16 @@ class ToolAgentRunner {
           toolName: call.toolName,
           argumentsJson: JSON.stringify(call.input)
         })
+        displayParts.push({
+          type: 'tool-call',
+          toolCallId: call.toolCallId,
+          toolName: call.toolName
+        })
         emit({ ...chunk, dynamic: true })
       }
+      displaySequence.push(
+        ...displayParts.filter((part) => part.type === 'tool-call' || part.text !== '')
+      )
       const assistant = {
         role: 'assistant' as const,
         parts: parts.filter((part) => part.type !== 'reasoning' || part.text)
@@ -196,7 +227,7 @@ class ToolAgentRunner {
       const replayAssistant = continuation ? { ...assistant, replay: continuation } : assistant
       if (!calls.length) {
         const finalAssistant = replayAssistant
-        if (finishReason !== 'length') return { assistantText, finalAssistant }
+        if (finishReason !== 'length') return { assistantText, finalAssistant, displaySequence }
         if (outputTokenRecoveries >= MAX_OUTPUT_TOKEN_RECOVERIES)
           throw new Error(
             'The model reached its output token limit twice. Lower thinking effort or increase the model output limit and try again.'
@@ -329,4 +360,4 @@ function emitToolResult(
 }
 
 export { ToolAgentRunner }
-export type { AgentStep }
+export type { AgentDisplayPart, AgentStep }

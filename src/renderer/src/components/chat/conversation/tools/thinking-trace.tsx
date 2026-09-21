@@ -4,19 +4,15 @@ import * as React from 'react'
 
 type ThinkingTraceProps = {
   id: string
-  isAnswerStreaming?: boolean
   isStreaming: boolean
   text: string
 }
 
 /** A reasoning trace owns the only token-by-token / auto-follow presentation in a model step. */
-function ThinkingTrace({
-  id,
-  isAnswerStreaming = false,
-  isStreaming,
-  text
-}: ThinkingTraceProps): React.JSX.Element | null {
-  const isThinking = isStreaming && !isAnswerStreaming
+function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX.Element | null {
+  // The reasoning part's own lifecycle state gates isStreaming upstream, so the
+  // shimmer follows the reasoning-end chunk instead of list position.
+  const isThinking = isStreaming
   const [expanded, setExpanded] = React.useState(isThinking)
   const [hasUserToggled, setHasUserToggled] = React.useState(false)
   const wasThinking = React.useRef(isThinking)

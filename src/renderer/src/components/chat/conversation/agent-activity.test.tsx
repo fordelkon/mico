@@ -243,7 +243,11 @@ describe('ThinkingBlock', () => {
 
 describe('AgentActivityTimeline', () => {
   it('user sees a thought settle when the next activity starts, then the new tool starts expanded', () => {
-    const reasoning = { type: 'reasoning' as const, text: 'Inspecting the request.' }
+    const reasoning = {
+      type: 'reasoning' as const,
+      text: 'Inspecting the request.',
+      state: 'streaming' as const
+    }
     const tool = {
       type: 'dynamic-tool' as const,
       toolCallId: 'read-live-1',
@@ -252,12 +256,7 @@ describe('AgentActivityTimeline', () => {
       input: { path: 'src/index.ts' }
     }
     const { rerender } = render(
-      <AgentActivityTimeline
-        id="step-live"
-        isAnswerStreaming={false}
-        isStreaming
-        parts={[reasoning]}
-      />
+      <AgentActivityTimeline id="step-live" isStreaming parts={[reasoning]} />
     )
 
     expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
@@ -268,9 +267,8 @@ describe('AgentActivityTimeline', () => {
     rerender(
       <AgentActivityTimeline
         id="step-live"
-        isAnswerStreaming={false}
         isStreaming
-        parts={[reasoning, tool]}
+        parts={[{ ...reasoning, state: 'done' as const }, tool]}
       />
     )
 
@@ -285,11 +283,55 @@ describe('AgentActivityTimeline', () => {
     )
   })
 
+  it('user sees the step stay open between tools, then it settles once when the step closes', () => {
+    const reasoning = {
+      type: 'reasoning' as const,
+      text: 'Inspecting the request.',
+      state: 'streaming' as const
+    }
+    const read = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'read-seq-1',
+      toolName: 'read',
+      state: 'input-available' as const,
+      input: { path: 'src/index.ts' }
+    }
+    const readDone = { ...read, state: 'output-available' as const, output: 'export {}' }
+    const { rerender } = render(
+      <AgentActivityTimeline id="step-seq" isStreaming parts={[reasoning]} />
+    )
+
+    // The read completes and the run continues without a new part yet: the step
+    // must not collapse in the gap between tools.
+    rerender(
+      <AgentActivityTimeline
+        id="step-seq"
+        isStreaming
+        parts={[{ ...reasoning, state: 'done' as const }, readDone]}
+      />
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Working')
+
+    // Interim text closes the step: the run settles exactly once.
+    rerender(
+      <AgentActivityTimeline
+        id="step-seq"
+        isSettled
+        isStreaming
+        parts={[{ ...reasoning, state: 'done' as const }, readDone]}
+      />
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('button', { name: '1 tool call · Agent run' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+  })
+
   it('user sees a model step summarize when it finishes, then expanding it reveals tool details', () => {
     render(
       <AgentActivityTimeline
         id="step-1"
-        isAnswerStreaming={false}
         isStreaming={false}
         parts={[
           { type: 'reasoning', text: 'Inspecting the request.' },

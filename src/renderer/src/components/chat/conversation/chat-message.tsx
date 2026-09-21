@@ -99,6 +99,9 @@ function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): Assista
         }
       }
     } else if (part.type === 'text') {
+      // An empty text part (a block the model started but never filled) must not
+      // close the current agent run or render as an invisible body block.
+      if (!part.text) return blocks
       const previous = blocks.at(-1)
 
       if (previous?.type === 'text') previous.text += part.text
@@ -173,7 +176,9 @@ function ChatMessageComponent({
                 {block.type === 'activity' ? (
                   <AgentActivityTimeline
                     id={`${message.id}-${index}`}
-                    isAnswerStreaming={isStreaming && Boolean(text)}
+                    // Any later block — interim or final text — closed this step,
+                    // so it settles instead of staying live for the rest of the turn.
+                    isSettled={index < assistantBlocks.length - 1}
                     isStreaming={isStreaming}
                     parts={block.parts}
                   />

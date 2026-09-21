@@ -429,9 +429,11 @@ describe('TurnExecutor', () => {
     )
 
     await recorded.terminal
+    // The persisted reply matches what streamed: the overflow delta was dropped
+    // silently, so the transcript must not retroactively append a truncation marker.
     expect(runtime.loadSession(session.id).messages.at(-1)).toEqual({
       role: 'assistant',
-      parts: [{ type: 'text', text: 'abcde\u2026' }]
+      parts: [{ type: 'text', text: 'abcdef' }]
     })
     expect(recorded.events).toEqual([
       {
@@ -842,6 +844,64 @@ describe('TurnExecutor', () => {
           output: 'Read 1 line.'
         },
         { type: 'text', text: 'Done' }
+      ]
+    })
+  })
+
+  it('user sees interim text between tool rounds when the turn is replayed, then the transcript keeps the stream order', async () => {
+    const { runtime, session } = await createSession('Project chat', {
+      projectId: 'project-1',
+      cwd: process.cwd()
+    })
+    let agentRequests = 0
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(async (input) => {
+      if (input.conversationKey.startsWith('title:')) return streamFrom([])
+      agentRequests += 1
+      if (agentRequests === 1)
+        return streamFrom([
+          // SAFETY: this fixture conforms to the documented reasoning-start UI chunk.
+          { type: 'reasoning-start', id: 'reasoning-1' } as UIMessageChunk,
+          // SAFETY: this fixture conforms to the documented reasoning-delta UI chunk.
+          { type: 'reasoning-delta', id: 'reasoning-1', delta: 'First thought.' } as UIMessageChunk,
+          // SAFETY: this fixture conforms to the documented reasoning-end UI chunk.
+          { type: 'reasoning-end', id: 'reasoning-1' } as UIMessageChunk,
+          // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
+          {
+            type: 'tool-input-available',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            input: { path: 'package.json', limit: 1 }
+          } as UIMessageChunk
+        ])
+      if (agentRequests === 2)
+        return streamFrom([
+          { type: 'text-delta', id: 'interim', delta: 'Found the entry point.' },
+          // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
+          {
+            type: 'tool-input-available',
+            toolCallId: 'call-2',
+            toolName: 'read',
+            input: { path: 'package.json', limit: 1 }
+          } as UIMessageChunk
+        ])
+      return streamFrom([{ type: 'text-delta', id: 'final', delta: 'Done.' }])
+    }, runtime)
+
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+
+    expect(runtime.loadSession(session.id).messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'First thought.' },
+        { type: 'tool-trace', toolCallId: 'call-1', state: 'output-available' },
+        { type: 'text', text: 'Found the entry point.' },
+        { type: 'tool-trace', toolCallId: 'call-2', state: 'output-available' },
+        { type: 'text', text: 'Done.' }
       ]
     })
   })

@@ -92,6 +92,43 @@ describe('ToolAgentRunner', () => {
     expect(onStep).not.toHaveBeenCalled()
   })
 
+  it('user sees reasoning, tools and text interleave when a turn spans tool steps, then stream positions are kept', async () => {
+    const cwd = await createTemporaryWorkspace('mico-tool-runner-')
+    await writeFile(join(cwd, 'a.txt'), 'contents')
+    const provider = createScriptedProvider([
+      [
+        // SAFETY: these fixtures conform to the documented reasoning UI chunks.
+        { type: 'reasoning-start', id: 'reasoning-1' } as UIMessageChunk,
+        // SAFETY: this fixture continues the documented reasoning stream above.
+        {
+          type: 'reasoning-delta',
+          id: 'reasoning-1',
+          delta: 'Read the file first.'
+        } as UIMessageChunk,
+        // SAFETY: this fixture closes the documented reasoning stream above.
+        { type: 'reasoning-end', id: 'reasoning-1' } as UIMessageChunk,
+        // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
+        {
+          type: 'tool-input-available',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          input: { path: 'a.txt' }
+        } as UIMessageChunk
+      ],
+      [{ type: 'text-delta', id: 'answer', delta: 'done' }]
+    ])
+
+    const result = await new ToolAgentRunner().run(
+      createRunInput(provider, 'Read a.txt', { registry: ToolRegistry.forWorkspace(cwd) })
+    )
+
+    expect(result.displaySequence).toEqual([
+      { type: 'reasoning', text: 'Read the file first.' },
+      { type: 'tool-call', toolCallId: 'call-1', toolName: 'read' },
+      { type: 'text', textId: 'answer', text: 'done' }
+    ])
+  })
+
   it('user sees tool history replayed when the model is re-prompted, then it continues', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-runner-')
     await writeFile(join(cwd, 'a.txt'), 'contents')

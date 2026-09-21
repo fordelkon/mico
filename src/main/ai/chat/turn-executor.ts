@@ -14,9 +14,10 @@ import type { ChatProviderResolver } from './chat-provider-resolver'
 import { ToolAgentRunner } from '../tools/tool-agent-runner'
 import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
 import { ToolRegistry } from '../tools/tool-registry'
-import type {
-  ExecutionProfileSnapshot,
-  SessionRuntimeService
+import {
+  toDisplayToolTrace,
+  type ExecutionProfileSnapshot,
+  type SessionRuntimeService
 } from '../sessions/session-runtime-service'
 
 type ActiveTurn = {
@@ -310,7 +311,7 @@ class TurnExecutor {
               receivedChunk = true
               if (chunk.type === 'text-delta') {
                 // Chunks append in O(delta); the full string is only materialized when read.
-                const visibleDelta = turn.assistantTextBuilder.append(chunk.delta)
+                const visibleDelta = turn.assistantTextBuilder.append(chunk.delta, chunk.id)
                 if (visibleDelta)
                   emit({
                     type: 'chunk',
@@ -323,25 +324,36 @@ class TurnExecutor {
             }
           }
           if (cwd) Object.assign(runnerInput, { registry: ToolRegistry.forWorkspace(cwd) })
+          const toolTraces = new Map<
+            string,
+            Parameters<SessionRuntimeService['recordToolTrace']>[1]
+          >()
           if (turn.runId)
             Object.assign(runnerInput, {
               onStep: (step: Parameters<SessionRuntimeService['recordAgentStep']>[1]) =>
                 this.runtime?.recordAgentStep(turn.runId!, step),
-              onToolResult: (trace: Parameters<SessionRuntimeService['recordToolTrace']>[1]) =>
+              onToolResult: (trace: Parameters<SessionRuntimeService['recordToolTrace']>[1]) => {
+                toolTraces.set(trace.toolCallId, trace)
                 this.runtime?.recordToolTrace(turn.runId!, trace)
+              }
             })
           const result = await new ToolAgentRunner().run(runnerInput)
 
           if (!turn.controller.signal.aborted) {
             if (turn.runId) {
-              let includedText = false
+              // Persist the exact stream order: an agent run is the activity between
+              // two text outputs, so reasoning, tool traces and interim texts keep
+              // their positions instead of collapsing into one trailing blob.
               const displayParts: ChatMessage['parts'] = []
-              for (const part of result.finalAssistant.parts) {
-                if (part.type === 'reasoning')
-                  displayParts.push({ type: 'reasoning', text: part.text })
-                else if (part.type === 'text' && !includedText) {
-                  includedText = true
-                  displayParts.push({ type: 'text', text: turn.assistantTextBuilder.toString() })
+              for (const part of result.displaySequence) {
+                if (part.type === 'reasoning') {
+                  if (part.text) displayParts.push({ type: 'reasoning', text: part.text })
+                } else if (part.type === 'text') {
+                  const text = turn.assistantTextBuilder.visibleSegment(part.textId)
+                  if (text.trim()) displayParts.push({ type: 'text', text })
+                } else {
+                  const trace = toolTraces.get(part.toolCallId)
+                  if (trace) displayParts.push(toDisplayToolTrace(trace))
                 }
               }
               if (!displayParts.length)
@@ -500,12 +512,25 @@ class CappedTextBuilder {
   #length = 0
   #sealed = false
   readonly #maxLength: number
+  // Visible text attributed per stream segment (text part id) so persistence can
+  // rebuild part positions without re-deriving them from the joined string.
+  readonly #segments = new Map<string, string[]>()
 
   constructor(maxLength: number) {
     this.#maxLength = maxLength
   }
 
-  append(delta: string): string {
+  append(delta: string, segmentId?: string): string {
+    const visible = this.#appendCapped(delta)
+    if (segmentId && visible) {
+      const segments = this.#segments.get(segmentId) ?? []
+      segments.push(visible)
+      this.#segments.set(segmentId, segments)
+    }
+    return visible
+  }
+
+  #appendCapped(delta: string): string {
     if (this.#sealed) return ''
 
     if (this.#length + delta.length <= this.#maxLength) {
@@ -533,6 +558,11 @@ class CappedTextBuilder {
     this.#length += visibleText.length + TRUNCATION_MARKER.length
     this.#sealed = true
     return visibleText + TRUNCATION_MARKER
+  }
+
+  /** The visible text streamed under one text part id, honoring the shared cap. */
+  visibleSegment(segmentId: string): string {
+    return this.#segments.get(segmentId)?.join('') ?? ''
   }
 
   toString(): string {

@@ -149,6 +149,83 @@ describe('SessionRuntimeService', () => {
     ])
   })
 
+  it('user sees the stream order preserved when the finalized reply embeds tool traces, then events do not duplicate it', async () => {
+    const { service, session } = await createSession()
+    const run = startTurn(service, session)
+    service.recordAgentStep(run.runId, {
+      index: 1,
+      assistant: {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'Inspect the requested file first.' },
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            argumentsJson: '{"path":"package.json"}'
+          }
+        ]
+      },
+      toolResults: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          output: '{"name":"mico"}',
+          isError: false
+        }
+      ]
+    })
+    service.recordToolTrace(run.runId, {
+      toolCallId: 'call-1',
+      toolName: 'read',
+      input: { path: 'package.json' },
+      isError: false,
+      output: '{"name":"mico"}',
+      startedAt: 1,
+      finishedAt: 2
+    })
+    service.finishRun(run.runId, {
+      status: 'completed',
+      assistant: {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'Inspect the requested file first.' },
+          {
+            type: 'tool-trace',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            input: { path: 'package.json' },
+            state: 'output-available',
+            output: 'Read 1 line.'
+          },
+          { type: 'text', text: 'Found the entry point.' },
+          { type: 'text', text: 'first answer' }
+        ]
+      }
+    })
+
+    expect(service.loadSession(session.id).messages).toEqual([
+      userMessage,
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'Inspect the requested file first.' },
+          {
+            type: 'tool-trace',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            input: { path: 'package.json' },
+            state: 'output-available',
+            output: 'Read 1 line.'
+          },
+          { type: 'text', text: 'Found the entry point.' },
+          { type: 'text', text: 'first answer' }
+        ]
+      }
+    ])
+  })
+
   it('user sees only the successful attempt when a retry completes, then replays skip failed attempts', async () => {
     const { service, session } = await createSession()
     const first = startTurn(service, session)
