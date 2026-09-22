@@ -22,7 +22,6 @@ import {
   getOptimisticThinkingCapabilities,
   isOptimisticThinkingEffort
 } from '../thinking-preferences'
-import { getVersionedApiUrl } from '../url'
 
 type AnthropicConfiguration = Extract<
   ChatProviderConfiguration,
@@ -108,9 +107,6 @@ function getThinkingBudget(selection: ThinkingSelection, maxTokens: number): num
   return Math.min(maxBudget, Math.max(MIN_THINKING_BUDGET, Math.floor(maxTokens * ratio)))
 }
 
-function getUrl(baseUrl: string): string {
-  return getVersionedApiUrl(baseUrl, 'messages')
-}
 function getSignature(
   part: Extract<ChatProviderMessage['parts'][number], { type: 'reasoning' }>
 ): string | undefined {
@@ -153,7 +149,8 @@ function toMessage(message: ChatProviderMessage) {
 }
 function createAnthropicCompatibleProvider(
   configuration: AnthropicConfiguration,
-  dependencies: ChatProviderDependencies
+  dependencies: ChatProviderDependencies,
+  chatUrl: string
 ): ChatProvider {
   const maxTokens = configuration.maxTokens ?? DEFAULT_MAX_TOKENS
   const fetchWithThinkingFallback = createThinkingFallback()
@@ -205,7 +202,7 @@ function createAnthropicCompatibleProvider(
           authentication
         )
         headers.set('content-type', 'application/json')
-        return dependencies.fetch(getUrl(configuration.baseUrl), {
+        return dependencies.fetch(chatUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),

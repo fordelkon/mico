@@ -5,10 +5,7 @@ import {
   type ChatProviderConfiguration,
   type ChatProviderDependencies
 } from './contracts'
-import { createOpenAIResponsesProvider } from './adapters/openai-responses'
-import { createOpenAICompatibleProvider } from './adapters/openai-compatible'
-import { createAnthropicCompatibleProvider } from './adapters/anthropic-compatible'
-import { createOllamaProvider } from './adapters/ollama'
+import { providerDescriptors, type ChatProviderDescriptor } from './provider-registry'
 import { discoverModels } from './discovery'
 import { testChatProvider } from './testing'
 export { resolveThinkingSelection } from './reasoning'
@@ -22,22 +19,11 @@ function createChatProvider(
   configuration: ChatProviderConfiguration,
   dependencies: ChatProviderDependencies = defaultDependencies
 ): ChatProvider {
-  let provider: ChatProvider
-  switch (configuration.provider) {
-    case 'openai-responses':
-      provider = createOpenAIResponsesProvider(configuration, dependencies)
-      break
-    case 'openai-compatible':
-      provider = createOpenAICompatibleProvider(configuration, dependencies)
-      break
-    case 'anthropic-compatible':
-      provider = createAnthropicCompatibleProvider(configuration, dependencies)
-      break
-    case 'ollama':
-      provider = createOllamaProvider(configuration, dependencies)
-      break
-  }
-  return withProviderFinish(provider)
+  // SAFETY: the descriptor table is keyed by the same discriminator as the
+  // configuration union, so the entry matches configuration's provider; the
+  // wide descriptor type is the correlated-union access TS cannot infer.
+  const descriptor = providerDescriptors[configuration.provider] as ChatProviderDescriptor
+  return withProviderFinish(descriptor.createProvider(configuration, dependencies))
 }
 
 function withProviderFinish(provider: ChatProvider): ChatProvider {

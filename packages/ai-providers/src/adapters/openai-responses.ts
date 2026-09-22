@@ -13,7 +13,6 @@ import { parseSse } from '../streaming/sse'
 import { createStreamSequencer } from '../streaming/sequencer'
 import { createToolCallAssembler } from '../streaming/tool-calls'
 import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
-import { getVersionedApiUrl } from '../url'
 
 type OpenAIResponsesConfiguration = Extract<
   ChatProviderConfiguration,
@@ -66,9 +65,6 @@ type OpenAIResponsesRequest = {
   tools?: ReturnType<typeof toTools>
 }
 
-function getOpenAIResponsesUrl(baseUrl: string): string {
-  return getVersionedApiUrl(baseUrl, 'responses')
-}
 function toOpenAIInput(messages: ChatProviderMessage[]): OpenAIInputItem[] {
   const input: OpenAIInputItem[] = []
   for (const message of messages) {
@@ -141,9 +137,10 @@ function parseEventData(data: string): OpenAIEvent {
 }
 function createOpenAIResponsesProvider(
   configuration: OpenAIResponsesConfiguration,
-  dependencies: ChatProviderDependencies
+  dependencies: ChatProviderDependencies,
+  chatUrl: string
 ): ChatProvider {
-  const responsesUrl = getOpenAIResponsesUrl(configuration.baseUrl)
+  const responsesUrl = chatUrl
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),

@@ -15,7 +15,6 @@ import { createStreamSequencer } from '../streaming/sequencer'
 import { createTaggedThinkingExtractor } from '../streaming/tagged-thinking'
 import { createToolCallAssembler } from '../streaming/tool-calls'
 import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
-import { getVersionedApiUrl } from '../url'
 
 type OpenAICompatibleConfiguration = Extract<
   ChatProviderConfiguration,
@@ -78,9 +77,6 @@ const EventSchema = z.object({
   error: z.object({ message: z.string().optional() }).optional()
 })
 
-function getUrl(baseUrl: string): string {
-  return getVersionedApiUrl(baseUrl, 'chat/completions')
-}
 type OpenAICompatibleMessage =
   | { role: 'system' | 'user'; content: string }
   | {
@@ -137,7 +133,8 @@ function toTools(tools: readonly ChatProviderTool[]) {
 }
 function createOpenAICompatibleProvider(
   configuration: OpenAICompatibleConfiguration,
-  dependencies: ChatProviderDependencies
+  dependencies: ChatProviderDependencies,
+  chatUrl: string
 ): ChatProvider {
   const fetchWithThinkingFallback = createThinkingFallback()
   return {
@@ -164,7 +161,7 @@ function createOpenAICompatibleProvider(
       if (tools?.length) request.tools = toTools(tools)
       if (collectPerformanceMetrics) request.stream_options = { include_usage: true }
       const response = await fetchWithThinkingFallback(thinkingEffort, (includeThinking) =>
-        dependencies.fetch(getUrl(configuration.baseUrl), {
+        dependencies.fetch(chatUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify(

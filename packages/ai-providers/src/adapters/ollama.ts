@@ -70,9 +70,6 @@ const ChunkSchema = z.object({
 })
 const ModelDetailsSchema = z.object({ capabilities: z.array(z.string()) })
 const ToolArgumentsSchema = z.record(z.string(), z.json())
-function getUrl(baseUrl: string): string {
-  return getNativeApiUrl(baseUrl, 'api/chat')
-}
 function getModelDetailsUrl(baseUrl: string): string {
   return getNativeApiUrl(baseUrl, 'api/show')
 }
@@ -128,7 +125,8 @@ function toThink(selection: ThinkingSelection): boolean | string | undefined {
 }
 function createOllamaProvider(
   configuration: OllamaConfiguration,
-  dependencies: ChatProviderDependencies
+  dependencies: ChatProviderDependencies,
+  chatUrl: string
 ): ChatProvider {
   return {
     getModelCapabilities: async () => {
@@ -156,7 +154,7 @@ function createOllamaProvider(
       }
       if (tools?.length) body.tools = toTools(tools)
       if (think !== undefined) body.think = think
-      const response = await dependencies.fetch(getUrl(configuration.baseUrl), {
+      const response = await dependencies.fetch(chatUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),

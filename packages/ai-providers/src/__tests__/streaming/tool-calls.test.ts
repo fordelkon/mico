@@ -16,7 +16,12 @@ describe('tool call assembler', () => {
     const assembler = createToolCallAssembler('invalid arguments.')
 
     expect(assembler.completeJson('call-1', 'read', '{"path":"a.ts"}')).toEqual([
-      { type: 'tool-input-available', toolCallId: 'call-1', toolName: 'read', input: { path: 'a.ts' } }
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call-1',
+        toolName: 'read',
+        input: { path: 'a.ts' }
+      }
     ])
   })
 
@@ -37,21 +42,26 @@ describe('tool call assembler', () => {
   it('user sees the protocol error chunk when a pre-parsed argument fails its shape check, then the raw value is preserved', () => {
     const assembler = createToolCallAssembler('invalid arguments.')
 
-    expect(
-      assembler.completeValue('call-1', 'read', { isValid: false, invalidInput: 42 })
-    ).toEqual([
-      {
-        type: 'tool-input-error',
-        toolCallId: 'call-1',
-        toolName: 'read',
-        input: 42,
-        errorText: 'invalid arguments.'
-      }
-    ])
+    expect(assembler.completeValue('call-1', 'read', { isValid: false, invalidInput: 42 })).toEqual(
+      [
+        {
+          type: 'tool-input-error',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          input: 42,
+          errorText: 'invalid arguments.'
+        }
+      ]
+    )
     expect(
       assembler.completeValue('call-1', 'read', { isValid: true, input: { path: 'a.ts' } })
     ).toEqual([
-      { type: 'tool-input-available', toolCallId: 'call-1', toolName: 'read', input: { path: 'a.ts' } }
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call-1',
+        toolName: 'read',
+        input: { path: 'a.ts' }
+      }
     ])
   })
 })
