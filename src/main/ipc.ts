@@ -62,18 +62,7 @@ interface IpcServices {
     | 'updateSessionModelEntry'
     | 'updateSessionThinkingEffort'
   >
-  mainWindow: Pick<
-    MainWindowService,
-    | 'close'
-    | 'isFocused'
-    | 'isFullscreen'
-    | 'isMaximized'
-    | 'isTrustedRendererUrl'
-    | 'maximize'
-    | 'minimize'
-    | 'toggleFullscreen'
-    | 'unmaximize'
-  >
+  mainWindow: Pick<MainWindowService, 'isTrustedRendererUrl'>
   preference: Pick<
     PreferenceService,
     | 'getAppearancePreference'
@@ -155,35 +144,35 @@ function registerIpc(
 
   register({
     channel: IpcChannel.WindowControls_Close,
-    handle: (_input, { window }) => mainWindow.close(window)
+    handle: (_input, { window }) => window.close()
   })
   register({
     channel: IpcChannel.WindowControls_IsFocused,
-    handle: (_input, { window }) => mainWindow.isFocused(window)
+    handle: (_input, { window }) => window.isFocused()
   })
   register({
     channel: IpcChannel.WindowControls_IsFullscreen,
-    handle: (_input, { window }) => mainWindow.isFullscreen(window)
+    handle: (_input, { window }) => window.isFullScreen()
   })
   register({
     channel: IpcChannel.WindowControls_IsMaximized,
-    handle: (_input, { window }) => mainWindow.isMaximized(window)
+    handle: (_input, { window }) => window.isMaximized()
   })
   register({
     channel: IpcChannel.WindowControls_Maximize,
-    handle: (_input, { window }) => mainWindow.maximize(window)
+    handle: (_input, { window }) => window.maximize()
   })
   register({
     channel: IpcChannel.WindowControls_Minimize,
-    handle: (_input, { window }) => mainWindow.minimize(window)
+    handle: (_input, { window }) => window.minimize()
   })
   register({
     channel: IpcChannel.WindowControls_ToggleFullscreen,
-    handle: (_input, { window }) => mainWindow.toggleFullscreen(window)
+    handle: (_input, { window }) => window.setFullScreen(!window.isFullScreen())
   })
   register({
     channel: IpcChannel.WindowControls_Unmaximize,
-    handle: (_input, { window }) => mainWindow.unmaximize(window)
+    handle: (_input, { window }) => window.unmaximize()
   })
 
   register({

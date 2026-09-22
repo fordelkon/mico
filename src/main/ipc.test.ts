@@ -40,8 +40,18 @@ function createFileHandle(bytes: Uint8Array, maxChunkSize = bytes.byteLength) {
 
 function createHarness() {
   const handlers = new Map<string, Handler>()
-  // SAFETY: The test double is only passed through to assert the IPC handler delegates correctly.
-  const window = Object.create(null) as BrowserWindow
+  // SAFETY: structural subset of BrowserWindow with only the state accessors
+  // the window-control handlers call directly; the full window is never used.
+  const window = Object.assign(Object.create(null) as BrowserWindow, {
+    close: vi.fn<BrowserWindow['close']>(),
+    isFocused: vi.fn<BrowserWindow['isFocused']>(() => true),
+    isFullScreen: vi.fn<BrowserWindow['isFullScreen']>(() => false),
+    isMaximized: vi.fn<BrowserWindow['isMaximized']>(() => false),
+    maximize: vi.fn<BrowserWindow['maximize']>(),
+    minimize: vi.fn<BrowserWindow['minimize']>(),
+    setFullScreen: vi.fn<BrowserWindow['setFullScreen']>(),
+    unmaximize: vi.fn<BrowserWindow['unmaximize']>()
+  })
   const turnExecutor = {
     abortTurn: vi.fn<TurnExecutor['abortTurn']>(),
     abortAllTurns: vi.fn<TurnExecutor['abortAllTurns']>(),
@@ -51,15 +61,7 @@ function createHarness() {
     updateSessionThinkingEffort: vi.fn<TurnExecutor['updateSessionThinkingEffort']>()
   }
   const mainWindow = {
-    close: vi.fn<MainWindowService['close']>(),
-    isFocused: vi.fn<MainWindowService['isFocused']>(),
-    isFullscreen: vi.fn<MainWindowService['isFullscreen']>(),
-    isMaximized: vi.fn<MainWindowService['isMaximized']>(),
-    isTrustedRendererUrl: vi.fn<MainWindowService['isTrustedRendererUrl']>(() => true),
-    maximize: vi.fn<MainWindowService['maximize']>(),
-    minimize: vi.fn<MainWindowService['minimize']>(),
-    toggleFullscreen: vi.fn<MainWindowService['toggleFullscreen']>(),
-    unmaximize: vi.fn<MainWindowService['unmaximize']>()
+    isTrustedRendererUrl: vi.fn<MainWindowService['isTrustedRendererUrl']>(() => true)
   }
   const preference = {
     getAppearancePreference: vi.fn<PreferenceService['getAppearancePreference']>(),
@@ -203,11 +205,10 @@ const startTurnRequest = {
 
 describe('registerIpc window control handlers', () => {
   it('user gets the focus state when the renderer asks, then it reflects that window', () => {
-    const { handlers, mainWindow, window, event } = createHarness()
-    mainWindow.isFocused.mockReturnValue(true)
+    const { handlers, window, event } = createHarness()
 
     expect(handlers.get(IpcChannel.WindowControls_IsFocused)?.(event)).toBe(true)
-    expect(mainWindow.isFocused).toHaveBeenCalledWith(window)
+    expect(window.isFocused).toHaveBeenCalled()
   })
 })
 

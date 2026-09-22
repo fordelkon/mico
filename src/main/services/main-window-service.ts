@@ -45,38 +45,6 @@ class MainWindowService {
     this.mainWindow.focus()
   }
 
-  close(window: BrowserWindow): void {
-    window.close()
-  }
-
-  isFocused(window: BrowserWindow): boolean {
-    return window.isFocused()
-  }
-
-  isFullscreen(window: BrowserWindow): boolean {
-    return window.isFullScreen()
-  }
-
-  isMaximized(window: BrowserWindow): boolean {
-    return window.isMaximized()
-  }
-
-  maximize(window: BrowserWindow): void {
-    window.maximize()
-  }
-
-  minimize(window: BrowserWindow): void {
-    window.minimize()
-  }
-
-  toggleFullscreen(window: BrowserWindow): void {
-    window.setFullScreen(!window.isFullScreen())
-  }
-
-  unmaximize(window: BrowserWindow): void {
-    window.unmaximize()
-  }
-
   private createWindow(): void {
     const windowOptions: BrowserWindowConstructorOptions = {
       width: 1000,
