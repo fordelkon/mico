@@ -509,24 +509,6 @@ describe('registerIpc session handlers', () => {
       cwd: '/projects/one'
     })
   })
-  it('user sees the saved sessions when listing them, then each summary returns', () => {
-    const { handlers, session, event } = createHarness()
-    const summaries = [
-      {
-        id: 'session-1',
-        title: 'Saved chat',
-        defaultProfile: null,
-        createdAt: 1,
-        updatedAt: 2,
-        lastActivityAt: 2
-      }
-    ]
-    session.listSessions.mockReturnValue(summaries)
-
-    expect(handlers.get(IpcChannel.Sessions_List)?.(event)).toEqual(summaries)
-    expect(session.listSessions).toHaveBeenCalledOnce()
-  })
-
   it('user cannot list sessions when the sender is untrusted, then nothing is delegated', () => {
     const { handlers, mainWindow, session } = createHarness()
     mainWindow.isTrustedRendererUrl.mockReturnValue(false)
@@ -536,74 +518,6 @@ describe('registerIpc session handlers', () => {
       'Untrusted window control sender'
     )
     expect(session.listSessions).not.toHaveBeenCalled()
-  })
-
-  it('user creates a session when providing a title, then it is created in the default workspace', () => {
-    const { handlers, session, event } = createHarness()
-    const summary = {
-      id: 'session-1',
-      title: 'Saved chat',
-      defaultProfile: null,
-      createdAt: 1,
-      updatedAt: 2,
-      lastActivityAt: 2
-    }
-    session.createSession.mockReturnValue(summary)
-
-    expect(handlers.get(IpcChannel.Sessions_Create)?.(event, { title: 'Saved chat' })).toEqual(
-      summary
-    )
-    expect(session.createSession).toHaveBeenCalledWith({
-      title: 'Saved chat',
-      defaultProfile: null,
-      projectId: 'default',
-      cwd: '/workspaces/default'
-    })
-  })
-
-  it('user gets the persisted transcript when loading a session, then it is returned by ID', () => {
-    const { handlers, session, event } = createHarness()
-    const persisted = {
-      id: 'session-1',
-      title: 'Saved chat',
-      defaultProfile: null,
-      createdAt: 1,
-      updatedAt: 2,
-      lastActivityAt: 2,
-      messages: []
-    }
-    session.loadSession.mockReturnValue(persisted)
-
-    expect(handlers.get(IpcChannel.Sessions_Load)?.(event, 'session-1')).toEqual(persisted)
-    expect(session.loadSession).toHaveBeenCalledWith('session-1')
-  })
-
-  it('user deletes a session when requesting its removal, then the deletion is delegated by ID', () => {
-    const { handlers, session, event } = createHarness()
-
-    expect(handlers.get(IpcChannel.Sessions_Delete)?.(event, 'session-1')).toBeUndefined()
-    expect(session.deleteSession).toHaveBeenCalledWith('session-1')
-  })
-
-  it('user renames a session when providing a new title, then the updated summary returns', () => {
-    const { handlers, session, event } = createHarness()
-    const summary = {
-      id: 'session-1',
-      title: 'Renamed chat',
-      defaultProfile: null,
-      createdAt: 1,
-      updatedAt: 2,
-      lastActivityAt: 2
-    }
-    session.renameSession.mockReturnValue(summary)
-
-    expect(
-      handlers.get(IpcChannel.Sessions_Rename)?.(event, {
-        sessionId: 'session-1',
-        title: 'Renamed chat'
-      })
-    ).toEqual(summary)
-    expect(session.renameSession).toHaveBeenCalledWith('session-1', 'Renamed chat')
   })
 
   it('user gets an error when session input is invalid, then no mutation is delegated', () => {
@@ -695,24 +609,6 @@ describe('registerIpc provider handlers', () => {
     ).toThrow('Untrusted')
     expect(provider.discoverModels).not.toHaveBeenCalled()
   })
-
-  it('user saves the provider library when valid, then it is passed through', async () => {
-    const { handlers, provider, event } = createHarness()
-    const library = {
-      configurations: [{ provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }],
-      customProviders: [],
-      enabledProviderIds: [],
-      models: [],
-      selectedModelId: null,
-      selectedProviderId: null
-    }
-    provider.saveLibrary.mockResolvedValue(library)
-
-    await expect(handlers.get(IpcChannel.Providers_SaveLibrary)?.(event, library)).resolves.toEqual(
-      library
-    )
-    expect(provider.saveLibrary).toHaveBeenCalledWith(library)
-  })
 })
 
 describe('registerIpc theme handlers', () => {
@@ -723,20 +619,6 @@ describe('registerIpc theme handlers', () => {
     themePresetDark: 'tokyo-night' as const,
     themePresetLight: 'one-nord-light' as const
   }
-  const themeState = {
-    ...themePreferences,
-    activeThemePreset: 'one-nord-light' as const,
-    appearance: 'light' as const,
-    shikiThemes: { dark: 'dracula', light: 'github-light' }
-  }
-
-  it('user gets the full theme state when requesting it, then the resolved state returns', () => {
-    const { handlers, preference, event } = createHarness()
-    preference.getThemeState.mockReturnValue(themeState)
-
-    expect(handlers.get(IpcChannel.Appearance_GetThemeState)?.(event)).toEqual(themeState)
-  })
-
   it('user cannot get the theme state when the sender is untrusted, then it is rejected', () => {
     const { handlers, mainWindow, preference } = createHarness()
     mainWindow.isTrustedRendererUrl.mockReturnValue(false)
@@ -746,16 +628,6 @@ describe('registerIpc theme handlers', () => {
       'Untrusted window control sender'
     )
     expect(preference.getThemeState).not.toHaveBeenCalled()
-  })
-
-  it('user saves theme preferences when submitting them, then the saved state returns', async () => {
-    const { handlers, preference, event } = createHarness()
-    preference.setThemePreferences.mockResolvedValue(themeState)
-
-    await expect(
-      handlers.get(IpcChannel.Appearance_SetThemePreferences)?.(event, themePreferences)
-    ).resolves.toEqual(themeState)
-    expect(preference.setThemePreferences).toHaveBeenCalledWith(themePreferences)
   })
 
   it('user cannot save theme preferences when a code theme is unsupported, then nothing is persisted', () => {

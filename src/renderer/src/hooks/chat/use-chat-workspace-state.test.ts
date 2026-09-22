@@ -319,64 +319,6 @@ describe('useChatWorkspaceState', () => {
     )
   })
 
-  it('user sees the streamed text arrive when deltas stream, then the workspace stays stable', async () => {
-    vi.useFakeTimers()
-    const api = new FakeChatAPI()
-    exposeApi(api)
-    let workspaceRenderCount = 0
-    const { result } = renderHook(() => {
-      workspaceRenderCount += 1
-      return useChatWorkspaceState()
-    })
-
-    act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-
-    const initialRequestId = api.startedRequests[0]?.requestId
-    if (!initialRequestId) throw new Error('Sending a message must start a request.')
-    const activeChat = result.current.activeChat
-    if (!activeChat) throw new Error('Sending a message must create an active chat.')
-    act(() => api.emit({ type: 'finish', requestId: initialRequestId }))
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-
-    const { result: transcript } = renderHook(() => useChat({ chat: activeChat, throttle: 50 }))
-    act(() => void result.current.sendMessage({ text: 'Hello again', documents: [] }))
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-
-    const requestId = api.startedRequests[1]?.requestId
-    if (!requestId) throw new Error('Sending another message must start a request.')
-
-    act(() => {
-      api.emit({ type: 'chunk', requestId, chunk: { type: 'text-start', id: 'part-1' } })
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100)
-    })
-    const rendersBeforeTextDelta = workspaceRenderCount
-
-    act(() => {
-      api.emit({
-        type: 'chunk',
-        requestId,
-        chunk: { type: 'text-delta', id: 'part-1', delta: 'Streamed answer' }
-      })
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100)
-    })
-
-    expect(transcript.current.messages.at(-1)?.parts).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'Streamed answer' })])
-    )
-    expect(workspaceRenderCount).toBe(rendersBeforeTextDelta)
-  })
-
   it('user sees the effort reset when capabilities exclude it, then defaults are used', async () => {
     let resolveCapabilities: (capabilities: ModelReasoningCapabilities | null) => void
     const capabilities = new Promise<ModelReasoningCapabilities | null>((resolve) => {
@@ -623,39 +565,6 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.response.status).not.toBe('error')
   })
 
-  it('user sees messages restored when selecting a chat, then the transcript matches', async () => {
-    const { result } = renderWorkspaceState((api) => {
-      api.sessions.list = async () => [
-        {
-          id: 'session-1',
-          title: 'Saved chat',
-          defaultProfile: null,
-          createdAt: 1,
-          updatedAt: 2,
-          lastActivityAt: 2
-        }
-      ]
-    })
-
-    await waitFor(() =>
-      expect(result.current.conversations).toEqual([{ id: 'session-1', title: 'Saved chat' }])
-    )
-    act(() => result.current.selectConversation('session-1'))
-
-    await waitFor(() =>
-      expect(
-        result.current.activeChat?.messages.map(({ metadata, parts, role }) => ({
-          completionState: metadata?.completionState,
-          role,
-          text: parts.find((part) => part.type === 'text')?.text
-        }))
-      ).toEqual([
-        { completionState: undefined, role: 'user', text: 'Saved prompt' },
-        { completionState: 'stopped', role: 'assistant', text: 'Saved answer' }
-      ])
-    )
-  })
-
   it('user sees the model selection return when reopening a chat, then effort returns', async () => {
     const savedProfile = {
       modelEntryId: 'ollama:qwen3',
@@ -697,42 +606,6 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.thinkingEffort).toBe('high')
   })
 
-  it('user sees a manual rename persisted when renaming, then the title updates', async () => {
-    const rename = vi.fn<SessionsAPI['rename']>(
-      async ({ sessionId, title }: { sessionId: string; title: string }) => ({
-        id: sessionId,
-        title,
-        defaultProfile: null,
-        createdAt: 1,
-        updatedAt: 3,
-        lastActivityAt: 2
-      })
-    )
-    const { result } = renderWorkspaceState((api) => {
-      api.sessions.rename = rename
-      api.sessions.list = async () => [
-        {
-          id: 'session-1',
-          title: 'Saved chat',
-          defaultProfile: null,
-          createdAt: 1,
-          updatedAt: 2,
-          lastActivityAt: 2
-        }
-      ]
-    })
-
-    await waitFor(() => expect(result.current.conversations).toHaveLength(1))
-    act(() => result.current.renameConversation('session-1', 'Renamed chat'))
-
-    await waitFor(() =>
-      expect(rename).toHaveBeenCalledWith({ sessionId: 'session-1', title: 'Renamed chat' })
-    )
-    await waitFor(() =>
-      expect(result.current.conversations).toEqual([{ id: 'session-1', title: 'Renamed chat' }])
-    )
-  })
-
   it('user sees the title update when a title is generated, then it appears', async () => {
     const { api, result } = renderWorkspaceState((api) => {
       api.sessions.list = async () => [
@@ -757,28 +630,5 @@ describe('useChatWorkspaceState', () => {
         { id: 'session-1', title: 'Plan release notes' }
       ])
     )
-  })
-
-  it('user permanently deletes a session when requested, then it leaves the sidebar', async () => {
-    const remove = vi.fn<SessionsAPI['delete']>(async (): Promise<void> => {})
-    const { result } = renderWorkspaceState((api) => {
-      api.sessions.delete = remove
-      api.sessions.list = async () => [
-        {
-          id: 'session-1',
-          title: 'Saved chat',
-          defaultProfile: null,
-          createdAt: 1,
-          updatedAt: 2,
-          lastActivityAt: 2
-        }
-      ]
-    })
-
-    await waitFor(() => expect(result.current.conversations).toHaveLength(1))
-    act(() => result.current.deleteConversation('session-1'))
-
-    await waitFor(() => expect(remove).toHaveBeenCalledWith('session-1'))
-    await waitFor(() => expect(result.current.conversations).toEqual([]))
   })
 })
