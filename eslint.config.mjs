@@ -36,6 +36,16 @@ export default defineConfig(
       ...eslintPluginReactRefresh.configs.vite.rules
     }
   },
+  {
+    // Playwright fixtures call a `use(...)` teardown callback that is not a React hook,
+    // and their first parameter is conventionally an empty destructuring pattern.
+    files: ['tests/e2e/**/*.{ts,tsx}'],
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
+      'react-refresh/only-export-components': 'off',
+      'no-empty-pattern': 'off'
+    }
+  },
   // Formatting is Biome's job now (see biome.jsonc), and anything oxlint
   // already covers is turned off here so the two don't do redundant work.
   // Must stay last: https://github.com/oxc-project/eslint-plugin-oxlint

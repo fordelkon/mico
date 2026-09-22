@@ -60,6 +60,12 @@
         "vitest/no-test-prefixes": "error",
         "vitest/valid-title": "error"
       }
+    },
+    {
+      "files": ["tests/e2e/**"],
+      "rules": {
+        "no-empty-pattern": "off"
+      }
     }
   ],
   "plugins": ["typescript", "unicorn", "oxc", "react", "vitest"],
