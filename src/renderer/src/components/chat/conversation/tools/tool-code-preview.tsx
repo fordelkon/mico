@@ -14,11 +14,18 @@ function ToolCodePreview({
   label: string
 }): React.JSX.Element {
   return (
-    <div className="overflow-hidden rounded-md border border-border-subtle bg-surface-secondary">
-      <div className="border-b border-border-subtle px-2 py-1 text-[11px] font-medium text-text-tertiary">
-        {label}
-      </div>
-      <ChatCodeBlock code={content} isStreaming={isStreaming} language={language} />
+    <div
+      aria-label={label}
+      aria-live={isStreaming ? 'polite' : 'off'}
+      className="overflow-hidden rounded-md border border-border-subtle bg-surface-secondary"
+      role="log"
+    >
+      <ChatCodeBlock
+        code={content}
+        isStreaming={isStreaming}
+        language={language}
+        outputLabel={label}
+      />
     </div>
   )
 }

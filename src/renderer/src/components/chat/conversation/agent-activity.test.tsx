@@ -51,29 +51,31 @@ describe('ThinkingBlock', () => {
     expect(summary).toHaveAttribute('aria-hidden', 'false')
   })
 
-  it('user sees the view follow reasoning when it streams, then scrolling stays instant', () => {
-    // SAFETY: jsdom does not implement element.scrollTo; the spy records the programmatic scroll call.
-    const scrollTo = vi.fn<(options?: ScrollToOptions) => void>()
-    const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-      configurable: true,
-      value: scrollTo
-    })
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
-      callback(performance.now())
-      return 1
-    })
-    vi.stubGlobal('cancelAnimationFrame', (): void => undefined)
+  it('user closes reasoning when it streams, then later content preserves that choice', () => {
+    const { rerender } = render(
+      <ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Thinking' }))
 
-    try {
-      render(<ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />)
+    rerender(
+      <ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request. Reading files." />
+    )
 
-      expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' })
-    } finally {
-      if (originalScrollTo)
-        Object.defineProperty(HTMLElement.prototype, 'scrollTo', originalScrollTo)
-      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
-    }
+    expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    rerender(
+      <ThinkingBlock
+        id="reasoning-1"
+        isStreaming={false}
+        text="Inspecting the request. Reading files."
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Thought' }))
+    expect(screen.getByTestId('thinking-panel')).toHaveTextContent(
+      'Inspecting the request. Reading files.'
+    )
   })
 
   it('user sees a write summarized in its trace, then file contents stay hidden when expanded', () => {
@@ -181,6 +183,8 @@ describe('ThinkingBlock', () => {
     expect(screen.getByText('Standard error')).toBeVisible()
     expect(screen.getByText('warning: cached')).toBeVisible()
     expect(screen.getByRole('button', { name: /Run pnpm test Streaming output/ })).toBeVisible()
+    expect(screen.getAllByRole('log')).toHaveLength(1)
+    expect(screen.queryByText('Writing')).not.toBeInTheDocument()
   })
 
   it('user sees a draft write preview when the operation is incomplete, then it shows Preparing file', () => {
@@ -273,7 +277,7 @@ describe('AgentActivityTimeline', () => {
       />
     )
 
-    // The finished thought drops the shimmer and collapses like a completed tool.
+    // The finished thought settles and collapses like a completed tool.
     expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute(
       'aria-expanded',
       'false'

@@ -153,7 +153,7 @@ function ChatMessageComponent({
   }
 
   return (
-    <Message align={isUser ? 'end' : 'start'} className={isUser ? 'chat-message--sent' : undefined}>
+    <Message align={isUser ? 'end' : 'start'}>
       <MessageContent className="gap-1.5">
         {documents.length > 0 ? (
           <AttachmentGroup aria-label="Attached documents">
@@ -172,7 +172,7 @@ function ChatMessageComponent({
         ) : null}
         {!isUser
           ? assistantBlocks.map((block, index) => (
-              <div className="agent-activity__event" key={`${message.id}-${index}`}>
+              <div className="min-w-0" key={`${message.id}-${index}`}>
                 {block.type === 'activity' ? (
                   <AgentActivityTimeline
                     id={`${message.id}-${index}`}

@@ -134,8 +134,6 @@ function ToolTrace({
     showsStreamedContent && (part.state === 'input-available' || part.state === 'input-streaming')
   )
   const [hasUserToggled, setHasUserToggled] = React.useState(false)
-  const [isFollowingOutput, setIsFollowingOutput] = React.useState(true)
-  const panelRef = React.useRef<HTMLDivElement>(null)
   const wasRunning = React.useRef(false)
   const activityState = getToolActivityState(part)
   const isError = activityState === 'failed'
@@ -184,27 +182,6 @@ function ToolTrace({
     wasRunning.current = isRunning
   }, [hasUserToggled, isRunning])
 
-  React.useEffect(() => {
-    if (!isRunning || !isExpanded || !isFollowingOutput) return
-    const frameId = window.requestAnimationFrame(() => {
-      const panel = panelRef.current
-      if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior: 'auto' })
-    })
-    return () => window.cancelAnimationFrame(frameId)
-  }, [detail, isExpanded, isFollowingOutput, isRunning, liveOutput])
-
-  const handlePanelScroll = (): void => {
-    const panel = panelRef.current
-    if (panel) setIsFollowingOutput(panel.scrollHeight - panel.scrollTop - panel.clientHeight < 12)
-  }
-
-  const followLatestOutput = (): void => {
-    const panel = panelRef.current
-    if (!panel) return
-    panel.scrollTo({ top: panel.scrollHeight, behavior: 'auto' })
-    setIsFollowingOutput(true)
-  }
-
   return (
     <section
       className="thinking-block agent-activity__trace w-full min-w-0 text-sm text-text-tertiary"
@@ -218,7 +195,7 @@ function ToolTrace({
               aria-label={[tool.title, tool.detail, status].filter(Boolean).join(' ')}
               aria-controls={hasDetail ? contentId : undefined}
               aria-expanded={hasDetail ? isExpanded : undefined}
-              className="agent-activity__trigger h-7 w-full min-w-0 gap-2 px-1 text-text-tertiary hover:bg-surface-secondary hover:text-foreground"
+              className="agent-activity__trigger h-7 w-full min-w-0 gap-2 px-1 hover:text-foreground"
               variant="ghost"
               onClick={() => {
                 if (!hasDetail) return
@@ -234,13 +211,7 @@ function ToolTrace({
                 </span>
               ) : null}
               <span
-                className={
-                  isError
-                    ? 'shrink-0 text-destructive'
-                    : isRunning
-                      ? 'thinking-block__label thinking-block__label--active shrink-0'
-                      : 'shrink-0 text-text-tertiary'
-                }
+                className={isError ? 'shrink-0 text-destructive' : 'shrink-0 text-text-tertiary'}
               >
                 {status}
               </span>
@@ -260,12 +231,9 @@ function ToolTrace({
         <div className="thinking-block__panel">
           <div
             aria-hidden={!isExpanded}
-            className={`thinking-block__panel-inner whitespace-pre-wrap break-words font-mono text-xs${
-              isRunning && isExpanded ? ' thinking-block__panel-inner--streaming' : ''
-            }`}
+            className="thinking-block__panel-inner whitespace-pre-wrap font-mono text-xs"
             id={contentId}
-            onScroll={handlePanelScroll}
-            ref={panelRef}
+            inert={!isExpanded}
           >
             {presentation ? (
               <ToolTracePresentationView
@@ -287,15 +255,6 @@ function ToolTrace({
                 {detail ? <div className="mt-2 border-t border-border pt-2">{detail}</div> : null}
               </>
             )}
-            {isRunning && !isFollowingOutput ? (
-              <button
-                className="tool-trace__jump-to-latest"
-                type="button"
-                onClick={followLatestOutput}
-              >
-                Jump to latest
-              </button>
-            ) : null}
           </div>
         </div>
       ) : null}

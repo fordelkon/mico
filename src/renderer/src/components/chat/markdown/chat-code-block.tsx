@@ -6,7 +6,13 @@ import { cn } from '@mico/ui/lib/utils'
 
 import { useStreamingCodeHighlight } from './use-streaming-code-highlight'
 
-type ChatCodeBlockProps = { code: string; isStreaming: boolean; language?: string }
+type ChatCodeBlockProps = {
+  code: string
+  isStreaming: boolean
+  language?: string
+  /** Embedded output delegates its surface and live announcements to the enclosing trace. */
+  outputLabel?: string
+}
 type CodeThemes = { dark: string; light: string }
 type CodeToken = { content: string; offset: number; style?: React.CSSProperties }
 
@@ -119,7 +125,12 @@ function CodeLine({ code, tokens }: { code: string; tokens?: CodeToken[] }): Rea
   )
 }
 
-function ChatCodeBlock({ code, isStreaming, language }: ChatCodeBlockProps): React.JSX.Element {
+function ChatCodeBlock({
+  code,
+  isStreaming,
+  language,
+  outputLabel
+}: ChatCodeBlockProps): React.JSX.Element {
   const copyTimerRef = React.useRef<number | undefined>(undefined)
   const [copied, setCopied] = React.useState(false)
   const normalizedLanguage = language ?? 'text'
@@ -157,41 +168,56 @@ function ChatCodeBlock({ code, isStreaming, language }: ChatCodeBlockProps): Rea
   return (
     <div
       aria-busy={isStreaming}
-      className="my-4 w-full overflow-hidden rounded-2xl bg-muted/80 text-sm"
+      className={cn(
+        'w-full overflow-hidden text-sm',
+        !outputLabel && 'my-4 rounded-2xl bg-muted/80'
+      )}
       data-slot="code-block"
       data-state={isStreaming ? 'streaming' : 'complete'}
       data-testid="code-block"
     >
-      <div className="flex h-10 items-center gap-2.5 px-3">
-        <FileCode2Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground/70" />
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/55">
-          {normalizedLanguage}
-        </span>
-        <span
-          aria-label={isStreaming ? 'Writing' : 'Ready'}
-          className="ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground"
-        >
-          {isStreaming ? (
-            <LoaderCircleIcon className="size-3 animate-spin motion-reduce:animate-none" />
-          ) : (
-            <CheckIcon className="size-3" />
-          )}
-          {isStreaming ? 'Writing' : 'Ready'}
-        </span>
+      <div className={cn('flex items-center gap-2.5', outputLabel ? 'h-8 px-2.5' : 'h-10 px-3')}>
+        {outputLabel ? (
+          <span className="text-[11px] font-medium text-text-tertiary">{outputLabel}</span>
+        ) : (
+          <>
+            <FileCode2Icon
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground/70"
+            />
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/55">
+              {normalizedLanguage}
+            </span>
+            <span
+              aria-label={isStreaming ? 'Writing' : 'Ready'}
+              className="ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground"
+            >
+              {isStreaming ? (
+                <LoaderCircleIcon className="size-3 animate-spin motion-reduce:animate-none" />
+              ) : (
+                <CheckIcon className="size-3" />
+              )}
+              {isStreaming ? 'Writing' : 'Ready'}
+            </span>
+          </>
+        )}
         <button
           type="button"
           aria-label={copied ? 'Copied' : 'Copy code'}
           title={copied ? 'Copied' : 'Copy code'}
           onClick={copy}
-          className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            outputLabel && 'ml-auto'
+          )}
         >
           {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
         </button>
       </div>
       <div
-        role={isStreaming ? 'log' : undefined}
-        aria-live={isStreaming ? 'polite' : undefined}
-        className="overflow-x-auto border-t border-border py-2"
+        role={isStreaming && !outputLabel ? 'log' : undefined}
+        aria-live={isStreaming && !outputLabel ? 'polite' : undefined}
+        className={cn('overflow-x-auto py-2', !outputLabel && 'border-t border-border')}
       >
         <pre className="m-0 min-w-max font-mono text-xs leading-5 text-foreground/85">
           <code>

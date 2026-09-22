@@ -44,7 +44,7 @@ function AgentLoadingIndicator({
           size={20}
           state={orbState}
         />
-        <span className="thinking-block__label thinking-block__label--active">Thinking</span>
+        <span className="thinking-block__label">Thinking</span>
       </div>
     </section>
   )
@@ -52,7 +52,8 @@ function AgentLoadingIndicator({
 
 /**
  * A model step is only an orchestrator: traces own their individual renderers;
- * this component owns chronological order, live-edge following and disclosure.
+ * this component owns chronological order and disclosure. The message scroller
+ * owns live-edge following so nested traces never compete for scroll position.
  */
 function AgentActivityTimeline({
   id,
@@ -71,8 +72,6 @@ function AgentActivityTimeline({
   const isLive = isStreaming && !isSettled
   const [open, setOpen] = React.useState(false)
   const [hasUserToggled, setHasUserToggled] = React.useState(false)
-  const viewportRef = React.useRef<HTMLDivElement>(null)
-  const isFollowingLiveEdge = React.useRef(true)
   const wasLive = React.useRef(isLive)
   const expanded = isLive || open
   const contentId = `agent-activity-${id}`
@@ -85,35 +84,11 @@ function AgentActivityTimeline({
     wasLive.current = isLive
   }, [hasUserToggled, isLive])
 
-  React.useLayoutEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport || !isLive || !expanded || !isFollowingLiveEdge.current) return
-
-    // Layout can grow after the first paint when a streamed token creates a new
-    // line. Assign scrollTop after layout and once more on the next frame so the
-    // outer activity viewport, rather than an intermediate child panel, owns the
-    // live edge.
-    viewport.scrollTop = viewport.scrollHeight
-    const frameId = window.requestAnimationFrame(() => {
-      const current = viewportRef.current
-      if (current && isFollowingLiveEdge.current) current.scrollTop = current.scrollHeight
-    })
-
-    return () => window.cancelAnimationFrame(frameId)
-  }, [expanded, isLive, parts])
-
-  const handleActivityScroll = (): void => {
-    const viewport = viewportRef.current
-    if (!viewport) return
-    isFollowingLiveEdge.current =
-      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 16
-  }
-
   return (
     <section
       aria-busy={isLive}
       aria-label="Agent activity"
-      className={`agent-activity${isLive ? ' agent-activity--live' : ''}`}
+      className="agent-activity"
       data-open={expanded}
       data-user-toggled={hasUserToggled ? 'true' : 'false'}
       data-testid="agent-activity-event"
@@ -121,7 +96,7 @@ function AgentActivityTimeline({
       {isLive ? (
         <div className="agent-activity__live-status" role="status">
           <span aria-hidden="true" className="agent-activity__live-dot" />
-          <span className="thinking-block__label thinking-block__label--active">{label}</span>
+          <span className="thinking-block__label">{label}</span>
         </div>
       ) : (
         <Button
@@ -142,17 +117,16 @@ function AgentActivityTimeline({
       <div className="agent-activity__body" id={contentId}>
         <div
           aria-hidden={!expanded}
-          className={`agent-activity__body-inner${isLive ? ' agent-activity__body-inner--streaming' : ''}`}
-          ref={viewportRef}
+          className="agent-activity__body-inner"
+          inert={!expanded}
           role="list"
-          onScroll={handleActivityScroll}
         >
           {parts.map((part, index) => (
             <div className="agent-activity__item" key={`${id}-${index}`} role="listitem">
               {part.type === 'reasoning' ? (
                 <ThinkingTrace
                   id={`${id}-${index}`}
-                  // The shimmer follows the reasoning part's own lifecycle state,
+                  // The label follows the reasoning part's own lifecycle state,
                   // not its position: a thought settles when its stream ends even
                   // if the message keeps streaming past this step.
                   isStreaming={isStreaming && part.state === 'streaming'}

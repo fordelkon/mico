@@ -1,4 +1,4 @@
-import { CheckIcon, FileCode2Icon, LoaderCircleIcon } from 'lucide-react'
+import { CheckIcon, FileCode2Icon } from 'lucide-react'
 import * as React from 'react'
 
 type EditTrace = { newText: string; oldText: string }
@@ -42,11 +42,7 @@ function EditToolTrace({
           <span className="text-destructive">-{deletions}</span>
         </span>
         <span className="inline-flex shrink-0 items-center gap-1 text-text-tertiary">
-          {isDraft ? (
-            <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />
-          ) : (
-            <CheckIcon aria-hidden="true" className="size-3 text-primary" />
-          )}
+          {!isDraft ? <CheckIcon aria-hidden="true" className="size-3 text-primary" /> : null}
           {stateLabel}
         </span>
       </div>

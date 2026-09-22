@@ -71,7 +71,7 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
   )
 
   return (
-    <div className="chat-paper flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="chat-paper paper-canvas flex min-h-0 flex-1 flex-col overflow-hidden">
       {workspace.activeConversation ? (
         <>
           <div
