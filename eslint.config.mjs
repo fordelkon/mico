@@ -12,6 +12,8 @@ export default defineConfig(
       '**/dist',
       '**/out',
       '**/storybook-static',
+      'playwright-report/**',
+      'test-results/**',
       'tools/oxlint/anti-slop/**'
     ]
   },
