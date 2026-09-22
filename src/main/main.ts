@@ -132,6 +132,12 @@ function watchDiagnostics(): void {
   })
 }
 
+// E2E and manual test runs redirect all persistence to an isolated directory.
+// The single-instance lock is scoped to userData, so this also lets a test
+// instance run beside the installed application.
+const testUserDataDir = process.env['MICO_USER_DATA_DIR']
+if (testUserDataDir) app.setPath('userData', testUserDataDir)
+
 const gotTheLock = app.requestSingleInstanceLock()
 
 if (gotTheLock) {
