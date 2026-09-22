@@ -1,9 +1,17 @@
-import { Button, Input, InputGroup, InputGroupAddon, InputGroupInput, Toggle } from '@mico/ui'
+import {
+  Button,
+  Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  Spinner,
+  Toggle
+} from '@mico/ui'
 import { useListReorderAnimation } from '@renderer/hooks/use-list-reorder-animation'
 import { sortByEnabledOrder } from '@renderer/utils/enabled-order'
 import type { ProviderConfiguration } from '@shared/data/schemas/provider'
 import type { AddModelRequest } from '@shared/ipc/schemas/providers'
-import { DownloadIcon, PlusIcon, SearchIcon } from 'lucide-react'
+import { PlusIcon, SearchIcon, DownloadIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
@@ -160,7 +168,15 @@ function ProviderModelsSection({
         aria-label={`${providerLabel} fetched models`}
         className="max-h-48 overflow-y-auto rounded-md border border-border-subtle"
       >
-        {hasModels ? (
+        {isFetchingModels ? (
+          <div className="flex items-center justify-center gap-2 px-3 py-8">
+            <Spinner
+              aria-hidden="true"
+              className="size-4 motion-reduce:animate-none text-text-secondary"
+            />
+            <span className="text-sm text-text-secondary">Loading Models</span>
+          </div>
+        ) : hasModels ? (
           filteredModels.length === 0 ? (
             <p className="px-3 py-8 text-center text-sm text-text-secondary">
               No models match your search.
