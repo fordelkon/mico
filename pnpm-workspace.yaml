@@ -6,6 +6,7 @@ packages:
 allowBuilds:
   better-sqlite3: true
   electron: true
+  electron-winstaller: true
   esbuild: true
 
 # Install prebuilt binaries for both arches on the host OS, so any platform can package
