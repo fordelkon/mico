@@ -12,13 +12,18 @@ tests/e2e/
 ├── README.md                 # This guide
 ├── global-setup.ts           # Loads .env; fails fast when the build is missing
 ├── fixtures/
-│   └── electron.fixture.ts   # Launch fixture: electronApp, mainWindow
+│   └── electron.fixture.ts   # Launch fixture: app (window + relaunch)
 ├── utils/
 │   ├── wait-helpers.ts       # App-ready waits
+│   ├── chat.ts               # Model selection and message send helpers
+│   ├── real-provider.ts      # Real endpoint configuration and setup flow
 │   └── index.ts              # Utility exports
 └── specs/                    # Test cases
     ├── app-launch.spec.ts    # Application launch boundary tests
-    └── real-provider.spec.ts # Real LLM endpoint profile (skipped without credentials)
+    ├── persistence.spec.ts   # Theme and transcript persistence across restart
+    ├── real-provider.spec.ts # Real LLM endpoint profile (skipped without credentials)
+    ├── sessions.spec.ts      # Conversation rename and delete
+    └── workspaces.spec.ts    # Project folder management (stubbed OS dialog)
 ```
 
 ## Running tests
@@ -56,7 +61,10 @@ verified against a real LLM endpoint configured by the user; the reply text is
 model-controlled, so scenarios assert observable outcomes (a streamed
 non-empty assistant message) instead of exact wording.
 
-- Import `test` and `expect` from `fixtures/electron.fixture.ts`.
+- Import `test` and `expect` from `fixtures/electron.fixture.ts`; the `app`
+  fixture exposes the current `window` and `relaunch()` for restart scenarios
+  (the derived `electronApp`/`mainWindow` fixtures are only valid until a
+  restart).
 - Anchor waits to observable conditions (`utils/wait-helpers.ts`), never to delays.
 - Refer to `playwright.config.ts` in the repository root for runtime settings.
 
