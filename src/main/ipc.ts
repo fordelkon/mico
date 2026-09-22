@@ -15,18 +15,13 @@ import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
 import { ProjectIdSchema, SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
 import { ThinkingSelectionSchema } from '@shared/data/schemas/chat'
 import {
-  CustomProviderSchema,
-  CustomProviderIdSchema,
   ModelEntryIdSchema,
-  ModelProviderSchema,
   ProviderConfigurationSchema,
   ProviderLibrarySchema
 } from '@shared/data/schemas/provider'
 import { IpcChannel } from '@shared/IpcChannel'
 import {
   AddModelRequestSchema,
-  ImportModelRequestSchema,
-  SetModelEnabledRequestSchema,
   SyncModelsRequestSchema,
   TestModelRequestSchema
 } from '@shared/ipc/schemas/providers'
@@ -73,21 +68,7 @@ interface IpcServices {
   >
   provider: Pick<
     ProviderService,
-    | 'addModel'
-    | 'addCustomProvider'
-    | 'updateCustomProvider'
-    | 'discoverModels'
-    | 'getLibrary'
-    | 'importModel'
-    | 'setModelEnabled'
-    | 'syncModels'
-    | 'removeModel'
-    | 'removeCustomProvider'
-    | 'saveConfiguration'
-    | 'saveLibrary'
-    | 'selectModel'
-    | 'selectProvider'
-    | 'testModel'
+    'addModel' | 'discoverModels' | 'getLibrary' | 'saveLibrary' | 'syncModels' | 'testModel'
   >
   session: Pick<
     SessionRuntimeService,
@@ -327,32 +308,6 @@ function registerIpc(
     handle: () => provider.getLibrary()
   })
   register({
-    channel: IpcChannel.Providers_AddCustomProvider,
-    input: {
-      schema: CustomProviderSchema.omit({ id: true }),
-      invalidMessage: 'Invalid custom provider'
-    },
-    handle: (input) => provider.addCustomProvider(input)
-  })
-  register({
-    channel: IpcChannel.Providers_UpdateCustomProvider,
-    input: { schema: CustomProviderSchema, invalidMessage: 'Invalid custom provider' },
-    handle: (input) => provider.updateCustomProvider(input)
-  })
-  register({
-    channel: IpcChannel.Providers_RemoveCustomProvider,
-    input: { schema: CustomProviderIdSchema, invalidMessage: 'Invalid custom provider ID' },
-    handle: (providerId) => provider.removeCustomProvider(providerId)
-  })
-  register({
-    channel: IpcChannel.Providers_SaveConfiguration,
-    input: {
-      schema: ProviderConfigurationSchema,
-      invalidMessage: 'Invalid provider configuration'
-    },
-    handle: (configuration) => provider.saveConfiguration(configuration)
-  })
-  register({
     channel: IpcChannel.Providers_SaveLibrary,
     input: { schema: ProviderLibrarySchema, invalidMessage: 'Invalid provider library' },
     handle: (library) => provider.saveLibrary(library)
@@ -366,16 +321,6 @@ function registerIpc(
     handle: (configuration) => provider.discoverModels(configuration)
   })
   register({
-    channel: IpcChannel.Providers_ImportModel,
-    input: { schema: ImportModelRequestSchema, invalidMessage: 'Invalid provider model' },
-    handle: (request) => provider.importModel(request)
-  })
-  register({
-    channel: IpcChannel.Providers_SetModelEnabled,
-    input: { schema: SetModelEnabledRequestSchema, invalidMessage: 'Invalid provider model' },
-    handle: (request) => provider.setModelEnabled(request)
-  })
-  register({
     channel: IpcChannel.Providers_SyncModels,
     input: { schema: SyncModelsRequestSchema, invalidMessage: 'Invalid provider models' },
     handle: (request) => provider.syncModels(request)
@@ -384,21 +329,6 @@ function registerIpc(
     channel: IpcChannel.Providers_AddModel,
     input: { schema: AddModelRequestSchema, invalidMessage: 'Invalid provider model' },
     handle: (request) => provider.addModel(request)
-  })
-  register({
-    channel: IpcChannel.Providers_RemoveModel,
-    input: { schema: ModelEntryIdSchema, invalidMessage: 'Invalid provider model ID' },
-    handle: (modelEntryId) => provider.removeModel(modelEntryId)
-  })
-  register({
-    channel: IpcChannel.Providers_SelectModel,
-    input: { schema: ModelEntryIdSchema.nullable(), invalidMessage: 'Invalid provider model ID' },
-    handle: (modelEntryId) => provider.selectModel(modelEntryId)
-  })
-  register({
-    channel: IpcChannel.Providers_SelectProvider,
-    input: { schema: ModelProviderSchema.nullable(), invalidMessage: 'Invalid provider ID' },
-    handle: (providerId) => provider.selectProvider(providerId)
   })
   register({
     channel: IpcChannel.Providers_TestModel,

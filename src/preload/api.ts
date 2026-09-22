@@ -108,26 +108,12 @@ const chat: ChatAPI = {
 }
 
 const providers: ProvidersAPI = {
-  addCustomProvider: (provider) =>
-    ipcRenderer.invoke(IpcChannel.Providers_AddCustomProvider, provider),
-  updateCustomProvider: (provider) =>
-    ipcRenderer.invoke(IpcChannel.Providers_UpdateCustomProvider, provider),
-  removeCustomProvider: (providerId) =>
-    ipcRenderer.invoke(IpcChannel.Providers_RemoveCustomProvider, providerId),
   addModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_AddModel, model),
   discoverModels: (configuration) =>
     ipcRenderer.invoke(IpcChannel.Providers_DiscoverModels, configuration),
   getLibrary: () => ipcRenderer.invoke(IpcChannel.Providers_GetLibrary),
   saveLibrary: (library) => ipcRenderer.invoke(IpcChannel.Providers_SaveLibrary, library),
-  importModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_ImportModel, model),
-  setModelEnabled: (model) => ipcRenderer.invoke(IpcChannel.Providers_SetModelEnabled, model),
   syncModels: (models) => ipcRenderer.invoke(IpcChannel.Providers_SyncModels, models),
-  removeModel: (modelId) => ipcRenderer.invoke(IpcChannel.Providers_RemoveModel, modelId),
-  saveConfiguration: (configuration) =>
-    ipcRenderer.invoke(IpcChannel.Providers_SaveConfiguration, configuration),
-  selectModel: (modelId) => ipcRenderer.invoke(IpcChannel.Providers_SelectModel, modelId),
-  selectProvider: (providerId) =>
-    ipcRenderer.invoke(IpcChannel.Providers_SelectProvider, providerId),
   testModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_TestModel, model)
 }
 

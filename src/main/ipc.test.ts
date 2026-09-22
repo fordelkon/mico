@@ -72,19 +72,10 @@ function createHarness() {
   }
   const provider = {
     addModel: vi.fn<ProviderService['addModel']>(),
-    addCustomProvider: vi.fn<ProviderService['addCustomProvider']>(),
-    updateCustomProvider: vi.fn<ProviderService['updateCustomProvider']>(),
     discoverModels: vi.fn<ProviderService['discoverModels']>(),
     getLibrary: vi.fn<ProviderService['getLibrary']>(),
-    importModel: vi.fn<ProviderService['importModel']>(),
-    setModelEnabled: vi.fn<ProviderService['setModelEnabled']>(),
-    syncModels: vi.fn<ProviderService['syncModels']>(),
-    removeCustomProvider: vi.fn<ProviderService['removeCustomProvider']>(),
-    removeModel: vi.fn<ProviderService['removeModel']>(),
-    saveConfiguration: vi.fn<ProviderService['saveConfiguration']>(),
     saveLibrary: vi.fn<ProviderService['saveLibrary']>(),
-    selectModel: vi.fn<ProviderService['selectModel']>(),
-    selectProvider: vi.fn<ProviderService['selectProvider']>(),
+    syncModels: vi.fn<ProviderService['syncModels']>(),
     testModel: vi.fn<ProviderService['testModel']>()
   }
   const session = {
@@ -705,17 +696,6 @@ describe('registerIpc provider handlers', () => {
     expect(provider.discoverModels).not.toHaveBeenCalled()
   })
 
-  it('user saves a provider configuration when valid, then it is passed through', async () => {
-    const { handlers, provider, event } = createHarness()
-    const configuration = { provider: 'ollama' as const, baseUrl: 'http://localhost:11434' }
-    provider.saveConfiguration.mockResolvedValue(configuration)
-
-    await expect(
-      handlers.get(IpcChannel.Providers_SaveConfiguration)?.(event, configuration)
-    ).resolves.toEqual(configuration)
-    expect(provider.saveConfiguration).toHaveBeenCalledWith(configuration)
-  })
-
   it('user saves the provider library when valid, then it is passed through', async () => {
     const { handlers, provider, event } = createHarness()
     const library = {
@@ -732,25 +712,6 @@ describe('registerIpc provider handlers', () => {
       library
     )
     expect(provider.saveLibrary).toHaveBeenCalledWith(library)
-  })
-
-  it('user selects a provider when the ID is valid, then the selection is delegated', async () => {
-    const { handlers, provider, event } = createHarness()
-    provider.selectProvider.mockResolvedValue('ollama')
-
-    await expect(
-      handlers.get(IpcChannel.Providers_SelectProvider)?.(event, 'ollama')
-    ).resolves.toEqual('ollama')
-    expect(provider.selectProvider).toHaveBeenCalledWith('ollama')
-  })
-
-  it('user cannot select a provider when the ID is empty, then nothing is delegated', () => {
-    const { handlers, provider, event } = createHarness()
-
-    expect(() => handlers.get(IpcChannel.Providers_SelectProvider)?.(event, '')).toThrow(
-      'Invalid provider ID'
-    )
-    expect(provider.selectProvider).not.toHaveBeenCalled()
   })
 })
 

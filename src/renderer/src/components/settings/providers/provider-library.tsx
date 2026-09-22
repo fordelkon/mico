@@ -2,14 +2,11 @@ import type {
   CustomProvider,
   ProviderLibrary as PersistedProviderLibrary
 } from '@shared/data/schemas/provider'
-import type {
-  AddCustomProviderRequest,
-  DiscoveredModel,
-  UpdateCustomProviderRequest
-} from '@shared/ipc/schemas/providers'
+import type { DiscoveredModel } from '@shared/ipc/schemas/providers'
 import * as React from 'react'
 
 import type { ProviderId } from './providers-sidebar'
+import { useAutosaveQueue } from './use-autosave-queue'
 
 type ProviderConfiguration = { apiKey: string; baseUrl: string; enabled: boolean }
 type CatalogModel = {
@@ -28,47 +25,22 @@ type ProviderCatalog = {
   selectedModelId: string | null
   selectedProviderId: string | null
 }
-
-function toPersistedLibrary(library: ProviderCatalog): PersistedProviderLibrary {
-  const configurations: PersistedProviderLibrary['configurations'][number][] = []
-  const ollama = library.configurations.ollama
-  if (ollama)
-    configurations.push({ provider: 'ollama', baseUrl: ollama.baseUrl, enabled: ollama.enabled })
-  return {
-    configurations,
-    customProviders: library.customProviders,
-    enabledProviderIds: library.enabledProviderIds,
-    models: library.models.map(({ id, providerId, modelId, name, enabled }) => ({
-      id,
-      provider: providerId,
-      modelId,
-      displayName: name,
-      enabled
-    })),
-    selectedModelId: library.selectedModelId,
-    selectedProviderId: library.selectedProviderId
-  }
-}
 type ProviderLibraryActions = {
-  addCustomProvider: (provider: AddCustomProviderRequest) => Promise<CustomProvider>
+  addCustomProvider: (provider: Omit<CustomProvider, 'id'>) => Promise<CustomProvider>
   addModel: (model: {
     displayName?: string
     modelId: string
     provider: ProviderId
   }) => Promise<void>
   commitProviderDrafts: () => Promise<void>
+  flushLibrary: () => Promise<void>
   removeCustomProvider: (providerId: ProviderId) => Promise<void>
   selectModel: (modelId: string) => Promise<void>
   selectProvider: (providerId: ProviderId | null) => Promise<void>
   syncModels: (providerId: ProviderId, models: DiscoveredModel[]) => Promise<void>
   toggleModel: (model: CatalogModel, enabled: boolean) => Promise<void>
-  flushConfiguration: (providerId: ProviderId) => void
-  updateConfiguration: (
-    providerId: ProviderId,
-    configuration: ProviderConfiguration,
-    options?: { immediate?: boolean }
-  ) => void
-  updateCustomProvider: (provider: UpdateCustomProviderRequest) => Promise<void>
+  updateConfiguration: (providerId: ProviderId, configuration: ProviderConfiguration) => void
+  updateCustomProvider: (provider: CustomProvider) => Promise<void>
 }
 type ProviderLibraryState = {
   isLoaded: boolean
@@ -78,42 +50,37 @@ type ProviderLibraryState = {
 }
 
 const configurationSaveDelay = 150
-const initialLibrary: ProviderCatalog = {
-  configurations: {
-    ollama: { apiKey: '', baseUrl: 'http://localhost:11434', enabled: false }
-  },
+const initialLibrary: PersistedProviderLibrary = {
+  configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434', enabled: false }],
   customProviders: [],
   enabledProviderIds: [],
-  enabledModelIds: [],
   models: [],
   selectedModelId: null,
   selectedProviderId: null
 }
-function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderCatalog {
-  const configurations = { ...initialLibrary.configurations }
-  for (const configuration of next.configurations) {
-    if (configuration.provider === 'ollama') {
-      configurations[configuration.provider] = {
-        apiKey: '',
-        baseUrl: configuration.baseUrl,
-        enabled: configuration.enabled ?? false
-      }
+/**
+ * The one derivation from the persisted shape to the catalog view the UI
+ * consumes. Mutations happen on the persisted state, so the catalog can never
+ * drift into a shape that saveLibrary would not accept back.
+ */
+function toProviderCatalog(next: PersistedProviderLibrary): ProviderCatalog {
+  const builtinOllama = next.configurations.find(({ provider }) => provider === 'ollama')
+  const configurations: ProviderCatalog['configurations'] = {
+    ollama: {
+      apiKey: '',
+      baseUrl: builtinOllama?.baseUrl ?? 'http://localhost:11434',
+      enabled: builtinOllama?.enabled ?? false
+    }
+  }
+  for (const provider of next.customProviders) {
+    configurations[provider.id] = {
+      apiKey: provider.apiKey ?? '',
+      baseUrl: provider.baseUrl,
+      enabled: provider.enabled ?? false
     }
   }
   return {
-    configurations: {
-      ...configurations,
-      ...Object.fromEntries(
-        next.customProviders.map(({ id }) => [
-          id,
-          {
-            apiKey: '',
-            baseUrl: '',
-            enabled: next.customProviders.find((provider) => provider.id === id)?.enabled ?? false
-          }
-        ])
-      )
-    },
+    configurations,
     customProviders: next.customProviders,
     enabledProviderIds: next.enabledProviderIds ?? [
       ...next.configurations.filter(({ enabled }) => enabled).map(({ provider }) => provider),
@@ -127,8 +94,8 @@ function fromPersistedLibrary(next: PersistedProviderLibrary): ProviderCatalog {
       providerId: provider
     })),
     enabledModelIds: next.models.filter(({ enabled }) => enabled).map(({ id }) => id),
-    selectedModelId: next.selectedModelId,
-    selectedProviderId: next.selectedProviderId
+    selectedModelId: next.selectedModelId ?? null,
+    selectedProviderId: next.selectedProviderId ?? null
   }
 }
 const unavailable = async (): Promise<never> => {
@@ -138,39 +105,29 @@ const ProviderLibraryActionsContext = React.createContext<ProviderLibraryActions
   addCustomProvider: unavailable,
   addModel: async () => undefined,
   commitProviderDrafts: async () => undefined,
+  flushLibrary: async () => undefined,
   removeCustomProvider: unavailable,
   selectModel: async () => undefined,
   selectProvider: async () => undefined,
   syncModels: unavailable,
   toggleModel: unavailable,
-  flushConfiguration: () => undefined,
   updateConfiguration: () => undefined,
   updateCustomProvider: unavailable
 })
 const ProviderLibraryStateContext = React.createContext<ProviderLibraryState>({
   isLoaded: false,
   loadError: null,
-  library: initialLibrary
+  library: toProviderCatalog(initialLibrary)
 })
 function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.JSX.Element {
   const [library, setLibrary] = React.useState(initialLibrary)
   const [isLoaded, setIsLoaded] = React.useState(false)
   const [loadError, setLoadError] = React.useState<string | null>(null)
-  const configurationSaveTimers = React.useRef(new Map<ProviderId, ReturnType<typeof setTimeout>>())
-  const configurationSaveRevisions = React.useRef(new Map<ProviderId, number>())
-  const configurationSaveQueues = React.useRef(new Map<ProviderId, Promise<void>>())
-  const pendingConfigurationSaves = React.useRef(new Map<ProviderId, Promise<void>>())
-  const pendingConfigurations = React.useRef(new Map<ProviderId, ProviderConfiguration>())
   const libraryRef = React.useRef(library)
-  const librarySaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  // A stale debounced snapshot must not finish after model sync and overwrite its normalized state.
-  const librarySaveQueue = React.useRef(Promise.resolve())
-  const isLibraryLoaded = React.useRef(false)
-  const libraryRevision = React.useRef(0)
-  const hasUnsavedLibraryChanges = React.useRef(false)
   React.useEffect(() => {
     libraryRef.current = library
   }, [library])
+  const isLibraryLoaded = React.useRef(false)
 
   const refreshRevision = React.useRef(0)
   const refresh = React.useCallback(async (): Promise<void> => {
@@ -178,7 +135,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     try {
       const next = await window.api.providers.getLibrary()
       if (revision === refreshRevision.current) {
-        setLibrary(fromPersistedLibrary(next))
+        setLibrary(next)
         setIsLoaded(true)
       }
     } catch {
@@ -186,79 +143,37 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
         setLoadError('Could not load models. Open Settings and try again.')
     }
   }, [])
-  const commitLibrary = React.useCallback(async (): Promise<void> => {
-    const revision = libraryRevision.current
-    const library = toPersistedLibrary(libraryRef.current)
-    const save = librarySaveQueue.current
-      .catch(() => undefined)
-      .then(async () => {
-        const saved = await window.api.providers.saveLibrary(library)
-        if (libraryRevision.current === revision) hasUnsavedLibraryChanges.current = false
-        setLibrary(fromPersistedLibrary(saved))
-      })
-    librarySaveQueue.current = save
-    await save
-  }, [])
-  const scheduleLibrarySave = React.useCallback((): void => {
-    libraryRevision.current += 1
-    hasUnsavedLibraryChanges.current = true
-    if (librarySaveTimer.current) clearTimeout(librarySaveTimer.current)
-    librarySaveTimer.current = setTimeout(() => void commitLibrary(), configurationSaveDelay)
-  }, [commitLibrary])
 
-  const persistConfiguration = React.useCallback(
-    async (): Promise<void> => commitLibrary(),
-    [commitLibrary]
-  )
-  const flushConfiguration = React.useCallback(
-    (providerId: ProviderId) => {
-      const timer = configurationSaveTimers.current.get(providerId)
-      if (timer) clearTimeout(timer)
-      configurationSaveTimers.current.delete(providerId)
+  const autosave = useAutosaveQueue({
+    delayMs: configurationSaveDelay,
+    save: async () => {
+      if (!isLibraryLoaded.current) return false
+      const snapshot = libraryRef.current
+      const saved = await window.api.providers.saveLibrary(snapshot)
+      // Local state is already the snapshot's source, so only main's
+      // selection sanitization is absorbed back — never the whole snapshot.
+      setLibrary((current) => ({
+        ...current,
+        selectedModelId: saved.selectedModelId,
+        selectedProviderId: saved.selectedProviderId
+      }))
+      return true
+    }
+  })
 
-      const configuration = pendingConfigurations.current.get(providerId)
-      if (!configuration) return
-      pendingConfigurations.current.delete(providerId)
-      const revision = (configurationSaveRevisions.current.get(providerId) ?? 0) + 1
-      configurationSaveRevisions.current.set(providerId, revision)
-      const previousSave = configurationSaveQueues.current.get(providerId) ?? Promise.resolve()
-      const save = previousSave
-        .catch(() => undefined)
-        .then(async () => {
-          await persistConfiguration()
-          if (configurationSaveRevisions.current.get(providerId) !== revision) return
-          await refresh()
-        })
-        .catch(async (error) => {
-          await refresh()
-          throw error
-        })
-      configurationSaveQueues.current.set(providerId, save)
-      pendingConfigurationSaves.current.set(providerId, save)
-      void save
-        .finally(() => {
-          if (pendingConfigurationSaves.current.get(providerId) === save)
-            pendingConfigurationSaves.current.delete(providerId)
-        })
-        .catch(() => undefined)
+  const editLibrary = React.useCallback(
+    (updater: (current: PersistedProviderLibrary) => PersistedProviderLibrary): void => {
+      setLibrary(updater)
+      autosave.schedule()
     },
-    [persistConfiguration, refresh]
+    [autosave]
   )
-
-  const waitForConfigurationSaves = React.useCallback(async (): Promise<void> => {
-    for (const providerId of configurationSaveTimers.current.keys()) flushConfiguration(providerId)
-    await Promise.all(pendingConfigurationSaves.current.values())
-  }, [flushConfiguration])
-
   const commitProviderDrafts = React.useCallback(async (): Promise<void> => {
-    if (librarySaveTimer.current) clearTimeout(librarySaveTimer.current)
-    await waitForConfigurationSaves()
-    await librarySaveQueue.current
-    if (!isLibraryLoaded.current || !hasUnsavedLibraryChanges.current) return
-
-    // A flush always serializes the draft, never a refresh result, so rail reordering and persistence share one state transition.
-    await commitLibrary()
-  }, [commitLibrary, waitForConfigurationSaves])
+    await autosave.settle()
+  }, [autosave])
+  const flushLibrary = React.useCallback(async (): Promise<void> => {
+    await autosave.flush()
+  }, [autosave])
 
   React.useEffect(
     () =>
@@ -270,8 +185,6 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
 
   React.useEffect(
     () => () => {
-      for (const timer of configurationSaveTimers.current.values()) clearTimeout(timer)
-      if (librarySaveTimer.current) clearTimeout(librarySaveTimer.current)
       // Strict Mode also runs cleanup during hydration; an unloaded or clean draft must never replace persisted data.
       void commitProviderDrafts()
     },
@@ -284,7 +197,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       try {
         const next = await window.api.providers.getLibrary()
         if (!isActive || revision !== refreshRevision.current) return
-        setLibrary(fromPersistedLibrary(next))
+        setLibrary(next)
         isLibraryLoaded.current = true
         setIsLoaded(true)
       } catch {
@@ -296,58 +209,42 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       isActive = false
     }
   }, [])
+
   const updateConfiguration = React.useCallback(
-    (
-      providerId: ProviderId,
-      configuration: ProviderConfiguration,
-      { immediate = false }: { immediate?: boolean } = {}
-    ) => {
-      setLibrary((current) => ({
+    (providerId: ProviderId, configuration: ProviderConfiguration): void => {
+      editLibrary((current) => ({
         ...current,
-        configurations: { ...current.configurations, [providerId]: configuration },
+        configurations: current.configurations.map((entry) =>
+          entry.provider === providerId
+            ? { ...entry, baseUrl: configuration.baseUrl, enabled: configuration.enabled }
+            : entry
+        ),
         customProviders: current.customProviders.map((provider) =>
-          provider.id === providerId ? { ...provider, enabled: configuration.enabled } : provider
+          provider.id === providerId
+            ? { ...provider, baseUrl: configuration.baseUrl, enabled: configuration.enabled }
+            : provider
         ),
         enabledProviderIds: configuration.enabled
           ? [...new Set([...current.enabledProviderIds, providerId])]
           : current.enabledProviderIds.filter((id) => id !== providerId)
       }))
-      scheduleLibrarySave()
-      pendingConfigurations.current.set(providerId, configuration)
-      if (immediate) {
-        flushConfiguration(providerId)
-        return
-      }
-
-      const timer = configurationSaveTimers.current.get(providerId)
-      if (timer) clearTimeout(timer)
-      configurationSaveTimers.current.set(
-        providerId,
-        setTimeout(() => flushConfiguration(providerId), configurationSaveDelay)
-      )
     },
-    [flushConfiguration, scheduleLibrarySave]
+    [editLibrary]
   )
   const addCustomProvider = React.useCallback(
-    async (provider: AddCustomProviderRequest) => {
-      await waitForConfigurationSaves()
+    async (provider: Omit<CustomProvider, 'id'>) => {
+      await commitProviderDrafts()
       const customProvider = { ...provider, id: crypto.randomUUID() }
-      setLibrary((current) => ({
+      editLibrary((current) => ({
         ...current,
         customProviders: [...current.customProviders, customProvider],
-        configurations: {
-          ...current.configurations,
-          [customProvider.id]: {
-            apiKey: customProvider.apiKey ?? '',
-            baseUrl: customProvider.baseUrl,
-            enabled: customProvider.enabled ?? false
-          }
-        }
+        enabledProviderIds: customProvider.enabled
+          ? [...new Set([...current.enabledProviderIds, customProvider.id])]
+          : current.enabledProviderIds
       }))
-      scheduleLibrarySave()
       return customProvider
     },
-    [scheduleLibrarySave, waitForConfigurationSaves]
+    [commitProviderDrafts, editLibrary]
   )
   const addModel = React.useCallback(
     async (model: { displayName?: string; modelId: string; provider: ProviderId }) => {
@@ -366,65 +263,65 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     [commitProviderDrafts, refresh]
   )
   const updateCustomProvider = React.useCallback(
-    async (provider: UpdateCustomProviderRequest) => {
-      await waitForConfigurationSaves()
-      setLibrary((current) => ({
+    async (provider: CustomProvider) => {
+      await commitProviderDrafts()
+      editLibrary((current) => ({
         ...current,
         customProviders: current.customProviders.map((item) =>
           item.id === provider.id ? provider : item
-        )
+        ),
+        enabledProviderIds: provider.enabled
+          ? [...new Set([...current.enabledProviderIds, provider.id])]
+          : current.enabledProviderIds.filter((id) => id !== provider.id)
       }))
-      scheduleLibrarySave()
     },
-    [scheduleLibrarySave, waitForConfigurationSaves]
+    [commitProviderDrafts, editLibrary]
   )
   const toggleModel = React.useCallback(
     async (model: CatalogModel, enabled: boolean) => {
-      await waitForConfigurationSaves()
-      setLibrary((current) => ({
+      await commitProviderDrafts()
+      editLibrary((current) => ({
         ...current,
         models: current.models.map((item) => (item.id === model.id ? { ...item, enabled } : item))
       }))
-      scheduleLibrarySave()
     },
-    [scheduleLibrarySave, waitForConfigurationSaves]
+    [commitProviderDrafts, editLibrary]
   )
   const removeCustomProvider = React.useCallback(
     async (providerId: ProviderId) => {
-      await waitForConfigurationSaves()
-      setLibrary((current) => ({
+      await commitProviderDrafts()
+      // Selection cleanup is main's invariant: saveLibrary sanitizes a
+      // selection this removal invalidated, and the saved snapshot refreshes
+      // the local state.
+      editLibrary((current) => ({
         ...current,
         customProviders: current.customProviders.filter((provider) => provider.id !== providerId),
-        models: current.models.filter((model) => model.providerId !== providerId),
-        selectedProviderId:
-          current.selectedProviderId === providerId ? null : current.selectedProviderId
+        models: current.models.filter((model) => model.provider !== providerId)
       }))
-      scheduleLibrarySave()
     },
-    [scheduleLibrarySave, waitForConfigurationSaves]
+    [commitProviderDrafts, editLibrary]
   )
   const selectModel = React.useCallback(
     async (modelId: string) => {
-      await waitForConfigurationSaves()
-      setLibrary((current) => ({ ...current, selectedModelId: modelId }))
-      scheduleLibrarySave()
+      await commitProviderDrafts()
+      editLibrary((current) => ({ ...current, selectedModelId: modelId }))
     },
-    [scheduleLibrarySave, waitForConfigurationSaves]
+    [commitProviderDrafts, editLibrary]
   )
   const selectProvider = React.useCallback(
     async (providerId: ProviderId | null) => {
-      setLibrary((current) => ({ ...current, selectedProviderId: providerId }))
-      await waitForConfigurationSaves()
-      scheduleLibrarySave()
+      editLibrary((current) => ({ ...current, selectedProviderId: providerId }))
+      await commitProviderDrafts()
     },
-    [scheduleLibrarySave, waitForConfigurationSaves]
+    [commitProviderDrafts, editLibrary]
   )
+  const catalog = React.useMemo(() => toProviderCatalog(library), [library])
   const actions = React.useMemo(
     () => ({
       addCustomProvider,
       addModel,
       commitProviderDrafts,
-      flushConfiguration,
+      flushLibrary,
       removeCustomProvider,
       selectModel,
       selectProvider,
@@ -437,7 +334,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       addCustomProvider,
       addModel,
       commitProviderDrafts,
-      flushConfiguration,
+      flushLibrary,
       removeCustomProvider,
       selectModel,
       selectProvider,
@@ -448,8 +345,8 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     ]
   )
   const state = React.useMemo(
-    () => ({ isLoaded, loadError, library }),
-    [isLoaded, loadError, library]
+    () => ({ isLoaded, loadError, library: catalog }),
+    [isLoaded, loadError, catalog]
   )
   return (
     <ProviderLibraryActionsContext value={actions}>

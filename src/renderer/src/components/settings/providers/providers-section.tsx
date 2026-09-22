@@ -69,7 +69,7 @@ function ProvidersSection({
   onProviderReorder: () => void
   providerId: ProviderId
 }): React.JSX.Element {
-  const { flushConfiguration, removeCustomProvider, updateConfiguration, updateCustomProvider } =
+  const { flushLibrary, removeCustomProvider, updateConfiguration, updateCustomProvider } =
     useProviderLibraryActions()
   const { library } = useProviderLibraryState()
   const [isApiKeyVisible, setIsApiKeyVisible] = React.useState(false)
@@ -347,7 +347,7 @@ function ProvidersSection({
                 }}
                 onBlur={() => {
                   if (customProvider) saveCustomProvider()
-                  else flushConfiguration(providerId)
+                  else void flushLibrary()
                 }}
                 value={customProviderValues?.baseUrl ?? configuration.baseUrl}
               />
@@ -371,7 +371,7 @@ function ProvidersSection({
                     type={isApiKeyVisible ? 'text' : 'password'}
                     onBlur={() => {
                       if (customProvider) saveCustomProvider()
-                      else flushConfiguration(providerId)
+                      else void flushLibrary()
                     }}
                     value={customProviderValues?.apiKey ?? configuration.apiKey}
                   />

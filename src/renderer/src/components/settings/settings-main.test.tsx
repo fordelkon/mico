@@ -46,19 +46,6 @@ function mockLibrary(selectedProviderId: string | null): void {
   })
 }
 
-function mockAddExampleProvider(): void {
-  providerApi.addCustomProvider.mockImplementation(async (provider) => {
-    const saved = {
-      ...provider,
-      apiKey: 'secret',
-      headers: { 'X-Client': 'Mico' },
-      id: 'example-ai'
-    }
-    persistedLibrary = { ...persistedLibrary, customProviders: [saved] }
-    return saved
-  })
-}
-
 async function addExampleAiProvider(user: UserEvent): Promise<void> {
   await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
   const dialog = screen.getByRole('dialog', { name: 'Add custom provider' })
@@ -83,20 +70,12 @@ async function waitForOllama(): Promise<void> {
 }
 
 const providerApi = {
-  addCustomProvider: vi.fn<ProvidersAPI['addCustomProvider']>(),
   addModel: vi.fn<ProvidersAPI['addModel']>(),
   discoverModels: vi.fn<ProvidersAPI['discoverModels']>(),
   getLibrary: vi.fn<ProvidersAPI['getLibrary']>(),
   saveLibrary: vi.fn<ProvidersAPI['saveLibrary']>(),
-  importModel: vi.fn<ProvidersAPI['importModel']>(),
-  removeCustomProvider: vi.fn<ProvidersAPI['removeCustomProvider']>(),
-  removeModel: vi.fn<ProvidersAPI['removeModel']>(),
-  saveConfiguration: vi.fn<ProvidersAPI['saveConfiguration']>(),
-  selectProvider: vi.fn<ProvidersAPI['selectProvider']>(),
-  setModelEnabled: vi.fn<ProvidersAPI['setModelEnabled']>(),
   syncModels: vi.fn<ProvidersAPI['syncModels']>(),
-  testModel: vi.fn<ProvidersAPI['testModel']>(),
-  updateCustomProvider: vi.fn<ProvidersAPI['updateCustomProvider']>()
+  testModel: vi.fn<ProvidersAPI['testModel']>()
 }
 const windowControlsApi = {
   onProviderDraftFlush: vi.fn<WindowControlsAPI['onProviderDraftFlush']>(() => () => undefined)
@@ -113,15 +92,6 @@ beforeEach(() => {
     selectedModelId: null,
     selectedProviderId: null
   }
-  providerApi.addCustomProvider.mockReset()
-  providerApi.addCustomProvider.mockImplementation(async (provider) => {
-    const saved = { ...provider, id: 'example-ai' }
-    persistedLibrary = {
-      ...persistedLibrary,
-      customProviders: [...persistedLibrary.customProviders, saved]
-    }
-    return saved
-  })
   providerApi.addModel.mockReset()
   providerApi.addModel.mockImplementation(async ({ displayName, modelId, provider }) => {
     const saved = {
@@ -145,57 +115,12 @@ beforeEach(() => {
     persistedLibrary = library
     return library
   })
-  providerApi.selectProvider.mockReset()
-  providerApi.selectProvider.mockImplementation(async (providerId) => {
-    persistedLibrary = { ...persistedLibrary, selectedProviderId: providerId }
-    return providerId
-  })
   providerApi.discoverModels.mockReset()
   providerApi.discoverModels.mockResolvedValue([
     { modelId: 'granite4.2:3b', displayName: 'granite4.2:3b' }
   ])
-  providerApi.removeCustomProvider.mockReset()
-  providerApi.removeCustomProvider.mockImplementation(async (providerId) => {
-    persistedLibrary = {
-      ...persistedLibrary,
-      customProviders: persistedLibrary.customProviders.filter(({ id }) => id !== providerId),
-      models: persistedLibrary.models.filter(({ provider }) => provider !== providerId)
-    }
-  })
-  providerApi.updateCustomProvider.mockReset()
-  providerApi.updateCustomProvider.mockImplementation(async (provider) => {
-    if (provider.apiKey === '') throw new Error('Invalid custom provider')
-    persistedLibrary = {
-      ...persistedLibrary,
-      customProviders: persistedLibrary.customProviders.map((current) =>
-        current.id === provider.id ? provider : current
-      )
-    }
-    return provider
-  })
   providerApi.testModel.mockReset()
   providerApi.testModel.mockResolvedValue(undefined)
-  providerApi.saveConfiguration.mockReset()
-  providerApi.saveConfiguration.mockImplementation(async (configuration) => {
-    persistedLibrary = {
-      ...persistedLibrary,
-      configurations: [
-        ...persistedLibrary.configurations.filter(
-          ({ provider }) => provider !== configuration.provider
-        ),
-        configuration
-      ]
-    }
-    return configuration
-  })
-  providerApi.importModel.mockReset()
-  providerApi.importModel.mockImplementation(async (model) => ({
-    id: 'saved-model',
-    enabled: false,
-    ...model
-  }))
-  providerApi.removeModel.mockReset()
-  providerApi.removeModel.mockResolvedValue(undefined)
   providerApi.syncModels.mockReset()
   providerApi.syncModels.mockImplementation(async ({ models, provider }) => {
     const existingModels = persistedLibrary.models.filter((model) => model.provider === provider)
@@ -220,17 +145,6 @@ beforeEach(() => {
           }))
       ]
     }
-  })
-  providerApi.setModelEnabled.mockReset()
-  providerApi.setModelEnabled.mockImplementation(async ({ enabled, modelId }) => {
-    const model = persistedLibrary.models.find(({ id }) => id === modelId)
-    if (!model) throw new Error('Provider model was not found.')
-    const saved = { ...model, enabled }
-    persistedLibrary = {
-      ...persistedLibrary,
-      models: persistedLibrary.models.map((current) => (current.id === modelId ? saved : current))
-    }
-    return saved
   })
   windowControlsApi.onProviderDraftFlush.mockClear()
   Object.defineProperty(window, 'api', {
@@ -676,7 +590,6 @@ describe('SettingsMain', () => {
 
   it('user lands on the new custom provider when adding it, then its models appear', async () => {
     const user = userEvent.setup()
-    mockAddExampleProvider()
     renderSettings()
 
     await addExampleAiProvider(user)
@@ -693,7 +606,6 @@ describe('SettingsMain', () => {
 
   it('user edits a custom provider when opening it, then the API key can be revealed', async () => {
     const user = userEvent.setup()
-    mockAddExampleProvider()
     renderSettings()
 
     await addExampleAiProvider(user)
