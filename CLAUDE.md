@@ -74,6 +74,7 @@ Use pnpm. Treat `package.json` scripts as the executable source of truth; use ex
 ## Task-specific References
 
 - Before writing or changing tests, read [docs/testing.md](docs/testing.md) for the testing standards and their lint enforcement.
+- Before writing or running e2e tests, read [tests/e2e/README.md](tests/e2e/README.md) for the launch fixture, real provider credentials, and isolation model.
 - Before designing or changing module boundaries and public interfaces, read [docs/design.md](docs/design.md) for reviewing abstraction quality and boundary enforcement.
 - Before changing CSS, component styling, or themes, read [docs/styling.md](docs/styling.md) for token ownership, theme boundaries, styling scope, and verification.
 - When adding or changing shared UI components, read [packages/ui/README.md](packages/ui/README.md) for component, story, and test conventions.
