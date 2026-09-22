@@ -1,4 +1,4 @@
-import * as z from 'zod'
+﻿import * as z from 'zod'
 
 import type {
   ChatProvider,
@@ -9,10 +9,11 @@ import type {
   ProviderStreamPart
 } from '../contracts'
 import { providerFinish } from '../contracts'
+import { createRequestNegotiator } from '../request-negotiator'
 import { parseSse } from '../streaming/sse'
 import { createStreamSequencer } from '../streaming/sequencer'
 import { createToolCallAssembler } from '../streaming/tool-calls'
-import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
+import { getOptimisticThinkingCapabilities } from '../thinking-preferences'
 
 type OpenAIResponsesConfiguration = Extract<
   ChatProviderConfiguration,
@@ -141,7 +142,10 @@ function createOpenAIResponsesProvider(
   chatUrl: string
 ): ChatProvider {
   const responsesUrl = chatUrl
-  const fetchWithThinkingFallback = createThinkingFallback()
+  const negotiate = createRequestNegotiator({
+    supportsFallbackAuth: false,
+    supportsFallbackThinking: false
+  })
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
     stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
@@ -159,23 +163,26 @@ function createOpenAIResponsesProvider(
       if (tools?.length) request.tools = toTools(tools)
       // Responses uses a different stream vocabulary from Chat Completions, so
       // reasoning summaries and output text are parsed from response.* events below.
-      const response = await fetchWithThinkingFallback(thinkingEffort, (includeThinking) => {
-        const headers = new Headers({
-          'content-type': 'application/json',
-          ...configuration.headers
-        })
-        if (configuration.apiKey && !headers.has('authorization'))
-          headers.set('authorization', `Bearer ${configuration.apiKey}`)
-        return dependencies.fetch(responsesUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(
-            includeThinking
-              ? { ...request, reasoning: { effort: thinkingEffort, summary: 'auto' } }
-              : request
-          ),
-          signal
-        })
+      const response = await negotiate({
+        thinkingEffort,
+        attempt: (variant) => {
+          const headers = new Headers({
+            'content-type': 'application/json',
+            ...configuration.headers
+          })
+          if (configuration.apiKey && !headers.has('authorization'))
+            headers.set('authorization', `Bearer ${configuration.apiKey}`)
+          return dependencies.fetch(responsesUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(
+              variant.includeThinking
+                ? { ...request, reasoning: { effort: thinkingEffort, summary: 'auto' } }
+                : request
+            ),
+            signal
+          })
+        }
       })
       if (!response.ok)
         throw new Error(`OpenAI request failed (${response.status} ${response.statusText}).`)

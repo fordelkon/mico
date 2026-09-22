@@ -1,4 +1,4 @@
-import type { ProviderMetadata } from 'ai'
+﻿import type { ProviderMetadata } from 'ai'
 import * as z from 'zod'
 
 import { createAnthropicHeaders } from '../anthropic-auth'
@@ -13,12 +13,12 @@ import type {
   ThinkingSelection
 } from '../contracts'
 import { providerFinish } from '../contracts'
+import { createRequestNegotiator, type RequestVariant } from '../request-negotiator'
 import { createReasoningChunkEmitter, type ReasoningChunkEmitter } from '../streaming/parts'
 import { parseSse } from '../streaming/sse'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
 import { createToolCallAssembler } from '../streaming/tool-calls'
 import {
-  createThinkingFallback,
   getOptimisticThinkingCapabilities,
   isOptimisticThinkingEffort
 } from '../thinking-preferences'
@@ -153,10 +153,12 @@ function createAnthropicCompatibleProvider(
   chatUrl: string
 ): ChatProvider {
   const maxTokens = configuration.maxTokens ?? DEFAULT_MAX_TOKENS
-  const fetchWithThinkingFallback = createThinkingFallback()
-  // Anthropic-compatible gateways may front non-Claude models with adaptive
-  // thinking. Probe once, then cache a 400/422 rejection as budget-only.
-  let adaptiveThinkingEnabled = true
+  const negotiate = createRequestNegotiator({
+    supportsFallbackAuth: Boolean(configuration.apiKey),
+    // Anthropic-compatible gateways may front non-Claude models with adaptive
+    // thinking. Probe once, then cache a 400/422 rejection as budget-only.
+    supportsFallbackThinking: true
+  })
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
     stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
@@ -170,10 +172,10 @@ function createAnthropicCompatibleProvider(
         .filter((message) => message.role !== 'system')
         .map(toMessage)
         .filter((message): message is NonNullable<typeof message> => message !== null)
-      const getThinking = (includeThinking: boolean) =>
-        includeThinking && thinkingEffort !== 'none'
+      const getThinking = (variant: RequestVariant) =>
+        variant.includeThinking && thinkingEffort !== 'none'
           ? (() => {
-              if (adaptiveThinkingEnabled) return { type: 'adaptive' as const }
+              if (!variant.useFallbackThinking) return { type: 'adaptive' as const }
               const budgetTokens = getThinkingBudget(thinkingEffort, maxTokens)
               return budgetTokens
                 ? { type: 'enabled' as const, budget_tokens: budgetTokens }
@@ -193,46 +195,30 @@ function createAnthropicCompatibleProvider(
           description: tool.description,
           input_schema: tool.inputSchema
         }))
-      const send = (includeThinking: boolean, authentication: 'api-key' | 'bearer' = 'api-key') => {
-        const thinking = getThinking(includeThinking)
-        const body = thinking ? { ...request, thinking } : request
-        const headers = createAnthropicHeaders(
-          configuration.apiKey,
-          configuration.headers,
-          authentication
-        )
-        headers.set('content-type', 'application/json')
-        return dependencies.fetch(chatUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          signal
-        })
-      }
-      const sendWithAuthenticationFallback = async (
-        includeThinking: boolean
-      ): Promise<Response> => {
-        let response = await send(includeThinking)
-        if (response.status === 401 && configuration.apiKey)
-          response = await send(includeThinking, 'bearer')
-        if (
-          includeThinking &&
-          adaptiveThinkingEnabled &&
-          (response.status === 400 || response.status === 422)
-        ) {
-          // A gateway can advertise a Claude 4.6 name without supporting the
-          // adaptive request shape. Fall back to budget thinking, not no thinking.
-          adaptiveThinkingEnabled = false
-          response = await send(true)
+      const response = await negotiate({
+        // Only the optimistic effort levels carry thinking; other selections
+        // stream without a thinking field at all.
+        thinkingEffort:
+          isOptimisticThinkingEffort(thinkingEffort) && thinkingEffort !== 'none'
+            ? thinkingEffort
+            : null,
+        attempt: (variant) => {
+          const thinking = getThinking(variant)
+          const body = thinking ? { ...request, thinking } : request
+          const headers = createAnthropicHeaders(
+            configuration.apiKey,
+            configuration.headers,
+            variant.useFallbackAuth ? 'bearer' : 'api-key'
+          )
+          headers.set('content-type', 'application/json')
+          return dependencies.fetch(chatUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal
+          })
         }
-        return response.status === 401 && configuration.apiKey
-          ? send(includeThinking, 'bearer')
-          : response
-      }
-      const response =
-        isOptimisticThinkingEffort(thinkingEffort) && thinkingEffort !== 'none'
-          ? await fetchWithThinkingFallback(thinkingEffort, sendWithAuthenticationFallback)
-          : await sendWithAuthenticationFallback(false)
+      })
       if (!response.ok)
         throw new Error(
           `Anthropic-compatible request failed (${response.status} ${response.statusText}).`

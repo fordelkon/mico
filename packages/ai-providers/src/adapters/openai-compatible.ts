@@ -1,4 +1,4 @@
-import * as z from 'zod'
+﻿import * as z from 'zod'
 
 import type {
   ChatProvider,
@@ -10,11 +10,12 @@ import type {
   ProviderStreamPart
 } from '../contracts'
 import { providerFinish } from '../contracts'
+import { createRequestNegotiator } from '../request-negotiator'
 import { parseSse } from '../streaming/sse'
 import { createStreamSequencer } from '../streaming/sequencer'
 import { createTaggedThinkingExtractor } from '../streaming/tagged-thinking'
 import { createToolCallAssembler } from '../streaming/tool-calls'
-import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
+import { getOptimisticThinkingCapabilities } from '../thinking-preferences'
 
 type OpenAICompatibleConfiguration = Extract<
   ChatProviderConfiguration,
@@ -136,7 +137,10 @@ function createOpenAICompatibleProvider(
   dependencies: ChatProviderDependencies,
   chatUrl: string
 ): ChatProvider {
-  const fetchWithThinkingFallback = createThinkingFallback()
+  const negotiate = createRequestNegotiator({
+    supportsFallbackAuth: false,
+    supportsFallbackThinking: false
+  })
   return {
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
     stream: async ({
@@ -160,16 +164,18 @@ function createOpenAICompatibleProvider(
       }
       if (tools?.length) request.tools = toTools(tools)
       if (collectPerformanceMetrics) request.stream_options = { include_usage: true }
-      const response = await fetchWithThinkingFallback(thinkingEffort, (includeThinking) =>
-        dependencies.fetch(chatUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(
-            includeThinking ? { ...request, reasoning_effort: thinkingEffort } : request
-          ),
-          signal
-        })
-      )
+      const response = await negotiate({
+        thinkingEffort,
+        attempt: (variant) =>
+          dependencies.fetch(chatUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(
+              variant.includeThinking ? { ...request, reasoning_effort: thinkingEffort } : request
+            ),
+            signal
+          })
+      })
       if (!response.ok)
         throw new Error(
           `OpenAI-compatible request failed (${response.status} ${response.statusText}).`
