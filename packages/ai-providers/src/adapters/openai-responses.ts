@@ -10,6 +10,7 @@ import type {
 } from '../contracts'
 import { providerFinish } from '../contracts'
 import { createRequestNegotiator } from '../request-negotiator'
+import { parseEvent } from '../streaming/event-parse'
 import { parseSse } from '../streaming/sse'
 import { createStreamSequencer } from '../streaming/sequencer'
 import { createToolCallAssembler } from '../streaming/tool-calls'
@@ -28,6 +29,7 @@ const OpenAIEventSchema = z.object({
       id: z.string().optional(),
       incomplete_details: z.object({ reason: z.string().optional() }).nullable().optional(),
       status: z.string().optional(),
+      // Usage is null until the response completes, per the Responses protocol.
       usage: z
         .object({
           input_tokens: z.number().nonnegative().optional(),
@@ -37,10 +39,17 @@ const OpenAIEventSchema = z.object({
             .optional(),
           total_tokens: z.number().nonnegative().optional()
         })
+        .nullable()
         .optional()
     })
     .optional(),
-  error: z.object({ message: z.string().optional() }).optional(),
+  // Some gateways send the error event as a plain string instead of an object.
+  error: z
+    .union([
+      z.string().transform((message) => ({ message })),
+      z.object({ message: z.string().optional() })
+    ])
+    .optional(),
   item: z
     .object({
       type: z.string().optional(),
@@ -50,7 +59,6 @@ const OpenAIEventSchema = z.object({
     })
     .optional()
 })
-type OpenAIEvent = z.infer<typeof OpenAIEventSchema>
 type OpenAIInputItem =
   | {
       role: 'assistant' | 'system' | 'user'
@@ -130,12 +138,6 @@ function toTools(tools: readonly ChatProviderTool[]) {
     parameters: tool.inputSchema
   }))
 }
-function parseEventData(data: string): OpenAIEvent {
-  const result = OpenAIEventSchema.safeParse(JSON.parse(data))
-  if (!result.success)
-    throw new Error('The OpenAI streaming response contained invalid event data.')
-  return result.data
-}
 function createOpenAIResponsesProvider(
   configuration: OpenAIResponsesConfiguration,
   dependencies: ChatProviderDependencies,
@@ -195,7 +197,7 @@ function createOpenAIResponsesProvider(
         )
         const calls = new Map<number, { id?: string; name?: string; argumentsJson: string }>()
         for await (const event of parseSse(stream)) {
-          const data = parseEventData(event.data)
+          const data = parseEvent(OpenAIEventSchema, 'OpenAI', event.data)
           if (event.event === 'response.reasoning_summary_text.delta' && data.delta)
             yield* seq.emitReasoning(data.delta)
           if (event.event === 'response.output_text.delta' && data.delta)

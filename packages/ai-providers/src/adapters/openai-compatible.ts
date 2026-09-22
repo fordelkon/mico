@@ -11,6 +11,7 @@ import type {
 } from '../contracts'
 import { providerFinish } from '../contracts'
 import { createRequestNegotiator } from '../request-negotiator'
+import { parseEvent } from '../streaming/event-parse'
 import { parseSse } from '../streaming/sse'
 import { createStreamSequencer } from '../streaming/sequencer'
 import { createTaggedThinkingExtractor } from '../streaming/tagged-thinking'
@@ -35,20 +36,35 @@ type OpenAICompatibleRequest = {
     }
   }>
 }
+// Compatible servers disagree on documented shapes: reasoning fields arrive as
+// null, single tool calls omit the index, multimodal servers stream content as
+// parts, and gateways send in-stream errors as a plain string. Accept those
+// variants instead of failing the stream.
 const EventSchema = z.object({
   choices: z
     .array(
       z.object({
         delta: z
           .object({
-            content: z.string().nullable().optional(),
-            reasoning: z.string().optional(),
-            reasoning_content: z.string().optional(),
-            reasoning_text: z.string().optional(),
+            content: z
+              .union([
+                z.string(),
+                z
+                  .array(z.object({ text: z.string().optional() }))
+                  .transform((parts) => parts.map((part) => part.text ?? '').join(''))
+              ])
+              .nullable()
+              .optional()
+              .transform((content) => content ?? undefined),
+            reasoning: z.string().nullable().optional(),
+            reasoning_content: z.string().nullable().optional(),
+            reasoning_text: z.string().nullable().optional(),
             tool_calls: z
               .array(
                 z.object({
-                  index: z.number().int(),
+                  // Only merges concurrent anonymous calls, which no known
+                  // compatible server emits alongside an omitted index.
+                  index: z.number().int().optional(),
                   id: z.string().optional(),
                   function: z
                     .object({ name: z.string().optional(), arguments: z.string().optional() })
@@ -75,7 +91,12 @@ const EventSchema = z.object({
     })
     .nullable()
     .optional(),
-  error: z.object({ message: z.string().optional() }).optional()
+  error: z
+    .union([
+      z.string().transform((message) => ({ message })),
+      z.object({ message: z.string().optional() })
+    ])
+    .optional()
 })
 
 type OpenAICompatibleMessage =
@@ -205,16 +226,12 @@ function createOpenAICompatibleProvider(
               throw new Error('The OpenAI-compatible provider returned an incomplete tool call.')
             break
           }
-          const parsed = EventSchema.safeParse(JSON.parse(event.data))
-          if (!parsed.success)
-            throw new Error(
-              'The OpenAI-compatible streaming response contained invalid event data.'
-            )
-          if (parsed.data.error?.message) throw new Error(parsed.data.error.message)
-          if (parsed.data.usage?.completion_tokens !== undefined)
-            onPerformanceMetrics?.({ outputTokens: parsed.data.usage.completion_tokens })
-          const delta = parsed.data.choices?.[0]?.delta
-          const nativeFinishReason = parsed.data.choices?.find(
+          const parsed = parseEvent(EventSchema, 'OpenAI-compatible', event.data)
+          if (parsed.error?.message) throw new Error(parsed.error.message)
+          if (parsed.usage?.completion_tokens !== undefined)
+            onPerformanceMetrics?.({ outputTokens: parsed.usage.completion_tokens })
+          const delta = parsed.choices?.[0]?.delta
+          const nativeFinishReason = parsed.choices?.find(
             (choice) => choice.finish_reason !== null && choice.finish_reason !== undefined
           )?.finish_reason
           if (nativeFinishReason) {
@@ -239,7 +256,8 @@ function createOpenAICompatibleProvider(
             else yield* seq.emitText(part.delta)
           }
           for (const call of delta?.tool_calls ?? []) {
-            const current = toolCalls.get(call.index) ?? {
+            const callIndex = call.index ?? 0
+            const current = toolCalls.get(callIndex) ?? {
               argumentsJson: '',
               pendingDeltas: []
             }
@@ -260,9 +278,9 @@ function createOpenAICompatibleProvider(
                 yield* assembler.delta(current.id, call.function.arguments)
               else current.pendingDeltas.push(call.function.arguments)
             }
-            toolCalls.set(call.index, current)
+            toolCalls.set(callIndex, current)
           }
-          if (parsed.data.choices?.some((choice) => choice.finish_reason === 'tool_calls')) {
+          if (parsed.choices?.some((choice) => choice.finish_reason === 'tool_calls')) {
             for (const call of toolCalls.values()) {
               if (!call.id || !call.name)
                 throw new Error('The OpenAI-compatible provider returned an incomplete tool call.')

@@ -406,4 +406,39 @@ describe('OpenAI Responses provider', () => {
     expect(await fetchCallRequestBody(fetchMock, 1)).not.toHaveProperty('reasoning')
     expect(await fetchCallRequestBody(fetchMock, 2)).not.toHaveProperty('reasoning')
   })
+
+  it('user keeps streaming when response usage is null, then the finish carries the ID', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        sseResponse(
+          'event: response.created\ndata: {"response":{"id":"resp_now","status":"in_progress","usage":null}}\n\nevent: response.completed\ndata: {"response":{"id":"resp_now"}}\n\n'
+        )
+      )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
+
+    await expect(collectProtocol(await provider.stream(streamInput()))).resolves.toContainEqual({
+      type: 'provider-finish',
+      reason: 'stop',
+      continuation: { provider: 'openai-responses', responseId: 'resp_now' }
+    })
+  })
+
+  it('user gets the endpoint error message when the error event carries a string, then it fails', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(sseResponse('event: error\ndata: {"error":"boom"}\n\n'))
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
+
+    await expect(collect(await provider.stream(streamInput()))).rejects.toThrow('boom')
+  })
+
+  it('user gets the failing field in the error when an event is malformed, then it can be diagnosed', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(sseResponse('event: response.output_text.delta\ndata: {"delta":123}\n\n'))
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
+
+    await expect(collect(await provider.stream(streamInput()))).rejects.toThrow('at delta')
+  })
 })

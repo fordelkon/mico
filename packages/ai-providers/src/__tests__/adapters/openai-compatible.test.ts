@@ -344,4 +344,80 @@ describe('OpenAI-compatible provider', () => {
 
     expect(receivedPerformanceMetrics).toBe(false)
   })
+
+  it('user keeps streaming when reasoning fields arrive as null, then text still follows', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"content":"Done.","reasoning_content":null}}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
+
+    await expect(collect(await provider.stream(streamInput()))).resolves.toEqual([
+      { type: 'text-start', id: 'part' },
+      { type: 'text-delta', id: 'part', delta: 'Done.' },
+      { type: 'text-end', id: 'part' }
+    ])
+  })
+
+  it('user sees text joined when content streams as parts, then it completes', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"content":[{"type":"text","text":"He"},{"type":"text","text":"llo"}]}}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
+
+    await expect(collect(await provider.stream(streamInput()))).resolves.toEqual([
+      { type: 'text-start', id: 'part' },
+      { type: 'text-delta', id: 'part', delta: 'Hello' },
+      { type: 'text-end', id: 'part' }
+    ])
+  })
+
+  it('user gets a rejected stream when the endpoint sends an error string, then the message is kept', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('data: {"error":"rate limited"}\n\n'))
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
+
+    await expect(collect(await provider.stream(streamInput()))).rejects.toThrow('rate limited')
+  })
+
+  it('user sees the tool call assembled when the index is omitted, then it completes', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(
+          'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","function":{"name":"read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'
+        )
+      )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
+
+    await expect(collect(await provider.stream(streamInput('Read.')))).resolves.toEqual([
+      { type: 'tool-input-start', toolCallId: 'call_1', toolName: 'read' },
+      { type: 'tool-input-delta', toolCallId: 'call_1', inputTextDelta: '{}' },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call_1',
+        toolName: 'read',
+        input: {}
+      }
+    ])
+  })
+
+  it('user gets the failing field in the error when an event is malformed, then it can be diagnosed', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":123}}]}\n\n'))
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
+
+    await expect(collect(await provider.stream(streamInput()))).rejects.toThrow(
+      'choices.0.delta.content'
+    )
+  })
 })
