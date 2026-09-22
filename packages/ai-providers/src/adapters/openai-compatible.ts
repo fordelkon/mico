@@ -10,10 +10,10 @@ import type {
   ProviderStreamPart
 } from '../contracts'
 import { providerFinish } from '../contracts'
-import { createReasoningChunkEmitter } from '../streaming/parts'
 import { parseSse } from '../streaming/sse'
+import { createStreamSequencer } from '../streaming/sequencer'
 import { createTaggedThinkingExtractor } from '../streaming/tagged-thinking'
-import { createTextChunkEmitter } from '../streaming/text-chunks'
+import { createToolCallAssembler } from '../streaming/tool-calls'
 import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
 import { getVersionedApiUrl } from '../url'
 
@@ -181,8 +181,10 @@ function createOpenAICompatibleProvider(
         throw new Error('OpenAI-compatible provider returned an empty streaming response.')
       const stream = response.body
       return (async function* (): AsyncIterable<ProviderStreamPart> {
-        const text = createTextChunkEmitter(dependencies.createId)
-        const reasoning = createReasoningChunkEmitter(dependencies.createId)
+        const seq = createStreamSequencer(dependencies.createId)
+        const assembler = createToolCallAssembler(
+          'The OpenAI-compatible provider returned invalid tool arguments.'
+        )
         const tagged = createTaggedThinkingExtractor()
         const toolCalls = new Map<
           number,
@@ -191,7 +193,6 @@ function createOpenAICompatibleProvider(
             name?: string
             argumentsJson: string
             pendingDeltas: string[]
-            started: boolean
           }
         >()
         let finishReason: ProviderFinishReason = 'stop'
@@ -229,70 +230,41 @@ function createOpenAICompatibleProvider(
             delta?.reasoning_content ?? delta?.reasoning ?? delta?.reasoning_text
           // Compatible servers disagree on the reasoning field name, while the
           // application deliberately has one reasoning stream representation.
-          if (nativeReasoning) yield* reasoning.emitDelta(nativeReasoning)
-          if (delta?.content) {
-            for (const part of tagged.push(delta.content)) {
-              if (part.type === 'reasoning') yield* reasoning.emitDelta(part.delta)
-              else {
-                yield* reasoning.finish()
-                yield* text.emitDelta(part.delta)
-              }
-            }
+          if (nativeReasoning) yield* seq.emitReasoning(nativeReasoning)
+          for (const part of tagged.push(delta?.content ?? '')) {
+            if (part.type === 'reasoning') yield* seq.emitReasoning(part.delta)
+            else yield* seq.emitText(part.delta)
           }
           for (const call of delta?.tool_calls ?? []) {
             const current = toolCalls.get(call.index) ?? {
               argumentsJson: '',
-              pendingDeltas: [],
-              started: false
+              pendingDeltas: []
             }
             if (call.id) current.id = call.id
             if (call.function?.name) current.name = call.function.name
-            if (current.id && current.name && !current.started) {
-              yield {
-                type: 'tool-input-start',
-                toolCallId: current.id,
-                toolName: current.name
-              }
-              current.started = true
+            const isStarted = Boolean(current.id && current.name)
+            if (current.id && current.name) {
+              // assembler.start is idempotent, so it can run on every delta once
+              // the id and name are known; buffered deltas flush right after it.
+              yield* assembler.start(current.id, current.name)
               for (const inputTextDelta of current.pendingDeltas)
-                yield { type: 'tool-input-delta', toolCallId: current.id, inputTextDelta }
+                yield* assembler.delta(current.id, inputTextDelta)
               current.pendingDeltas = []
             }
             if (call.function?.arguments) {
               current.argumentsJson += call.function.arguments
-              if (!current.started) current.pendingDeltas.push(call.function.arguments)
+              if (current.id && isStarted)
+                yield* assembler.delta(current.id, call.function.arguments)
+              else current.pendingDeltas.push(call.function.arguments)
             }
             toolCalls.set(call.index, current)
-            if (current.id && current.started && call.function?.arguments) {
-              yield {
-                type: 'tool-input-delta',
-                toolCallId: current.id,
-                inputTextDelta: call.function.arguments
-              }
-            }
           }
           if (parsed.data.choices?.some((choice) => choice.finish_reason === 'tool_calls')) {
             for (const call of toolCalls.values()) {
               if (!call.id || !call.name)
                 throw new Error('The OpenAI-compatible provider returned an incomplete tool call.')
-              if (!call.started)
-                yield { type: 'tool-input-start', toolCallId: call.id, toolName: call.name }
-              try {
-                yield {
-                  type: 'tool-input-available',
-                  toolCallId: call.id,
-                  toolName: call.name,
-                  input: JSON.parse(call.argumentsJson)
-                }
-              } catch {
-                yield {
-                  type: 'tool-input-error',
-                  toolCallId: call.id,
-                  toolName: call.name,
-                  input: call.argumentsJson,
-                  errorText: 'The OpenAI-compatible provider returned invalid tool arguments.'
-                }
-              }
+              yield* assembler.start(call.id, call.name)
+              yield* assembler.completeJson(call.id, call.name, call.argumentsJson)
             }
             toolCalls.clear()
           }
@@ -300,14 +272,10 @@ function createOpenAICompatibleProvider(
         if (toolCalls.size > 0)
           throw new Error('The OpenAI-compatible provider returned an incomplete tool call.')
         for (const part of tagged.finish()) {
-          if (part.type === 'reasoning') yield* reasoning.emitDelta(part.delta)
-          else {
-            yield* reasoning.finish()
-            yield* text.emitDelta(part.delta)
-          }
+          if (part.type === 'reasoning') yield* seq.emitReasoning(part.delta)
+          else yield* seq.emitText(part.delta)
         }
-        yield* reasoning.finish()
-        yield* text.finish()
+        yield* seq.finish()
         yield providerFinish({ reason: finishReason })
       })()
     }

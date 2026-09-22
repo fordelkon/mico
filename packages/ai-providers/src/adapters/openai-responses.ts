@@ -10,8 +10,8 @@ import type {
 } from '../contracts'
 import { providerFinish } from '../contracts'
 import { parseSse } from '../streaming/sse'
-import { createTextChunkEmitter } from '../streaming/text-chunks'
-import { createReasoningChunkEmitter } from '../streaming/parts'
+import { createStreamSequencer } from '../streaming/sequencer'
+import { createToolCallAssembler } from '../streaming/tool-calls'
 import { createThinkingFallback, getOptimisticThinkingCapabilities } from '../thinking-preferences'
 import { getVersionedApiUrl } from '../url'
 
@@ -185,74 +185,43 @@ function createOpenAIResponsesProvider(
       const stream = response.body
       if (!stream) throw new Error('OpenAI returned an empty streaming response.')
       return (async function* (): AsyncIterable<ProviderStreamPart> {
-        const text = createTextChunkEmitter(dependencies.createId)
-        const reasoning = createReasoningChunkEmitter(dependencies.createId)
-        const calls = new Map<
-          number,
-          { id?: string; name?: string; argumentsJson: string; started: boolean }
-        >()
+        const seq = createStreamSequencer(dependencies.createId)
+        const assembler = createToolCallAssembler(
+          'The OpenAI provider returned invalid tool arguments.'
+        )
+        const calls = new Map<number, { id?: string; name?: string; argumentsJson: string }>()
         for await (const event of parseSse(stream)) {
           const data = parseEventData(event.data)
           if (event.event === 'response.reasoning_summary_text.delta' && data.delta)
-            yield* reasoning.emitDelta(data.delta)
-          if (event.event === 'response.output_text.delta' && data.delta) {
-            yield* reasoning.finish()
-            yield* text.emitDelta(data.delta)
-          }
+            yield* seq.emitReasoning(data.delta)
+          if (event.event === 'response.output_text.delta' && data.delta)
+            yield* seq.emitText(data.delta)
           const outputIndex = data.output_index ?? 0
           if (event.event === 'response.output_item.added' && data.item?.type === 'function_call') {
             const call = {
               id: data.item.call_id,
               name: data.item.name,
-              argumentsJson: data.item.arguments ?? '',
-              started: false
+              argumentsJson: data.item.arguments ?? ''
             }
-            if (call.id && call.name) {
-              yield { type: 'tool-input-start', toolCallId: call.id, toolName: call.name }
-              call.started = true
-            }
+            if (call.id && call.name) yield* assembler.start(call.id, call.name)
             calls.set(outputIndex, call)
           }
           if (event.event === 'response.function_call_arguments.delta' && data.delta) {
             const call = calls.get(outputIndex)
             if (call) {
               call.argumentsJson += data.delta
-              if (call.id)
-                yield {
-                  type: 'tool-input-delta',
-                  toolCallId: call.id,
-                  inputTextDelta: data.delta
-                }
+              if (call.id) yield* assembler.delta(call.id, data.delta)
             }
           }
           if (event.event === 'response.output_item.done' && data.item?.type === 'function_call') {
-            const call = calls.get(outputIndex) ?? {
-              argumentsJson: '',
-              started: false
-            }
+            const call = calls.get(outputIndex) ?? { argumentsJson: '' }
             call.id = data.item.call_id ?? call.id
             call.name = data.item.name ?? call.name
             if (data.item.arguments !== undefined) call.argumentsJson = data.item.arguments
             if (!call.id || !call.name)
               throw new Error('The OpenAI provider returned an incomplete tool call.')
-            if (!call.started)
-              yield { type: 'tool-input-start', toolCallId: call.id, toolName: call.name }
-            try {
-              yield {
-                type: 'tool-input-available',
-                toolCallId: call.id,
-                toolName: call.name,
-                input: JSON.parse(call.argumentsJson)
-              }
-            } catch {
-              yield {
-                type: 'tool-input-error',
-                toolCallId: call.id,
-                toolName: call.name,
-                input: call.argumentsJson,
-                errorText: 'The OpenAI provider returned invalid tool arguments.'
-              }
-            }
+            yield* assembler.start(call.id, call.name)
+            yield* assembler.completeJson(call.id, call.name, call.argumentsJson)
             calls.delete(outputIndex)
           }
           if (event.event === 'response.completed') {
@@ -260,8 +229,7 @@ function createOpenAIResponsesProvider(
               throw new Error('The OpenAI provider returned an incomplete tool call.')
             if (data.response?.usage?.output_tokens !== undefined)
               onPerformanceMetrics?.({ outputTokens: data.response.usage.output_tokens })
-            yield* reasoning.finish()
-            yield* text.finish()
+            yield* seq.finish()
             if (data.response?.id)
               yield providerFinish({
                 reason: 'stop',
@@ -271,8 +239,7 @@ function createOpenAIResponsesProvider(
             return
           }
           if (event.event === 'response.incomplete') {
-            yield* reasoning.finish()
-            yield* text.finish()
+            yield* seq.finish()
             const reason = data.response?.incomplete_details?.reason
             const finish = providerFinish({
               reason: reason === 'max_output_tokens' ? 'length' : 'unknown',
@@ -289,8 +256,7 @@ function createOpenAIResponsesProvider(
             )
         }
         if (calls.size > 0) throw new Error('The OpenAI provider returned an incomplete tool call.')
-        yield* reasoning.finish()
-        yield* text.finish()
+        yield* seq.finish()
       })()
     }
   }

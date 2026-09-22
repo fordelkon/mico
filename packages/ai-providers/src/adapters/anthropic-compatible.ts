@@ -16,6 +16,7 @@ import { providerFinish } from '../contracts'
 import { createReasoningChunkEmitter, type ReasoningChunkEmitter } from '../streaming/parts'
 import { parseSse } from '../streaming/sse'
 import { createTextChunkEmitter } from '../streaming/text-chunks'
+import { createToolCallAssembler } from '../streaming/tool-calls'
 import {
   createThinkingFallback,
   getOptimisticThinkingCapabilities,
@@ -243,7 +244,13 @@ function createAnthropicCompatibleProvider(
         throw new Error('Anthropic-compatible provider returned an empty streaming response.')
       const stream = response.body
       return (async function* (): AsyncIterable<ProviderStreamPart> {
+        // Anthropic reasoning blocks interleave with text by content-block index,
+        // so each block owns a reasoning emitter and text never closes them; only
+        // the tool-call lifecycle is shared with the other linear protocols.
         const text = createTextChunkEmitter(dependencies.createId)
+        const assembler = createToolCallAssembler(
+          'The Anthropic-compatible provider returned invalid tool arguments.'
+        )
         const reasoning = new Map<number, ReasoningChunkEmitter>()
         const signatures = new Map<number, string>()
         const toolUses = new Map<
@@ -303,12 +310,7 @@ function createAnthropicCompatibleProvider(
               initialInput: parsed.data.content_block.input
             }
             toolUses.set(index, toolUse)
-            if (toolUse.id && toolUse.name)
-              yield {
-                type: 'tool-input-start',
-                toolCallId: toolUse.id,
-                toolName: toolUse.name
-              }
+            if (toolUse.id && toolUse.name) yield* assembler.start(toolUse.id, toolUse.name)
           }
           if (
             event.event === 'content_block_delta' &&
@@ -318,8 +320,7 @@ function createAnthropicCompatibleProvider(
             const delta = parsed.data.delta.partial_json ?? ''
             if (tool) {
               tool.argumentsJson += delta
-              if (tool.id && delta)
-                yield { type: 'tool-input-delta', toolCallId: tool.id, inputTextDelta: delta }
+              if (tool.id && delta) yield* assembler.delta(tool.id, delta)
             }
           }
           if (event.event === 'content_block_stop') {
@@ -340,22 +341,8 @@ function createAnthropicCompatibleProvider(
                   'The Anthropic-compatible provider returned an incomplete tool call.'
                 )
               const argumentsJson = tool.argumentsJson || JSON.stringify(tool.initialInput)
-              try {
-                yield {
-                  type: 'tool-input-available',
-                  toolCallId: tool.id,
-                  toolName: tool.name,
-                  input: JSON.parse(argumentsJson)
-                }
-              } catch {
-                yield {
-                  type: 'tool-input-error',
-                  toolCallId: tool.id,
-                  toolName: tool.name,
-                  input: argumentsJson,
-                  errorText: 'The Anthropic-compatible provider returned invalid tool arguments.'
-                }
-              }
+              yield* assembler.start(tool.id, tool.name)
+              yield* assembler.completeJson(tool.id, tool.name, argumentsJson)
               toolUses.delete(index)
             }
           }

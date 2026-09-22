@@ -13,8 +13,8 @@ import type {
 } from '../contracts'
 import { providerFinish } from '../contracts'
 import { parseNdjson } from '../streaming/ndjson'
-import { createReasoningChunkEmitter } from '../streaming/parts'
-import { createTextChunkEmitter } from '../streaming/text-chunks'
+import { createStreamSequencer } from '../streaming/sequencer'
+import { createToolCallAssembler } from '../streaming/tool-calls'
 import { getOptimisticThinkingCapabilities } from '../thinking-preferences'
 import { getNativeApiUrl } from '../url'
 
@@ -167,39 +167,29 @@ function createOllamaProvider(
       if (!response.body) throw new Error('Ollama returned an empty streaming response.')
       const stream = response.body
       return (async function* (): AsyncIterable<ProviderStreamPart> {
-        const text = createTextChunkEmitter(dependencies.createId)
-        const reasoning = createReasoningChunkEmitter(dependencies.createId)
+        const seq = createStreamSequencer(dependencies.createId)
+        const assembler = createToolCallAssembler(
+          'The Ollama provider returned invalid tool arguments.'
+        )
         let finishReason: 'length' | 'stop' | 'unknown' = 'stop'
         for await (const value of parseNdjson(stream)) {
           const parsed = ChunkSchema.safeParse(value)
           if (!parsed.success)
             throw new Error('The Ollama streaming response contained invalid event data.')
           if (parsed.data.error) throw new Error(parsed.data.error)
-          if (parsed.data.message?.thinking)
-            yield* reasoning.emitDelta(parsed.data.message.thinking)
-          if (parsed.data.message?.content) {
-            yield* reasoning.finish()
-            yield* text.emitDelta(parsed.data.message.content)
-          }
+          if (parsed.data.message?.thinking) yield* seq.emitReasoning(parsed.data.message.thinking)
+          if (parsed.data.message?.content) yield* seq.emitText(parsed.data.message.content)
           for (const call of parsed.data.message?.tool_calls ?? []) {
             const toolCallId = call.id ?? dependencies.createId()
-            yield { type: 'tool-input-start', toolCallId, toolName: call.function.name }
+            yield* assembler.start(toolCallId, call.function.name)
             const argumentsResult = ToolArgumentsSchema.safeParse(call.function.arguments)
-            if (argumentsResult.success)
-              yield {
-                type: 'tool-input-available',
-                toolCallId,
-                toolName: call.function.name,
-                input: argumentsResult.data
-              }
-            else
-              yield {
-                type: 'tool-input-error',
-                toolCallId,
-                toolName: call.function.name,
-                input: call.function.arguments,
-                errorText: 'The Ollama provider returned invalid tool arguments.'
-              }
+            yield* assembler.completeValue(
+              toolCallId,
+              call.function.name,
+              argumentsResult.success
+                ? { isValid: true, input: argumentsResult.data }
+                : { isValid: false, invalidInput: call.function.arguments }
+            )
           }
           if (parsed.data.done) {
             finishReason =
@@ -220,8 +210,7 @@ function createOllamaProvider(
             break
           }
         }
-        yield* reasoning.finish()
-        yield* text.finish()
+        yield* seq.finish()
         yield providerFinish({ reason: finishReason })
       })()
     }
