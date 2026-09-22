@@ -152,18 +152,22 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
       const saved = await window.api.providers.saveLibrary(snapshot)
       // Local state is already the snapshot's source, so only main's
       // selection sanitization is absorbed back — never the whole snapshot.
-      setLibrary((current) => ({
-        ...current,
+      libraryRef.current = {
+        ...libraryRef.current,
         selectedModelId: saved.selectedModelId,
         selectedProviderId: saved.selectedProviderId
-      }))
+      }
+      setLibrary(libraryRef.current)
       return true
     }
   })
 
   const editLibrary = React.useCallback(
     (updater: (current: PersistedProviderLibrary) => PersistedProviderLibrary): void => {
-      setLibrary(updater)
+      // Keep the ref in sync synchronously: a flush that lands before React
+      // commits must save and absorb the latest edits, not the last commit.
+      libraryRef.current = updater(libraryRef.current)
+      setLibrary(libraryRef.current)
       autosave.schedule()
     },
     [autosave]
@@ -305,8 +309,12 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     async (modelId: string) => {
       await commitProviderDrafts()
       editLibrary((current) => ({ ...current, selectedModelId: modelId }))
+      // Selecting a model is a committed action: the composer's send path
+      // resolves the selection in main, so a debounced save would let a fast
+      // send start a turn before the selection is persisted.
+      await autosave.flush()
     },
-    [commitProviderDrafts, editLibrary]
+    [autosave, commitProviderDrafts, editLibrary]
   )
   const selectProvider = React.useCallback(
     async (providerId: ProviderId | null) => {
