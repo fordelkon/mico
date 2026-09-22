@@ -5,12 +5,12 @@ import {
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
-  MessageScrollerViewport
+  MessageScrollerViewport,
+  Spinner
 } from '@mico/ui'
 
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
 import { Chat, useChat } from '@ai-sdk/react'
-import { LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
@@ -82,7 +82,7 @@ function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Elemen
         key={retry.startedAt}
         style={retryProgressStyle}
       />
-      <LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />
+      <Spinner aria-hidden="true" />
       {remainingSeconds > 0
         ? `Connection interrupted. Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
         : `Connection interrupted. Retrying · attempt ${retry.attempt} of ${retry.maxAttempts}.`}

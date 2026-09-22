@@ -1,7 +1,8 @@
-import { CheckIcon, CopyIcon, FileCode2Icon, LoaderCircleIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, FileCode2Icon } from 'lucide-react'
 import * as React from 'react'
 import { bundledLanguages, bundledThemes, createHighlighter, type Highlighter } from 'shiki'
 
+import { Button, Spinner } from '@mico/ui'
 import { cn } from '@mico/ui/lib/utils'
 
 import { useStreamingCodeHighlight } from './use-streaming-code-highlight'
@@ -193,7 +194,7 @@ function ChatCodeBlock({
               className="ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground"
             >
               {isStreaming ? (
-                <LoaderCircleIcon className="size-3 animate-spin motion-reduce:animate-none" />
+                <Spinner aria-hidden="true" className="size-3 motion-reduce:animate-none" />
               ) : (
                 <CheckIcon className="size-3" />
               )}
@@ -201,18 +202,20 @@ function ChatCodeBlock({
             </span>
           </>
         )}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label={copied ? 'Copied' : 'Copy code'}
           title={copied ? 'Copied' : 'Copy code'}
           onClick={copy}
           className={cn(
-            'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            'rounded-full hover:bg-background/70 hover:text-foreground',
             outputLabel && 'ml-auto'
           )}
         >
           {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-        </button>
+        </Button>
       </div>
       <div
         role={isStreaming && !outputLabel ? 'log' : undefined}

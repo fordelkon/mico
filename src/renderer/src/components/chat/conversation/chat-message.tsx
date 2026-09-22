@@ -7,6 +7,7 @@ import {
   AttachmentTitle,
   Bubble,
   BubbleContent,
+  IconSwap,
   IconTooltipButton,
   Message,
   MessageContent,
@@ -220,11 +221,11 @@ function ChatMessageComponent({
           <MessageFooter className="min-h-6 text-text-tertiary opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100">
             <IconTooltipButton
               icon={
-                copyState === 'copied' ? (
-                  <CheckIcon aria-hidden="true" />
-                ) : (
-                  <CopyIcon aria-hidden="true" />
-                )
+                <IconSwap
+                  from={<CopyIcon aria-hidden="true" />}
+                  state={copyState === 'copied' ? 'to' : 'from'}
+                  to={<CheckIcon aria-hidden="true" />}
+                />
               }
               label="Copy message"
               size="icon-xs"
