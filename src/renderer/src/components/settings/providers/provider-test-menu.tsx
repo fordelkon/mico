@@ -1,12 +1,6 @@
-import { Button, SearchPopover } from '@mico/ui'
+import { Button, SearchPopover, Spinner } from '@mico/ui'
 import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
-import {
-  CheckCircle2Icon,
-  ChevronDownIcon,
-  CircleXIcon,
-  LoaderCircleIcon,
-  ZapIcon
-} from 'lucide-react'
+import { CheckCircle2Icon, ChevronDownIcon, CircleXIcon, ZapIcon } from 'lucide-react'
 import * as React from 'react'
 
 import type { CatalogModel } from './provider-library'
@@ -45,10 +39,7 @@ function ProviderTestMenu({
           variant="outline"
         >
           {testState === 'testing' ? (
-            <LoaderCircleIcon
-              aria-label={`Testing ${providerLabel} model`}
-              className="animate-spin"
-            />
+            <Spinner aria-label={`Testing ${providerLabel} model`} />
           ) : testState === 'success' ? (
             <CheckCircle2Icon
               aria-label={`${providerLabel} model test succeeded`}
