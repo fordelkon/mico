@@ -618,7 +618,7 @@ describe('registerIpc session handlers', () => {
     const { handlers, session, event } = createHarness()
 
     expect(() => handlers.get(IpcChannel.Sessions_Create)?.(event, { title: '' })).toThrow(
-      'Invalid session title'
+      'Invalid session request'
     )
     expect(() => handlers.get(IpcChannel.Sessions_Load)?.(event, '')).toThrow('Invalid session ID')
     expect(() => handlers.get(IpcChannel.Sessions_Delete)?.(event, '')).toThrow(

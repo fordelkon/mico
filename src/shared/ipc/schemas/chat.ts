@@ -2,15 +2,10 @@ import * as z from 'zod'
 
 import type { UIMessageChunk } from 'ai'
 
-import {
-  ChatUserMessageSchema,
-  ModelReasoningCapabilitiesSchema,
-  ThinkingSelectionSchema
-} from '../../data/schemas/chat'
+import { ChatUserMessageSchema, ThinkingSelectionSchema } from '../../data/schemas/chat'
 import type { ModelReasoningCapabilities } from '../../data/schemas/chat'
 import { defineSchema } from '../../data/define'
 import { SessionIdSchema } from '../../data/schemas/session'
-import { defineRoute } from '../define'
 
 type TurnTerminalEvent =
   | { type: 'cancelled'; requestId: string }
@@ -89,21 +84,11 @@ interface ChatAPI {
   onTurnEvent: (listener: (event: TurnStreamEvent) => void) => () => void
 }
 
-const chatIpcSchemas = {
-  'chat.abort-turn': defineRoute({ input: TurnRequestIdSchema, output: z.void() }),
-  'chat.get-capabilities': defineRoute({
-    input: z.void(),
-    output: ModelReasoningCapabilitiesSchema.nullable()
-  }),
-  'chat.start-turn': defineRoute({ input: TurnStartRequestSchema, output: z.void() })
-}
-
 export {
   TurnRequestIdSchema,
   TurnStartRequestSchema,
   TurnStreamEventSchema,
   ToolOutputDeltaDataSchema,
-  chatIpcSchemas,
   type ChatAPI,
   type TurnStartRequest,
   type TurnStreamEvent,

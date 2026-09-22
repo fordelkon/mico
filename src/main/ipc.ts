@@ -34,6 +34,7 @@ import {
   pickCodeDocuments,
   type CodeDocumentPickerDependencies
 } from './attachments/code-document-picker'
+import { CreateSessionRequestSchema } from '@shared/ipc/schemas/sessions'
 import { TurnSenderGate } from './ai/chat/turn-sender-gate'
 import type { TurnExecutor } from './ai/chat/turn-executor'
 import { registerChannel, type ChannelDefinition } from './ipc/define-channel'
@@ -241,22 +242,14 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Sessions_Create,
-    handle: (rawInput) => {
-      // SAFETY: this channel has no declared schema; its two fields are parsed
-      // individually here because their failure copy differs.
-      const input = rawInput as { title?: unknown; projectId?: unknown } | undefined
-      const title = SessionTitleSchema.safeParse(input?.title)
-      const projectId =
-        input?.projectId === undefined ? undefined : ProjectIdSchema.safeParse(input.projectId)
-      if (!title.success) throw new Error('Invalid session title')
-      if (projectId !== undefined && !projectId.success) throw new Error('Invalid session project')
-
-      const context = projectId?.success
-        ? workspace.getActiveProjectContext(projectId.data)
+    input: { schema: CreateSessionRequestSchema, invalidMessage: 'Invalid session request' },
+    handle: ({ title, projectId }) => {
+      const context = projectId
+        ? workspace.getActiveProjectContext(projectId)
         : workspace.getDefaultWorkspaceContext()
 
       return session.createSession({
-        title: title.data,
+        title,
         defaultProfile: null,
         projectId: context.projectId,
         cwd: context.rootPath

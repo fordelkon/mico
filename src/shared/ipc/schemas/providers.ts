@@ -2,12 +2,9 @@ import * as z from 'zod'
 
 import {
   CustomProviderSchema,
-  CustomProviderIdSchema,
   ModelDisplayNameSchema,
   ModelEntryIdSchema,
-  ModelEntrySchema,
   ProviderConfigurationSchema,
-  ProviderLibrarySchema,
   ModelProviderSchema,
   ProviderModelIdSchema
 } from '../../data/schemas/provider'
@@ -18,7 +15,6 @@ import type {
   ProviderId,
   ProviderLibrary
 } from '../../data/schemas/provider'
-import { defineRoute } from '../define'
 
 const DiscoveredModelSchema = z.object({
   modelId: ProviderModelIdSchema,
@@ -68,63 +64,6 @@ interface ProvidersAPI {
   selectProvider: (providerId: string | null) => Promise<string | null>
 }
 
-const providersRequestSchemas = {
-  'providers.add-custom-provider': defineRoute({
-    input: AddCustomProviderRequestSchema,
-    output: CustomProviderSchema
-  }),
-  'providers.add-model': defineRoute({
-    input: AddModelRequestSchema,
-    output: ModelEntrySchema
-  }),
-  'providers.update-custom-provider': defineRoute({
-    input: UpdateCustomProviderRequestSchema,
-    output: CustomProviderSchema
-  }),
-  'providers.remove-custom-provider': defineRoute({
-    input: CustomProviderIdSchema,
-    output: z.void()
-  }),
-  'providers.discover-models': defineRoute({
-    input: ProviderConfigurationSchema,
-    output: z.array(DiscoveredModelSchema)
-  }),
-  'providers.get-library': defineRoute({ input: z.void(), output: ProviderLibrarySchema }),
-  'providers.save-library': defineRoute({
-    input: ProviderLibrarySchema,
-    output: ProviderLibrarySchema
-  }),
-  'providers.import-model': defineRoute({
-    input: ImportModelRequestSchema,
-    output: ModelEntrySchema
-  }),
-  'providers.set-model-enabled': defineRoute({
-    input: SetModelEnabledRequestSchema,
-    output: ModelEntrySchema
-  }),
-  'providers.sync-models': defineRoute({
-    input: SyncModelsRequestSchema,
-    output: z.void()
-  }),
-  'providers.remove-model': defineRoute({
-    input: ModelEntryIdSchema,
-    output: z.void()
-  }),
-  'providers.save-configuration': defineRoute({
-    input: ProviderConfigurationSchema,
-    output: ProviderConfigurationSchema
-  }),
-  'providers.select-model': defineRoute({
-    input: ModelEntryIdSchema.nullable(),
-    output: ModelEntryIdSchema.nullable()
-  }),
-  'providers.select-provider': defineRoute({
-    input: SelectProviderRequestSchema,
-    output: SelectProviderRequestSchema
-  }),
-  'providers.test-model': defineRoute({ input: TestModelRequestSchema, output: z.void() })
-}
-
 type AddModelRequest = z.infer<typeof AddModelRequestSchema>
 type AddCustomProviderRequest = z.infer<typeof AddCustomProviderRequestSchema>
 type DiscoveredModel = z.infer<typeof DiscoveredModelSchema>
@@ -144,7 +83,6 @@ export {
   SelectProviderRequestSchema,
   SyncModelsRequestSchema,
   TestModelRequestSchema,
-  providersRequestSchemas,
   type ProvidersAPI
 }
 export type {

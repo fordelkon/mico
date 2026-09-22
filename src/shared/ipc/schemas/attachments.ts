@@ -3,7 +3,6 @@ import * as z from 'zod'
 import { ChatDocumentPartSchema, CodeDocumentsMaxTextBytes } from '../../data/schemas/chat'
 import type { ChatDocumentPart } from '../../data/schemas/chat'
 import { defineSchema } from '../../data/define'
-import { defineRoute } from '../define'
 
 const CodeDocumentPartsSchema = defineSchema(
   z
@@ -22,11 +21,4 @@ interface AttachmentsAPI {
   pickCodeDocuments: () => Promise<ChatDocumentPart[]>
 }
 
-const attachmentsRequestSchemas = {
-  'attachments.pick-code-documents': defineRoute({
-    input: z.void(),
-    output: CodeDocumentPartsSchema
-  })
-}
-
-export { attachmentsRequestSchemas, type AttachmentsAPI }
+export { CodeDocumentPartsSchema, type AttachmentsAPI }
