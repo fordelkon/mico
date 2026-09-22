@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
   Input,
   Textarea,
-  Toggle,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -103,7 +102,6 @@ function CustomProviderDialog({
   const [customProviderApiKey, setCustomProviderApiKey] = React.useState('')
   const [customProviderApiFormat, setCustomProviderApiFormat] = React.useState('openai-compatible')
   const [customProviderHeaders, setCustomProviderHeaders] = React.useState('')
-  const [usesMaxCompletionTokens, setUsesMaxCompletionTokens] = React.useState(false)
   const [customProviderError, setCustomProviderError] = React.useState<string | null>(null)
   const [customProviderIconSearch, setCustomProviderIconSearch] = React.useState('')
   const [isCustomProviderIconMenuOpen, setIsCustomProviderIconMenuOpen] = React.useState(false)
@@ -137,7 +135,6 @@ function CustomProviderDialog({
 
   const setApiFormat = (apiFormat: string): void => {
     setCustomProviderApiFormat(apiFormat)
-    if (apiFormat !== 'openai-compatible') setUsesMaxCompletionTokens(false)
   }
 
   const resetCustomProviderForm = (): void => {
@@ -147,7 +144,6 @@ function CustomProviderDialog({
     setCustomProviderApiKey('')
     setCustomProviderApiFormat('openai-compatible')
     setCustomProviderHeaders('')
-    setUsesMaxCompletionTokens(false)
     setCustomProviderError(null)
     setCustomProviderIconSearch('')
   }
@@ -168,8 +164,7 @@ function CustomProviderDialog({
       baseUrl: customProviderBaseUrl.trim(),
       headers,
       icon: customProviderIcon,
-      name: customProviderName.trim(),
-      useMaxCompletionTokens: usesMaxCompletionTokens
+      name: customProviderName.trim()
     })
     if (!result.success) {
       setCustomProviderError(
@@ -313,24 +308,6 @@ function CustomProviderDialog({
                 value={customProviderApiFormat}
               />
             </fieldset>
-            {customProviderApiFormat === 'openai-compatible' ? (
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <label className="text-sm" htmlFor="custom-provider-max-completion-tokens">
-                    Use max_completion_tokens
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    Enable for OpenAI models that require max_completion_tokens.
-                  </p>
-                </div>
-                <Toggle
-                  aria-label="Use max_completion_tokens"
-                  checked={usesMaxCompletionTokens}
-                  id="custom-provider-max-completion-tokens"
-                  onCheckedChange={setUsesMaxCompletionTokens}
-                />
-              </div>
-            ) : null}
             <label className="flex flex-col gap-2 text-sm" htmlFor="custom-provider-headers">
               <span>Custom headers (JSON)</span>
               <Textarea

@@ -13,8 +13,7 @@ const providers = sqliteTable('providers', {
   headers: text().notNull().default('{}'),
   icon: text(),
   maxTokens: integer('max_tokens'),
-  name: text(),
-  useMaxCompletionTokens: integer('use_max_completion_tokens', { mode: 'boolean' })
+  name: text()
 })
 
 /** Locally managed model entries belonging to provider configurations. */

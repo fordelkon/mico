@@ -40,8 +40,7 @@ const CustomProviderSchema = defineSchema(
     headers: z.record(z.string(), z.string()),
     icon: CustomProviderIconSchema,
     id: CustomProviderIdSchema,
-    name: z.string().trim().min(1),
-    useMaxCompletionTokens: z.boolean()
+    name: z.string().trim().min(1)
   })
 )
 const ProviderConfigurationSchema = defineSchema(
@@ -64,8 +63,7 @@ const ProviderConfigurationSchema = defineSchema(
       baseUrl: ProviderBaseUrlSchema,
       apiKey: ProviderApiKeySchema.optional(),
       enabled: z.boolean().optional(),
-      headers: ProviderHeadersSchema.optional(),
-      useMaxCompletionTokens: z.boolean().optional()
+      headers: ProviderHeadersSchema.optional()
     }),
     z.object({
       provider: z.literal('anthropic-compatible'),

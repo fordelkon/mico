@@ -35,7 +35,6 @@ const TOOL_BUDGET_EXHAUSTED_MESSAGE =
   'Tool execution budget reached. Use the completed observations and provide your best final answer without calling more tools.'
 
 type ToolAgentRunnerInput = {
-  conversationKey: string
   provider: ChatProvider
   messages: ChatProviderMessage[]
   registry?: ToolRegistry
@@ -93,7 +92,6 @@ function toToolCall(chunk: UIMessageChunk): ToolCall | null {
 
 class ToolAgentRunner {
   async run({
-    conversationKey,
     provider,
     messages,
     registry,
@@ -117,7 +115,6 @@ class ToolAgentRunner {
     for (let modelStep = 1; modelStep <= MAX_MODEL_STEPS; modelStep += 1) {
       signal.throwIfAborted()
       const request = {
-        conversationKey,
         messages: history,
         thinkingEffort,
         signal

@@ -19,7 +19,6 @@ const library: ProviderCatalog = {
       baseUrl: 'https://api.example.com/v1',
       headers: {},
       icon: 'zhipu',
-      useMaxCompletionTokens: true,
       enabled: true
     }
   ],

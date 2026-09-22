@@ -34,8 +34,7 @@ function toCustomProviderConfiguration(provider: CustomProvider): ProviderConnec
       const configuration: Extract<ProviderConnection, { provider: 'openai-compatible' }> = {
         provider: 'openai-compatible',
         baseUrl: provider.baseUrl,
-        headers: provider.headers,
-        useMaxCompletionTokens: provider.useMaxCompletionTokens
+        headers: provider.headers
       }
       if (provider.apiKey) configuration.apiKey = provider.apiKey
       return configuration
@@ -407,13 +406,7 @@ function ProvidersSection({
                       apiFormat === 'openai-responses' ||
                       apiFormat === 'anthropic-compatible'
                     ) {
-                      saveCustomProvider({
-                        apiFormat,
-                        useMaxCompletionTokens:
-                          apiFormat === 'openai-compatible'
-                            ? customProvider.useMaxCompletionTokens
-                            : false
-                      })
+                      saveCustomProvider({ apiFormat })
                     }
                   }}
                   options={[
@@ -424,26 +417,6 @@ function ProvidersSection({
                   value={customProvider.apiFormat}
                 />
               </fieldset>
-              {customProvider.apiFormat === 'openai-compatible' ? (
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <label className="text-sm" htmlFor={`${providerId}-max-completion-tokens`}>
-                      Use max_completion_tokens
-                    </label>
-                    <p className="text-xs text-muted-foreground">
-                      Enable for OpenAI models that require max_completion_tokens.
-                    </p>
-                  </div>
-                  <Toggle
-                    aria-label="Use max_completion_tokens"
-                    checked={customProvider.useMaxCompletionTokens}
-                    id={`${providerId}-max-completion-tokens`}
-                    onCheckedChange={(useMaxCompletionTokens) =>
-                      saveCustomProvider({ useMaxCompletionTokens })
-                    }
-                  />
-                </div>
-              ) : null}
               <label className="flex flex-col gap-2 text-sm" htmlFor={`${providerId}-headers`}>
                 <span>Custom headers (JSON)</span>
                 <Textarea

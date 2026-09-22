@@ -29,7 +29,6 @@ function streamInput(
   overrides: Partial<ChatProviderStreamInput> = {}
 ): ChatProviderStreamInput {
   return {
-    conversationKey: 'x',
     messages: [{ role: 'user', parts: [{ type: 'text', text }] }],
     thinkingEffort: 'none',
     signal: new AbortController().signal,
@@ -307,9 +306,7 @@ describe('OpenAI Responses provider', () => {
     )
 
     const chunks = await collect(
-      await provider.stream(
-        streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'high' })
-      )
+      await provider.stream(streamInput('Hello', { thinkingEffort: 'high' }))
     )
 
     expect(await fetchCallRequestBody(fetchMock)).toMatchObject({
@@ -339,9 +336,7 @@ describe('OpenAI Responses provider', () => {
     )
 
     const chunks = await collect(
-      await provider.stream(
-        streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'xhigh' })
-      )
+      await provider.stream(streamInput('Hello', { thinkingEffort: 'xhigh' }))
     )
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -378,11 +373,7 @@ describe('OpenAI Responses provider', () => {
       streamDependencies(fetchMock, () => 'part-1')
     )
 
-    await collect(
-      await provider.stream(
-        streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'xhigh' })
-      )
-    )
+    await collect(await provider.stream(streamInput('Hello', { thinkingEffort: 'xhigh' })))
 
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
       JSON.stringify({
@@ -403,7 +394,7 @@ describe('OpenAI Responses provider', () => {
       providerConfig({ apiKey: 'key', modelId: 'model' }),
       streamDependencies(fetchMock, () => 'part-1')
     )
-    const input = streamInput('Hello', { conversationKey: '42:chat-1', thinkingEffort: 'high' })
+    const input = streamInput('Hello', { thinkingEffort: 'high' })
 
     await collect(await provider.stream(input))
     await collect(await provider.stream(input))

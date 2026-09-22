@@ -18,7 +18,6 @@ const provider = createChatProvider({
 
 const controller = new AbortController()
 const stream = await provider.stream({
-  conversationKey: 'chat-1',
   messages: [{ role: 'user', parts: [{ type: 'text', text: 'Hello.' }] }],
   thinkingEffort: 'none',
   signal: controller.signal
@@ -128,7 +127,6 @@ const convertCurrency: ChatProviderTool = {
 
 const controller = new AbortController()
 const stream = await provider.stream({
-  conversationKey: 'chat-1',
   messages: [
     {
       role: 'user',
@@ -186,7 +184,6 @@ const toolHistory: ChatProviderMessage[] = [
 ]
 
 const nextStream = await provider.stream({
-  conversationKey: 'chat-1',
   messages: [
     { role: 'user', parts: [{ type: 'text', text: 'Convert 100 EUR to USD.' }] },
     ...toolHistory

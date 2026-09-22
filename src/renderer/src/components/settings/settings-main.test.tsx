@@ -24,8 +24,7 @@ const exampleAiCustomProvider: CustomProvider = {
   headers: {},
   icon: 'cloud',
   id: 'example-ai',
-  name: 'Example AI',
-  useMaxCompletionTokens: false
+  name: 'Example AI'
 }
 
 function renderSettings(): void {
@@ -53,8 +52,7 @@ function mockAddExampleProvider(): void {
       ...provider,
       apiKey: 'secret',
       headers: { 'X-Client': 'Mico' },
-      id: 'example-ai',
-      useMaxCompletionTokens: true
+      id: 'example-ai'
     }
     persistedLibrary = { ...persistedLibrary, customProviders: [saved] }
     return saved
@@ -350,8 +348,7 @@ describe('SettingsMain', () => {
           headers: {},
           icon: 'default',
           id: 'example-ai',
-          name: 'Example AI',
-          useMaxCompletionTokens: false
+          name: 'Example AI'
         }
       ],
       enabledProviderIds: ['ollama'],
@@ -751,23 +748,6 @@ describe('SettingsMain', () => {
     await user.click(screen.getByRole('menuitemradio', { name: 'Responses (/responses)' }))
 
     expect(screen.getByRole('button', { name: 'Responses (/responses)' })).toBeVisible()
-  })
-
-  it('user sees max tokens when the format is Chat Completions, then they hide', async () => {
-    const user = userEvent.setup()
-
-    renderSettings()
-
-    await user.click(screen.getByRole('button', { name: 'Add custom provider' }))
-
-    expect(screen.getByRole('switch', { name: 'Use max_completion_tokens' })).toBeVisible()
-
-    await user.click(screen.getByRole('button', { name: 'Chat Completions (/chat/completions)' }))
-    await user.click(screen.getByRole('menuitemradio', { name: 'Responses (/responses)' }))
-
-    expect(
-      screen.queryByRole('switch', { name: 'Use max_completion_tokens' })
-    ).not.toBeInTheDocument()
   })
 
   it('user sees an icon name when hovering it, then a tooltip reveals the name', async () => {

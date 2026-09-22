@@ -3,6 +3,7 @@ type ProviderMigration = {
     | '0001_initial_provider_library'
     | '0002_add_provider_library_columns'
     | '0003_remove_lm_studio_builtin_provider'
+    | '0004_remove_use_max_completion_tokens'
   sql: string
 }
 
@@ -65,6 +66,14 @@ const providerMigrations: readonly ProviderMigration[] = [
           SELECT id FROM provider_models WHERE provider_id = 'lm-studio'
         );
       DELETE FROM providers WHERE id = 'lm-studio';
+    `
+  },
+  {
+    id: '0004_remove_use_max_completion_tokens',
+    // The flag never reached a provider request: no adapter sends a token limit,
+    // so the column and its settings toggle were removed outright.
+    sql: `
+      ALTER TABLE providers DROP COLUMN use_max_completion_tokens;
     `
   }
 ]

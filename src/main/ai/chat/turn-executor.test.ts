@@ -9,7 +9,18 @@ import {
 } from '../sessions/session-runtime-service'
 import { SessionDatabase } from '../../data/session-database'
 import { createChatProviderResolver } from './chat-provider-resolver'
-import { TurnExecutor } from './turn-executor'
+import { SESSION_TITLE_INSTRUCTIONS, TurnExecutor } from './turn-executor'
+
+// Title generation and agent turns share one provider.stream() interface; the
+// title prompt is the only observable signal distinguishing the two calls.
+function isTitleStream(input: Parameters<ChatProvider['stream']>[0]): boolean {
+  const firstPart = input.messages[0]?.parts[0]
+  return (
+    input.messages[0]?.role === 'system' &&
+    firstPart?.type === 'text' &&
+    firstPart.text === SESSION_TITLE_INSTRUCTIONS
+  )
+}
 
 const request: TurnStartRequest = {
   sessionId: 'session-1',
@@ -166,12 +177,8 @@ describe('TurnExecutor', () => {
       role: 'user',
       parts: [{ type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' }]
     }
-    expect(
-      calls.find(({ conversationKey }) => conversationKey === `window-1:${session.id}`)?.messages
-    ).toEqual([expected])
-    expect(
-      calls.find(({ conversationKey }) => conversationKey === `title:${session.id}`)?.messages[1]
-    ).toEqual(expected)
+    expect(calls.find((input) => !isTitleStream(input))?.messages).toEqual([expected])
+    expect(calls.find((input) => isTitleStream(input))?.messages[1]).toEqual(expected)
     await titleGenerated.promise
   })
 
@@ -807,7 +814,7 @@ describe('TurnExecutor', () => {
     let agentRequests = 0
     const recorded = collectEvents()
     const service = createConfiguredExecutor(async (input) => {
-      if (input.conversationKey.startsWith('title:')) return streamFrom([])
+      if (isTitleStream(input)) return streamFrom([])
       agentRequests += 1
       return agentRequests === 1
         ? streamFrom([
@@ -852,7 +859,7 @@ describe('TurnExecutor', () => {
     let agentRequests = 0
     const recorded = collectEvents()
     const service = createConfiguredExecutor(async (input) => {
-      if (input.conversationKey.startsWith('title:')) return streamFrom([])
+      if (isTitleStream(input)) return streamFrom([])
       agentRequests += 1
       return streamFrom([
         // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
@@ -889,7 +896,7 @@ describe('TurnExecutor', () => {
     let agentRequests = 0
     const recorded = collectEvents()
     const service = createConfiguredExecutor(async (input) => {
-      if (input.conversationKey.startsWith('title:')) return streamFrom([])
+      if (isTitleStream(input)) return streamFrom([])
       agentRequests += 1
       if (agentRequests === 1)
         return streamFrom([
@@ -958,9 +965,7 @@ describe('TurnExecutor', () => {
     )
     await recorded.terminal
 
-    expect(
-      calls.find(({ conversationKey }) => conversationKey === `window-1:${session.id}`)?.messages[0]
-    ).toEqual({
+    expect(calls.find((input) => !isTitleStream(input))?.messages[0]).toEqual({
       role: 'system',
       parts: [
         expect.objectContaining({

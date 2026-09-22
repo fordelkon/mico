@@ -47,13 +47,6 @@ type ProviderFinish = {
   continuation?: ProviderContinuation
   usage?: ProviderUsage
 }
-type ProviderCapabilities = {
-  continuation: 'none' | 'response-id' | 'signed-reasoning'
-  reasoning: { efforts: ThinkingSelection[]; mode: 'adaptive' | 'budget' | 'effort' | 'none' }
-  terminalReason: boolean
-  tools: { inputStreaming: boolean; parallelCalls: boolean; strictSchema: boolean }
-  usage: { cachedInputTokens: boolean; reasoningTokens: boolean }
-}
 type ProviderStreamPart = ProviderFinish | UIMessageChunk
 
 type ChatProviderTextPart = { type: 'text'; text: string }
@@ -94,7 +87,6 @@ type ChatProviderTool = { name: string; description: string; inputSchema: JsonOb
 
 type ChatProviderStreamInput = {
   collectPerformanceMetrics?: boolean
-  conversationKey: string
   messages: ChatProviderMessage[]
   tools?: readonly ChatProviderTool[]
   thinkingEffort: ThinkingSelection
@@ -114,7 +106,6 @@ type ProviderTestResult = ProviderPerformanceMetrics & {
 
 type ChatProvider = {
   getModelCapabilities: () => Promise<ModelReasoningCapabilities | null>
-  getCapabilities?: () => Promise<ProviderCapabilities>
   stream: (input: ChatProviderStreamInput) => Promise<AsyncIterable<ProviderStreamPart>>
 }
 
@@ -139,7 +130,6 @@ type ChatProviderConfiguration =
       modelId: string
       apiKey?: string
       headers?: Record<string, string>
-      useMaxCompletionTokens?: boolean
     }
   | {
       provider: 'anthropic-compatible'
@@ -156,7 +146,6 @@ type ChatProviderConfiguration =
       headers?: Record<string, string>
     }
 
-type LocalProviderId = 'ollama'
 type DiscoverableProviderId = ChatProviderConfiguration['provider']
 type DiscoveredModel = { modelId: string; displayName: string }
 type ModelDiscoveryInput = {
@@ -188,14 +177,12 @@ export type {
   ChatProviderStreamInput,
   DiscoveredModel,
   DiscoverableProviderId,
-  LocalProviderId,
   JsonObject,
   JsonValue,
   ModelDiscoveryDependencies,
   ModelDiscoveryInput,
   ModelReasoningCapabilities,
   ProviderPerformanceMetrics,
-  ProviderCapabilities,
   ProviderContinuation,
   ProviderFinish,
   ProviderFinishReason,

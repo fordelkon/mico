@@ -40,7 +40,6 @@ function createRunInput(
   overrides: Partial<RunnerInput> = {}
 ): RunnerInput {
   return {
-    conversationKey: 'test-session',
     provider,
     messages: [{ role: 'user', parts: [{ type: 'text', text: userText }] }],
     thinkingEffort: 'none',

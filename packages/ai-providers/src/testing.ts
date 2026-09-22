@@ -29,7 +29,6 @@ async function testChatProvider(
   const provider = createChatProvider(configuration, providerDependencies)
   const stream = await provider.stream({
     collectPerformanceMetrics: true,
-    conversationKey: 'provider-test',
     messages: [{ role: 'user', parts: [{ type: 'text', text: 'Reply with OK.' }] }],
     thinkingEffort: 'default',
     signal: new AbortController().signal,

@@ -23,7 +23,6 @@ function streamInput(
   overrides: Partial<ChatProviderStreamInput> = {}
 ): ChatProviderStreamInput {
   return {
-    conversationKey: 'x',
     messages: [{ role: 'user', parts: [{ type: 'text', text }] }],
     thinkingEffort: 'none',
     signal: new AbortController().signal,

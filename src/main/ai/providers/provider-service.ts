@@ -40,7 +40,6 @@ const defaultDependencies: Required<ProviderServiceDependencies> = {
   testModel: async (configuration, messages) => {
     const provider = createChatProvider(configuration)
     const stream = await provider.stream({
-      conversationKey: 'provider-test',
       messages,
       thinkingEffort: 'default',
       signal: new AbortController().signal
@@ -526,8 +525,6 @@ function toConfiguration(row: typeof providers.$inferSelect): ProviderConfigurat
       }
       if (row.apiKey) configuration.apiKey = row.apiKey
       if (Object.keys(headers).length) configuration.headers = headers
-      if (row.useMaxCompletionTokens !== null)
-        configuration.useMaxCompletionTokens = row.useMaxCompletionTokens
       return configuration
     }
     case 'anthropic-compatible': {
@@ -556,16 +553,12 @@ function toProviderValues(configuration: ProviderConfiguration) {
     icon: null,
     maxTokens:
       configuration.provider === 'anthropic-compatible' ? (configuration.maxTokens ?? null) : null,
-    name: null,
-    useMaxCompletionTokens:
-      configuration.provider === 'openai-compatible'
-        ? (configuration.useMaxCompletionTokens ?? null)
-        : null
+    name: null
   }
 }
 
 function toCustomProvider(row: typeof providers.$inferSelect): CustomProvider {
-  if (!row.apiFormat || !row.icon || !row.name || row.useMaxCompletionTokens === null)
+  if (!row.apiFormat || !row.icon || !row.name)
     throw new Error(`Custom provider '${row.id}' is incomplete.`)
   return CustomProviderSchema.parse({
     apiFormat: row.apiFormat,
@@ -575,8 +568,7 @@ function toCustomProvider(row: typeof providers.$inferSelect): CustomProvider {
     headers: parseHeaders(row.headers),
     icon: row.icon,
     id: row.id,
-    name: row.name,
-    useMaxCompletionTokens: row.useMaxCompletionTokens
+    name: row.name
   })
 }
 
@@ -591,8 +583,7 @@ function toCustomProviderValues(provider: CustomProvider) {
     headers: JSON.stringify(provider.headers),
     icon: provider.icon,
     maxTokens: null,
-    name: provider.name,
-    useMaxCompletionTokens: provider.useMaxCompletionTokens
+    name: provider.name
   }
 }
 
@@ -602,8 +593,7 @@ function toCustomProviderConfiguration(provider: CustomProvider): ProviderConfig
       const configuration: Extract<ProviderConfiguration, { provider: 'openai-compatible' }> = {
         provider: 'openai-compatible',
         baseUrl: provider.baseUrl,
-        headers: provider.headers,
-        useMaxCompletionTokens: provider.useMaxCompletionTokens
+        headers: provider.headers
       }
       if (provider.apiKey) configuration.apiKey = provider.apiKey
       return configuration

@@ -61,7 +61,8 @@ const DEFAULT_RETRY_DELAY_MS = 1_000
 const DEFAULT_MAX_ASSISTANT_TEXT_CHARS = 256 * 1024
 const DEFAULT_SESSION_TITLE = 'New chat'
 const MAX_SESSION_TITLE_CHARS = 50
-const SESSION_TITLE_INSTRUCTIONS = `You are a conversation title generator.
+// Exported so tests can tell title-generation streams from agent-turn streams.
+export const SESSION_TITLE_INSTRUCTIONS = `You are a conversation title generator.
 
 Your ONLY task is to generate a concise, descriptive title for the conversation.
 Output ONLY the title. Do not answer the user's request and do not include explanations.
@@ -299,7 +300,6 @@ class TurnExecutor {
               parts: [{ type: 'text', text: createProjectAgentInstructions(cwd) }]
             })
           const runnerInput = {
-            conversationKey: `${turn.ownerId}:${request.sessionId}`,
             provider,
             messages,
             thinkingEffort: effectiveThinkingEffort,
@@ -470,7 +470,6 @@ class TurnExecutor {
   ): Promise<void> {
     try {
       const stream = await provider.stream({
-        conversationKey: `title:${sessionId}`,
         messages: [
           { role: 'system', parts: [{ type: 'text', text: SESSION_TITLE_INSTRUCTIONS }] },
           { role: 'user', parts: [{ type: 'text', text: sourceText }] }

@@ -89,8 +89,7 @@ describe('ProviderService', () => {
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'secret',
       headers: { 'X-Client': 'Mico' },
-      enabled: true,
-      useMaxCompletionTokens: true
+      enabled: true
     })
 
     expect(configuration).toEqual({
@@ -98,8 +97,7 @@ describe('ProviderService', () => {
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'secret',
       headers: { 'X-Client': 'Mico' },
-      enabled: true,
-      useMaxCompletionTokens: true
+      enabled: true
     })
   })
 
@@ -117,8 +115,7 @@ describe('ProviderService', () => {
           headers: {},
           icon: 'cloud',
           id: 'example-ai',
-          name: 'Example AI',
-          useMaxCompletionTokens: false
+          name: 'Example AI'
         }
       ],
       enabledProviderIds: ['ollama', 'example-ai'],
@@ -145,8 +142,7 @@ describe('ProviderService', () => {
           headers: {},
           icon: 'cloud',
           id: 'example-ai',
-          name: 'Example AI',
-          useMaxCompletionTokens: false
+          name: 'Example AI'
         }
       ],
       enabledProviderIds: ['ollama', 'example-ai'],
@@ -223,8 +219,7 @@ describe('ProviderService', () => {
       baseUrl: 'https://api.example.com/v1',
       headers: {},
       icon: 'cloud',
-      name: 'Example AI',
-      useMaxCompletionTokens: false
+      name: 'Example AI'
     })
     const providerId = provider.id
     if (!providerId) throw new Error('Custom provider was not created.')
@@ -377,8 +372,7 @@ describe('ProviderService', () => {
       enabled: true,
       headers: { 'X-Client': 'Mico' },
       icon: 'cloud',
-      name: 'Example AI',
-      useMaxCompletionTokens: true
+      name: 'Example AI'
     })
     const providerId = provider.id
     if (!providerId) throw new Error('Custom provider was not created.')
@@ -390,8 +384,7 @@ describe('ProviderService', () => {
       provider: 'openai-compatible',
       baseUrl: 'https://api.example.com/v1',
       headers: { 'X-Client': 'Mico' },
-      modelId: 'gpt-5.6',
-      useMaxCompletionTokens: true
+      modelId: 'gpt-5.6'
     })
   })
 
