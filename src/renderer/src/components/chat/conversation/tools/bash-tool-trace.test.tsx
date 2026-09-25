@@ -1,0 +1,31 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+
+import { BashToolTrace } from './bash-tool-trace'
+
+describe('Terminal output following', () => {
+  it('user reads earlier output when more text arrives, then their position is preserved until returning to the bottom', () => {
+    const { rerender } = render(
+      <BashToolTrace isStreaming output="First output" isTruncated={false} />
+    )
+    const viewport = screen.getByRole('log', { name: 'Terminal output' })
+    // jsdom has no layout; provide viewport geometry at the browser boundary.
+    let height = 500
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, get: () => height }
+    })
+    rerender(<BashToolTrace isStreaming output="Second output" isTruncated={false} />)
+    expect(viewport.scrollTop).toBe(400)
+    viewport.scrollTop = 100
+    fireEvent.scroll(viewport)
+    height = 600
+    rerender(<BashToolTrace isStreaming output="Third output" isTruncated={false} />)
+    expect(viewport.scrollTop).toBe(100)
+    viewport.scrollTop = 500
+    fireEvent.scroll(viewport)
+    height = 700
+    rerender(<BashToolTrace output="Final output" isTruncated={false} />)
+    expect(viewport.scrollTop).toBe(600)
+  })
+})

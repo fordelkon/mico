@@ -14,7 +14,6 @@ import { Chat, useChat } from '@ai-sdk/react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
-import { thinkingOrbStates, type ThinkingOrbState } from './agent-activity'
 
 // A bounded commit rate keeps long streamed Markdown from exhausting the renderer.
 const STREAMING_UPDATE_THROTTLE_MS = 50
@@ -23,20 +22,6 @@ const PENDING_ASSISTANT_MESSAGE = {
   role: 'assistant',
   parts: []
 } satisfies MicoUIMessage
-
-function getRandomThinkingOrbState(): ThinkingOrbState {
-  return thinkingOrbStates[Math.floor(Math.random() * thinkingOrbStates.length)]
-}
-
-function ThinkingOrbStateScope({
-  children
-}: {
-  children: (thinkingOrbState: ThinkingOrbState) => React.ReactNode
-}): React.JSX.Element {
-  const [thinkingOrbState] = React.useState(getRandomThinkingOrbState)
-
-  return <>{children(thinkingOrbState)}</>
-}
 
 type ChatMessageListProps = {
   conversationId: string
@@ -120,34 +105,25 @@ function ChatMessageList({
             className="mx-auto w-full max-w-[46rem] gap-8 px-5 pb-10 pt-12 sm:px-8"
           >
             {/* Preserve the mounted transcript when a response completes so the browser retains scroll position. */}
-            <ThinkingOrbStateScope>
-              {(thinkingOrbState) => (
-                <>
-                  {displayedMessages.map((message) => (
-                    <MessageScrollerItem key={message.id} messageId={message.id}>
-                      <ChatMessage
-                        message={message}
-                        isStreaming={
-                          isResponding &&
-                          message.role === 'assistant' &&
-                          message.id === latestMessage?.id
-                        }
-                        thinkingOrbState={thinkingOrbState}
-                      />
-                    </MessageScrollerItem>
-                  ))}
-                  {showPendingThinking && (
-                    <MessageScrollerItem messageId="pending-assistant">
-                      <ChatMessage
-                        isStreaming
-                        message={PENDING_ASSISTANT_MESSAGE}
-                        thinkingOrbState={thinkingOrbState}
-                      />
-                    </MessageScrollerItem>
-                  )}
-                </>
+            <>
+              {displayedMessages.map((message) => (
+                <MessageScrollerItem key={message.id} messageId={message.id}>
+                  <ChatMessage
+                    message={message}
+                    isStreaming={
+                      isResponding &&
+                      message.role === 'assistant' &&
+                      message.id === latestMessage?.id
+                    }
+                  />
+                </MessageScrollerItem>
+              ))}
+              {showPendingThinking && (
+                <MessageScrollerItem messageId="pending-assistant">
+                  <ChatMessage isStreaming message={PENDING_ASSISTANT_MESSAGE} />
+                </MessageScrollerItem>
               )}
-            </ThinkingOrbStateScope>
+            </>
             {errorMessage && (
               <div
                 className="flex items-center justify-between gap-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"

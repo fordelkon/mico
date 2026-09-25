@@ -22,14 +22,12 @@ import {
   AgentLoadingIndicator,
   AgentActivityTimeline,
   type AgentActivityPart,
-  type ThinkingOrbState,
   type ToolOutputDelta
 } from './agent-activity'
 
 type ChatMessageProps = {
   message: MicoUIMessage
   isStreaming: boolean
-  thinkingOrbState?: ThinkingOrbState
 }
 
 const textEncoder = new TextEncoder()
@@ -112,11 +110,7 @@ function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): Assista
   }, [])
 }
 
-function ChatMessageComponent({
-  message,
-  isStreaming,
-  thinkingOrbState
-}: ChatMessageProps): React.JSX.Element {
+function ChatMessageComponent({ message, isStreaming }: ChatMessageProps): React.JSX.Element {
   const [copyState, setCopyState] = React.useState<'idle' | 'copied'>('idle')
   const text = getFinalAnswerText(message.parts)
   const isUser = message.role === 'user'
@@ -193,9 +187,7 @@ function ChatMessageComponent({
               </div>
             ))
           : null}
-        {!isUser && isStreaming && !message.parts.length ? (
-          <AgentLoadingIndicator orbState={thinkingOrbState} />
-        ) : null}
+        {!isUser && isStreaming && !message.parts.length ? <AgentLoadingIndicator /> : null}
         {isUser && (text || !documents.length) ? (
           <Bubble
             align={isUser ? 'end' : 'start'}

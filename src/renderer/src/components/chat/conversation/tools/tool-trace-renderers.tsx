@@ -43,10 +43,10 @@ function getToolTracePresentation(
   if (input?.__micoPresentation) return input.__micoPresentation
   if (!input) return undefined
   if (toolName === 'read' && output) return { content: output, isTruncated: false, type: 'read' }
-  // A bash call can have live stdout/stderr before it receives its final output.
-  // An empty presentation creates the terminal shell so those deltas are visible.
-  if (toolName === 'bash' && output !== undefined)
-    return { content: output, isTruncated: false, type: 'bash' }
+  // Retain the complete command before output arrives, including failed calls
+  // with no output. Live deltas can fill this terminal shell independently.
+  if (toolName === 'bash' && (input.command || output !== undefined))
+    return { content: output ?? '', isTruncated: false, type: 'bash' }
   if (toolName === 'write' && input.content !== undefined)
     return {
       content: input.content,
@@ -91,6 +91,7 @@ function ToolTracePresentationView({
       <EditToolTrace
         edits={presentation.edits}
         isDraft={isDraft}
+        isStreaming={isStreaming}
         isTruncated={presentation.isTruncated}
       />
     )
@@ -117,6 +118,7 @@ function ToolTracePresentationView({
       <WriteToolTrace
         content={liveOutput?.preview ?? presentation.content}
         isDraft={isDraft}
+        isStreaming={isStreaming}
         isTruncated={presentation.isTruncated}
         operation={presentation.operation}
         path={path}

@@ -16,13 +16,32 @@ function BashToolTrace({
   stderr?: string
   isTruncated: boolean
 }): React.JSX.Element {
-  const hasError = Boolean(stderr)
+  const viewportRef = React.useRef<HTMLDivElement>(null)
+  const contentRef = React.useRef<HTMLDivElement>(null)
+  const followOutput = React.useRef(true)
+  const follow = React.useCallback(() => {
+    const viewport = viewportRef.current
+    if (viewport && viewport.clientHeight > 0 && followOutput.current) {
+      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    }
+  }, [])
+
+  React.useLayoutEffect(follow, [follow, output, stderr])
+  React.useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    const content = contentRef.current
+    if (!viewport || !content) return
+    // Observe both disclosure resizing and asynchronous syntax highlighting.
+    const observer = new ResizeObserver(follow)
+    observer.observe(viewport)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [follow])
 
   return (
     <div
       aria-busy={isStreaming}
       className="overflow-hidden rounded-lg border border-border-subtle bg-surface-secondary"
-      data-state={isStreaming ? 'running' : hasError ? 'error' : 'success'}
     >
       <div className="flex min-w-0 items-center gap-2 border-b border-border-subtle px-2.5 py-1.5 text-[11px]">
         <SquareTerminalIcon aria-hidden="true" className="size-3.5 shrink-0 text-text-tertiary" />
@@ -30,36 +49,47 @@ function BashToolTrace({
       </div>
       <div
         aria-label="Terminal output"
-        aria-live={isStreaming ? 'polite' : 'off'}
-        className="overflow-visible"
+        aria-live="off"
+        className="agent-activity__terminal-viewport"
+        ref={viewportRef}
+        tabIndex={0}
+        onScroll={(event) => {
+          const viewport = event.currentTarget
+          if (viewport.clientHeight > 0) {
+            followOutput.current =
+              viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 4
+          }
+        }}
         role="log"
       >
-        {command ? (
-          <div className="border-b border-border-subtle px-2.5 py-1.5 font-mono text-xs text-text-secondary">
-            <span aria-hidden="true" className="select-none text-text-tertiary">
-              $
-            </span>
-            {command}
-          </div>
-        ) : null}
-        <div className="border-b border-border-subtle last:border-b-0">
-          <ChatCodeBlock
-            code={output}
-            isStreaming={isStreaming}
-            language="text"
-            outputLabel="Output"
-          />
-        </div>
-        {stderr ? (
-          <div className="bg-destructive/5">
+        <div ref={contentRef}>
+          {command ? (
+            <div className="whitespace-pre-wrap break-all border-b border-border-subtle px-2.5 py-1.5 font-mono text-xs text-text-secondary">
+              <span aria-hidden="true" className="select-none text-text-tertiary">
+                $
+              </span>
+              {command}
+            </div>
+          ) : null}
+          <div className="border-b border-border-subtle last:border-b-0">
             <ChatCodeBlock
-              code={stderr}
+              code={output}
               isStreaming={isStreaming}
               language="text"
-              outputLabel="Standard error"
+              outputLabel="Output"
             />
           </div>
-        ) : null}
+          {stderr ? (
+            <div className="bg-surface-secondary">
+              <ChatCodeBlock
+                code={stderr}
+                isStreaming={isStreaming}
+                language="text"
+                outputLabel="Standard error"
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
       {isTruncated ? (
         <p className="px-2.5 py-1.5 text-xs text-text-tertiary">Output truncated.</p>

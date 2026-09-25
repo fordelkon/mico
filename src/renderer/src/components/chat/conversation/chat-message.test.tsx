@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import type { RenderResult } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -143,10 +143,9 @@ describe('ChatMessage', () => {
       { isStreaming: true }
     )
 
-    expect(screen.getByRole('button', { name: 'Agent run' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
+    expect(
+      screen.getByRole('button', { name: 'Agent activity: Reasoning finished' })
+    ).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByTestId('thinking-panel').firstElementChild).toHaveAttribute(
       'aria-hidden',
       'true'
@@ -162,7 +161,7 @@ describe('ChatMessage', () => {
       { isStreaming: true }
     )
 
-    expect(screen.getByRole('button', { name: 'Agent run' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Agent activity: Reasoning finished' })).toBeVisible()
     expect(screen.getByTestId('thinking-panel').firstElementChild).toHaveAttribute(
       'aria-hidden',
       'true'
@@ -253,7 +252,7 @@ describe('ChatMessage', () => {
       { isStreaming: true, id: 'assistant-interim' }
     )
 
-    expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Agent activity: Thinking' })).toHaveAttribute(
       'aria-expanded',
       'true'
     )
@@ -273,22 +272,20 @@ describe('ChatMessage', () => {
       />
     )
 
-    // The finished step settles: its summary collapses and only the next step
-    // stays live while the message keeps streaming.
-    expect(screen.getByRole('button', { name: 'Agent run' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
-    expect(screen.getAllByRole('status')).toHaveLength(1)
+    // The finished group preserves its disclosure while the next step starts.
+    expect(
+      screen.getByRole('button', { name: 'Agent activity: Reasoning finished' })
+    ).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getAllByRole('status')).toHaveLength(2)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Agent run' }))
     expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
-    expect(
-      screen.getByRole('button', { name: 'Read src/index.ts Reading file' })
-    ).not.toHaveAttribute('aria-expanded')
+    expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
   })
 
   it('user sees a completed tool compacted when reasoning follows, then its details collapse', () => {

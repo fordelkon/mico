@@ -6,6 +6,7 @@ function WriteToolTrace({
   content,
   isTruncated,
   operation,
+  isStreaming = false,
   isDraft = false,
   path
 }: {
@@ -14,12 +15,15 @@ function WriteToolTrace({
   operation: 'created' | 'replaced' | 'unknown'
   /** Content received while the model is preparing the call is not committed yet. */
   isDraft?: boolean
+  isStreaming?: boolean
   path?: string
 }): React.JSX.Element {
   const lineCount = content.split('\n').length
   const byteCount = new TextEncoder().encode(content).byteLength
   const label = isDraft
-    ? 'Preparing file'
+    ? isStreaming
+      ? 'Preparing file'
+      : 'Write not confirmed'
     : operation === 'created'
       ? 'File created'
       : operation === 'replaced'
@@ -29,7 +33,7 @@ function WriteToolTrace({
 
   return (
     <div
-      aria-busy={isDraft}
+      aria-busy={isStreaming}
       className="overflow-hidden rounded-lg border border-border-subtle bg-surface-secondary"
       data-state={isDraft ? 'draft' : 'complete'}
     >

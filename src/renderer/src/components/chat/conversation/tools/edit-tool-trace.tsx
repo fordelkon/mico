@@ -14,25 +14,31 @@ function countLines(text: string): number {
 function EditToolTrace({
   edits,
   isTruncated,
+  isStreaming = false,
   isDraft = false
 }: {
   edits: EditTrace[]
   isTruncated: boolean
   /** An edit remains a proposal until the tool produces a successful result. */
   isDraft?: boolean
+  isStreaming?: boolean
 }): React.JSX.Element {
   if (!edits.length)
     return <p className="text-xs text-text-tertiary">Diff preview is too large to retain.</p>
 
   const additions = edits.reduce((count, edit) => count + countLines(edit.newText), 0)
   const deletions = edits.reduce((count, edit) => count + countLines(edit.oldText), 0)
-  const stateLabel = isDraft ? 'Applying changes' : 'Changes applied'
+  const stateLabel = isDraft
+    ? isStreaming
+      ? 'Applying changes'
+      : 'Changes not confirmed'
+    : 'Changes applied'
 
   return (
     <div
-      aria-busy={isDraft}
+      aria-busy={isStreaming}
       className="overflow-hidden rounded-lg border border-border-subtle bg-surface-secondary"
-      data-state={isDraft ? 'streaming' : 'complete'}
+      data-state={isStreaming ? 'streaming' : isDraft ? 'draft' : 'complete'}
     >
       <div className="flex min-w-0 items-center gap-2 border-b border-border-subtle px-2.5 py-1.5 text-[11px]">
         <FileCode2Icon aria-hidden="true" className="size-3.5 shrink-0 text-text-tertiary" />
@@ -46,12 +52,7 @@ function EditToolTrace({
           {stateLabel}
         </span>
       </div>
-      <div
-        aria-label="File diff"
-        aria-live={isDraft ? 'polite' : 'off'}
-        className="overflow-visible"
-        role="log"
-      >
+      <div aria-label="File diff" aria-live="off" className="overflow-visible" role="log">
         {edits.map((edit, index) => (
           <div className="border-b border-border-subtle last:border-b-0" key={index}>
             <div className="px-2.5 py-1 text-[11px] text-text-tertiary">

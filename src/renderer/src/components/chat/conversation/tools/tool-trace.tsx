@@ -1,6 +1,7 @@
-import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@mico/ui'
+import { Button } from '@mico/ui'
 import {
   ChevronDownIcon,
+  CircleAlertIcon,
   FilePenLineIcon,
   FilePlus2Icon,
   FileSearchIcon,
@@ -23,7 +24,13 @@ import {
 type ToolDescription = { detail: string | null; title: string }
 type ToolOutputDelta = { preview: string; stderr: string; stdout: string }
 type ToolActivityPart = DynamicToolUIPart & { liveOutput?: ToolOutputDelta }
-type ToolActivityState = 'completed' | 'executing' | 'failed' | 'preparing' | 'streaming-output'
+type ToolActivityState =
+  | 'incomplete'
+  | 'completed'
+  | 'executing'
+  | 'failed'
+  | 'preparing'
+  | 'streaming-output'
 
 const MAX_TOOL_DISPLAY_CHARACTERS = 2_000
 const MAX_TOOL_OUTPUT_LINES = 8
@@ -80,15 +87,17 @@ function describeOutput(toolName: string, output: string): string {
     : display
 }
 
-function getToolActivityState(part: ToolActivityPart): ToolActivityState {
-  if (part.state === 'output-error') return 'failed'
+function getToolActivityState(part: ToolActivityPart, isActive = true): ToolActivityState {
+  if (part.state === 'output-error' || part.state === 'output-denied') return 'failed'
+  if (part.state === 'output-available') return 'completed'
+  if (!isActive) return 'incomplete'
   if (part.state === 'input-streaming') return 'preparing'
   if (part.state === 'input-available') {
     if (part.toolName === 'bash' && (part.liveOutput?.stdout || part.liveOutput?.stderr))
       return 'streaming-output'
     return 'executing'
   }
-  return 'completed'
+  return 'preparing'
 }
 
 function getToolStatus(
@@ -96,6 +105,7 @@ function getToolStatus(
   state: ToolActivityState,
   output: string | undefined
 ): string {
+  if (state === 'incomplete') return 'Not completed'
   if (state === 'failed') return 'Failed'
   if (state === 'preparing') return 'Preparing'
   if (state === 'streaming-output') return 'Streaming output'
@@ -119,25 +129,29 @@ function ToolIcon({ toolName }: { toolName: string }): React.JSX.Element {
   return <Icon aria-hidden="true" className="size-3.5" />
 }
 
-/** The shared disclosure shell delegates content to the tool-specific trace renderer. */
+/** A timeline summary uses the same validated input as the tool row. */
+function getToolActivityLabel(part: ToolActivityPart): string {
+  const input = ToolTraceInputSchema.safeParse(part.input)
+  const action = { read: 'Reading', write: 'Writing', edit: 'Editing', bash: 'Running' }[
+    part.toolName
+  ]
+  const target = input.success ? describeTool(part.toolName, input.data).detail : null
+  return [action ?? toolLabel(part.toolName), target].filter(Boolean).join(' ')
+}
+
+/** Tool details stay under user control throughout their execution lifecycle. */
 function ToolTrace({
   part,
-  isFollowedByActivity = false
+  isActive = true
 }: {
   part: ToolActivityPart
-  isFollowedByActivity?: boolean
+  isActive?: boolean
 }): React.JSX.Element {
-  // Traces whose content is only meaningful once finished render as a compact row
-  // while running and stay collapsed after completing; opening them is user-only.
-  const showsStreamedContent = part.toolName === 'bash' || part.toolName === 'write'
-  const [expanded, setExpanded] = React.useState(
-    showsStreamedContent && (part.state === 'input-available' || part.state === 'input-streaming')
-  )
-  const [hasUserToggled, setHasUserToggled] = React.useState(false)
-  const wasRunning = React.useRef(false)
-  const activityState = getToolActivityState(part)
+  const [expanded, setExpanded] = React.useState(false)
+  const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
+  const activityState = getToolActivityState(part, isActive)
   const isError = activityState === 'failed'
-  const isRunning = activityState !== 'completed' && !isError
+  const isRunning = ['preparing', 'executing', 'streaming-output'].includes(activityState)
   const input = ToolTraceInputSchema.safeParse(part.input)
   const output = 'output' in part ? ToolOutputSchema.safeParse(part.output) : undefined
   const status = getToolStatus(
@@ -148,113 +162,102 @@ function ToolTrace({
   const tool = input.success
     ? describeTool(part.toolName, input.data)
     : { detail: null, title: toolLabel(part.toolName) }
-  const detail = isError
-    ? part.errorText
-    : output?.success
-      ? describeOutput(part.toolName, output.data)
-      : isRunning
-        ? null
-        : 'No output was returned.'
-  const liveOutput = part.liveOutput
+  const error = isError
+    ? part.errorText ||
+      (part.state === 'output-denied'
+        ? 'Tool execution was denied. Review the request before trying again.'
+        : 'The tool failed. Review its input and try again.')
+    : null
+  const detail = output?.success
+    ? describeOutput(part.toolName, output.data)
+    : isRunning || error
+      ? null
+      : 'No output was returned.'
   const presentation = getToolTracePresentation(
     part.toolName,
     input.success ? input.data : undefined,
-    output?.success ? output.data : liveOutput && part.toolName === 'bash' ? '' : undefined
+    output?.success ? output.data : part.liveOutput && part.toolName === 'bash' ? '' : undefined
   )
+  // Failed mutations must not render their proposed edits as successfully applied.
+  const showPresentation = presentation && (!isError || part.toolName === 'bash')
+  const hasDetail = Boolean(error || tool.detail || detail || showPresentation || part.liveOutput)
+  const Trigger = hasDetail ? Button : 'div'
   const contentId = `tool-trace-${part.toolCallId}`
-  // Auto-open belongs to the newest call only: in a parallel batch every part is
-  // running, so without the position gate all panels would open and close in a
-  // wave. A user toggle always wins over the gate.
-  const isExpanded = hasUserToggled
-    ? expanded
-    : showsStreamedContent && !isFollowedByActivity && (isRunning || expanded)
-  const hasDetail =
-    isRunning && !showsStreamedContent
-      ? false
-      : Boolean(tool.detail || detail || presentation || liveOutput)
-
-  React.useLayoutEffect(() => {
-    // A completed tool should return to its compact trace row. The detail panel
-    // remains available on demand, while active tools stay open at the live edge.
-    // Layout effect: the collapsed commit must land before paint, or the browser
-    // flashes one frame of the completed panel before the collapse starts.
-    if (wasRunning.current && !isRunning && !hasUserToggled) setExpanded(false)
-    wasRunning.current = isRunning
-  }, [hasUserToggled, isRunning])
 
   return (
     <section
       className="thinking-block agent-activity__trace w-full min-w-0 text-sm text-text-tertiary"
-      data-open={isExpanded}
-      data-user-toggled={hasUserToggled ? 'true' : 'false'}
+      data-open={expanded}
+      data-animate-disclosure={animateDisclosure}
+      data-state={activityState}
     >
-      <TooltipProvider delayDuration={500}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={[tool.title, tool.detail, status].filter(Boolean).join(' ')}
-              aria-controls={hasDetail ? contentId : undefined}
-              aria-expanded={hasDetail ? isExpanded : undefined}
-              className="agent-activity__trigger h-7 w-full min-w-0 gap-2 px-1 hover:text-foreground"
-              variant="ghost"
-              onClick={() => {
-                if (!hasDetail) return
-                setHasUserToggled(true)
-                setExpanded(!isExpanded)
-              }}
-            >
-              <ToolIcon toolName={part.toolName} />
-              <span className="shrink-0 font-medium text-foreground">{tool.title}</span>
-              {tool.detail ? (
-                <span className="agent-activity__summary font-mono" title={tool.detail}>
-                  {tool.detail}
-                </span>
-              ) : null}
-              <span
-                className={isError ? 'shrink-0 text-destructive' : 'shrink-0 text-text-tertiary'}
-              >
-                {status}
-              </span>
-              <span aria-hidden="true" className="thinking-block__chevron">
-                <ChevronDownIcon className="size-3.5" />
-              </span>
-            </Button>
-          </TooltipTrigger>
-          {input.success && input.data.command ? (
-            <TooltipContent className="max-w-sm break-all font-mono text-xs">
-              {input.data.command}
-            </TooltipContent>
-          ) : null}
-        </Tooltip>
-      </TooltipProvider>
+      <Trigger
+        aria-label={[tool.title, tool.detail, status].filter(Boolean).join(' ')}
+        aria-controls={
+          hasDetail
+            ? [contentId, error ? `${contentId}-error` : null].filter(Boolean).join(' ')
+            : undefined
+        }
+        aria-expanded={hasDetail ? expanded : undefined}
+        className="agent-activity__trigger"
+        {...(hasDetail ? { variant: 'ghost' as const } : {})}
+        onClick={(event) => {
+          if (!hasDetail) return
+          setAnimateDisclosure(event.detail > 0)
+          setExpanded((current) => !current)
+        }}
+      >
+        <span className="agent-activity__node">
+          <ToolIcon toolName={part.toolName} />
+        </span>
+        <span className="agent-activity__action">{tool.title}</span>
+        <span className="agent-activity__summary font-mono" title={tool.detail ?? undefined}>
+          {tool.detail}
+        </span>
+        <span
+          className={isError ? 'agent-activity__state text-destructive' : 'agent-activity__state'}
+        >
+          {status}
+        </span>
+        {hasDetail ? (
+          <span aria-hidden="true" className="thinking-block__chevron">
+            <ChevronDownIcon className="size-3.5" />
+          </span>
+        ) : null}
+      </Trigger>
+      {error ? (
+        <div className="agent-activity__error" id={`${contentId}-error`}>
+          <CircleAlertIcon aria-hidden="true" className="size-3.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : null}
       {hasDetail ? (
         <div className="thinking-block__panel">
           <div
-            aria-hidden={!isExpanded}
-            className="thinking-block__panel-inner whitespace-pre-wrap font-mono text-xs"
+            aria-hidden={!expanded}
+            className="thinking-block__panel-inner whitespace-pre-wrap text-xs"
             id={contentId}
-            inert={!isExpanded}
+            inert={!expanded}
           >
-            {presentation ? (
-              <ToolTracePresentationView
-                command={input.success ? input.data.command : undefined}
-                isDraft={isRunning}
-                isStreaming={isRunning}
-                liveOutput={liveOutput}
-                path={input.success ? input.data.path : undefined}
-                presentation={presentation}
-              />
-            ) : (
-              <>
-                {tool.detail ? <div className="text-text-tertiary">{tool.detail}</div> : null}
-                {activityState === 'executing' ? (
-                  <div className="mt-2 border-t border-border pt-2 text-text-secondary">
-                    {status}…
-                  </div>
-                ) : null}
-                {detail ? <div className="mt-2 border-t border-border pt-2">{detail}</div> : null}
-              </>
-            )}
+            <div className="agent-activity__detail">
+              {showPresentation ? (
+                <ToolTracePresentationView
+                  command={input.success ? input.data.command : undefined}
+                  isDraft={activityState !== 'completed'}
+                  isStreaming={isRunning}
+                  liveOutput={part.liveOutput}
+                  path={input.success ? input.data.path : undefined}
+                  presentation={presentation}
+                />
+              ) : (
+                <>
+                  {tool.detail ? (
+                    <div className="break-all font-mono text-text-secondary">{tool.detail}</div>
+                  ) : null}
+                  {detail ? <div className="mt-2 font-mono">{detail}</div> : null}
+                </>
+              )}
+            </div>
           </div>
         </div>
       ) : null}
@@ -262,4 +265,10 @@ function ToolTrace({
   )
 }
 
-export { ToolTrace, type ToolActivityPart, type ToolOutputDelta }
+export {
+  ToolTrace,
+  getToolActivityState,
+  getToolActivityLabel,
+  type ToolActivityPart,
+  type ToolOutputDelta
+}

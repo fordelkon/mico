@@ -118,7 +118,7 @@ describe('ChatMessageList', () => {
       parts: [{ type: 'text' as const, text: 'What should I work on next?' }]
     }
     const { rerender } = renderMessageList({ isResponding: true, messages: [userMessage] })
-    expect(screen.getByTestId('thinking-orb')).toBeVisible()
+    expect(screen.getByRole('status')).toBeVisible()
 
     rerender(
       <ChatMessageList
@@ -128,7 +128,7 @@ describe('ChatMessageList', () => {
       />
     )
 
-    expect(screen.getByTestId('thinking-orb')).toBeVisible()
+    expect(screen.getByRole('status')).toBeVisible()
 
     rerender(
       <ChatMessageList
@@ -145,7 +145,7 @@ describe('ChatMessageList', () => {
       />
     )
 
-    expect(screen.queryByTestId('thinking-orb')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
     expect(screen.getAllByTestId('answer-content').at(-1)).toHaveTextContent(
       'Start with the most important task.'
     )
@@ -189,8 +189,8 @@ describe('ChatMessageList', () => {
       retry: { attempt: 2, maxAttempts: 5, retryDelayMs: 2_000, startedAt: Date.now() }
     })
 
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Connection interrupted. Retrying in 2s · attempt 2 of 5.'
-    )
+    expect(
+      screen.getByText('Connection interrupted. Retrying in 2s · attempt 2 of 5.')
+    ).toHaveAttribute('role', 'status')
   })
 })

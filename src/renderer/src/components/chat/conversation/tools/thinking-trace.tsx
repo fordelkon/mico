@@ -13,51 +13,48 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
   // The reasoning part's own lifecycle state gates isStreaming upstream, so the
   // label follows the reasoning-end chunk instead of list position.
   const isThinking = isStreaming
-  const [expanded, setExpanded] = React.useState(isThinking)
-  const [hasUserToggled, setHasUserToggled] = React.useState(false)
-  const wasThinking = React.useRef(isThinking)
+  const [expanded, setExpanded] = React.useState(false)
+  const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
   const contentId = `thinking-${id}`
   const label = isThinking ? 'Thinking' : 'Thought'
 
-  React.useLayoutEffect(() => {
-    // A thought settles like a completed tool: the panel collapses once reasoning
-    // hands over to the next activity part.
-    // Layout effect: the collapsed commit must land before paint, or the browser
-    // flashes one frame of the completed panel before the collapse starts.
-    if (wasThinking.current && !isThinking && !hasUserToggled) setExpanded(false)
-    wasThinking.current = isThinking
-  }, [hasUserToggled, isThinking])
-
   if (!text && !isThinking) return null
+
+  const Trigger = text ? Button : 'div'
 
   return (
     <section
       className="thinking-block agent-activity__trace w-full min-w-0 text-sm text-text-tertiary"
       data-open={expanded}
-      data-user-toggled={hasUserToggled ? 'true' : 'false'}
+      data-animate-disclosure={animateDisclosure}
     >
-      <Button
+      <Trigger
         aria-label={label}
-        aria-controls={contentId}
-        aria-expanded={expanded}
-        className="agent-activity__trigger h-7 w-full min-w-0 gap-2 px-1 hover:text-foreground"
-        variant="ghost"
-        onClick={() => {
-          setHasUserToggled(true)
+        aria-controls={text ? contentId : undefined}
+        aria-expanded={text ? expanded : undefined}
+        className="agent-activity__trigger"
+        {...(text ? { variant: 'ghost' as const } : {})}
+        onClick={(event) => {
+          if (!text) return
+          setAnimateDisclosure(event.detail > 0)
           setExpanded((current) => !current)
         }}
       >
-        <BrainIcon aria-hidden="true" className="size-3.5 shrink-0" />
-        <span className="thinking-block__label">{label}</span>
+        <span className="agent-activity__node">
+          <BrainIcon aria-hidden="true" className="size-3.5" />
+        </span>
+        <span className="agent-activity__action">{label}</span>
         {text ? (
           <span className="agent-activity__summary" title={text}>
             {text}
           </span>
         ) : null}
-        <span aria-hidden="true" className="thinking-block__chevron">
-          <ChevronDownIcon className="size-3.5" />
-        </span>
-      </Button>
+        {text ? (
+          <span aria-hidden="true" className="thinking-block__chevron">
+            <ChevronDownIcon className="size-3.5" />
+          </span>
+        ) : null}
+      </Trigger>
       <div className="thinking-block__panel" data-testid="thinking-panel">
         <div
           aria-hidden={!expanded}
@@ -65,7 +62,7 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
           id={contentId}
           inert={!expanded}
         >
-          {text}
+          <div className="agent-activity__detail">{text}</div>
         </div>
       </div>
     </section>

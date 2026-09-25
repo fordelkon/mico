@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import {
   AgentActivityTimeline,
@@ -10,30 +10,20 @@ import {
   ToolTrace
 } from './agent-activity'
 
-beforeEach(() => {
-  // SAFETY: jsdom cannot create a canvas 2D context; the stub keeps canvas-backed rendering from throwing.
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-})
-
 describe('ThinkingBlock', () => {
-  it('user sees Thinking start expanded when reasoning streams, then the label shows', () => {
-    render(<ThinkingBlock id="reasoning-1" isStreaming text="" />)
+  it('user sees compact reasoning when text streams, then details remain optional', () => {
+    render(<ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />)
 
     expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
       'aria-expanded',
-      'true'
+      'false'
     )
   })
 
-  it('user sees the loading orb when the agent has no activity yet, then it renders on its own', () => {
+  it('user sees a loading status when the agent has no activity yet, then Thinking is announced', () => {
     render(<AgentLoadingIndicator />)
 
-    expect(screen.getByTestId('thinking-orb')).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Thinking')
   })
 
   it('user reveals the thought summary when clicking Thought, then the panel shows', () => {
@@ -55,6 +45,7 @@ describe('ThinkingBlock', () => {
     const { rerender } = render(
       <ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Thinking' }))
     fireEvent.click(screen.getByRole('button', { name: 'Thinking' }))
 
     rerender(
@@ -135,6 +126,7 @@ describe('ThinkingBlock', () => {
       />
     )
 
+    fireEvent.click(screen.getByRole('button', { name: /Run pnpm test/ }))
     expect(screen.getByText('12 tests passed')).toBeVisible()
     expect(screen.queryByText('Output is unavailable.')).not.toBeInTheDocument()
   })
@@ -175,6 +167,7 @@ describe('ThinkingBlock', () => {
       />
     )
 
+    fireEvent.click(screen.getByRole('button', { name: /Run pnpm test/ }))
     const output = screen
       .getAllByTestId('code-block')
       .find((block) => block.getAttribute('data-state') === 'streaming')
@@ -201,6 +194,7 @@ describe('ThinkingBlock', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Write src/index.ts Writing file' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Write src/index.ts Writing file' }))
     expect(screen.getByText('Preparing file')).toBeVisible()
   })
 
@@ -220,10 +214,13 @@ describe('ThinkingBlock', () => {
     expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toBeVisible()
     expect(screen.queryByText('Reading file…')).not.toBeInTheDocument()
     expect(screen.queryByText('File read')).not.toBeInTheDocument()
-    expect(document.querySelector('.thinking-block__panel')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
   })
 
-  it('user sees the tool detail auto-collapse when the run completes, then it stays collapsed', () => {
+  it('user leaves tool details closed when the run completes, then they remain closed', () => {
     const part = {
       type: 'dynamic-tool' as const,
       toolCallId: 'bash-collapse-1',
@@ -234,7 +231,7 @@ describe('ThinkingBlock', () => {
 
     expect(screen.getByRole('button', { name: /Run pnpm test Running/ })).toHaveAttribute(
       'aria-expanded',
-      'true'
+      'false'
     )
 
     rerender(<ToolTrace part={{ ...part, state: 'output-available', output: 'Tests passed' }} />)
@@ -247,7 +244,7 @@ describe('ThinkingBlock', () => {
 })
 
 describe('AgentActivityTimeline', () => {
-  it('user sees a thought settle when the next activity starts, then the new tool starts expanded', () => {
+  it('user sees a thought settle when the next activity starts, then both details stay compact', () => {
     const reasoning = {
       type: 'reasoning' as const,
       text: 'Inspecting the request.',
@@ -266,7 +263,7 @@ describe('AgentActivityTimeline', () => {
 
     expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
       'aria-expanded',
-      'true'
+      'false'
     )
 
     rerender(
@@ -284,11 +281,11 @@ describe('AgentActivityTimeline', () => {
     )
     expect(screen.getByRole('button', { name: 'Run cat package.json Running' })).toHaveAttribute(
       'aria-expanded',
-      'true'
+      'false'
     )
   })
 
-  it('user sees only the newest tool open when a batch runs, then earlier tools stay compact rows', () => {
+  it('user sees parallel tools when a batch runs, then all details stay compact', () => {
     const bash = (toolCallId: string) => ({
       type: 'dynamic-tool' as const,
       toolCallId,
@@ -306,7 +303,7 @@ describe('AgentActivityTimeline', () => {
     )
     expect(screen.getByRole('button', { name: 'Run run call-2 Running' })).toHaveAttribute(
       'aria-expanded',
-      'true'
+      'false'
     )
   })
 
@@ -348,10 +345,10 @@ describe('AgentActivityTimeline', () => {
         parts={[{ ...reasoning, state: 'done' as const }, readDone]}
       />
     )
-    expect(screen.queryByRole('status')).toBeNull()
-    expect(screen.getByRole('button', { name: '1 tool call · Agent run' })).toHaveAttribute(
+    expect(screen.getByRole('status')).toHaveTextContent('1 tool call')
+    expect(screen.getByRole('button', { name: 'Agent activity: 1 tool call' })).toHaveAttribute(
       'aria-expanded',
-      'false'
+      'true'
     )
   })
 
@@ -382,7 +379,7 @@ describe('AgentActivityTimeline', () => {
       />
     )
 
-    const activity = screen.getByRole('button', { name: '2 tool calls · Agent run' })
+    const activity = screen.getByRole('button', { name: 'Agent activity: 2 tool calls' })
     expect(activity).toHaveAttribute('aria-expanded', 'false')
 
     fireEvent.click(activity)
@@ -399,5 +396,186 @@ describe('AgentActivityTimeline', () => {
     expect(screen.queryByText('export {}')).not.toBeInTheDocument()
     expect(screen.getByText('Output')).toBeVisible()
     expect(screen.getByText('Tests passed')).toBeVisible()
+  })
+})
+
+describe('Activity disclosure and outcomes', () => {
+  it('user closes a live group when tools arrive, then it stays closed through completion', () => {
+    const { rerender } = render(<AgentActivityTimeline id="live" isStreaming parts={[]} />)
+    const header = screen.getByRole('button', { name: 'Agent activity: Thinking' })
+    header.focus()
+    fireEvent.click(header)
+    const tool = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'read',
+      toolName: 'read',
+      state: 'input-available' as const,
+      input: { path: 'package.json' }
+    }
+    rerender(<AgentActivityTimeline id="live" isStreaming parts={[tool]} />)
+    expect(
+      screen.getByRole('button', { name: 'Agent activity: Reading package.json' })
+    ).toHaveAttribute('aria-expanded', 'false')
+    rerender(
+      <AgentActivityTimeline
+        id="live"
+        isStreaming={false}
+        parts={[{ ...tool, state: 'output-available', output: '{}' }]}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Agent activity: 1 tool call' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(header).toHaveFocus()
+  })
+
+  it('user opens a live tool when inspecting output, then it stays open after completion', () => {
+    const part = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'terminal',
+      toolName: 'bash',
+      input: { command: 'pnpm test' }
+    }
+    const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
+    const trigger = screen.getByRole('button', { name: 'Run pnpm test Running' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    rerender(<ToolTrace part={{ ...part, state: 'output-available', output: 'Tests passed' }} />)
+    expect(screen.getByRole('button', { name: 'Run pnpm test Completed' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    expect(screen.getByRole('log', { name: 'Terminal output' })).toHaveTextContent('Tests passed')
+  })
+
+  it('user sees a failed edit when rich input exists, then the error remains visible', () => {
+    render(
+      <AgentActivityTimeline
+        id="failed"
+        isStreaming={false}
+        parts={[
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'edit-error',
+            toolName: 'edit',
+            state: 'output-error',
+            input: { path: 'index.ts', edits: [{ oldText: 'old', newText: 'new' }] },
+            errorText: 'Could not edit index.ts. Read the file and try again.'
+          }
+        ]}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Agent activity: 1 tool call · 1 failed' }))
+    expect(screen.getByText('Could not edit index.ts. Read the file and try again.')).toBeVisible()
+    expect(screen.queryByText('Applied change 1')).not.toBeInTheDocument()
+  })
+
+  it('user sees an unfinished tool when generation ends, then it is not reported as completed', () => {
+    render(
+      <AgentActivityTimeline
+        id="interrupted"
+        isStreaming={false}
+        parts={[
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'pending',
+            toolName: 'bash',
+            state: 'input-available',
+            input: { command: 'pnpm test' }
+          }
+        ]}
+      />
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Agent activity: 1 tool call · 1 not completed' })
+    )
+    expect(screen.getByRole('button', { name: 'Run pnpm test Not completed' })).toBeVisible()
+    expect(screen.queryByText('Completed')).not.toBeInTheDocument()
+  })
+
+  it('user sees parallel tools when the newest call finishes, then earlier running work stays identified', () => {
+    render(
+      <AgentActivityTimeline
+        id="parallel"
+        isStreaming
+        parts={[
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'a',
+            toolName: 'read',
+            state: 'input-available',
+            input: { path: 'package.json' }
+          },
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'b',
+            toolName: 'read',
+            state: 'output-available',
+            input: { path: 'README.md' },
+            output: 'Readme'
+          }
+        ]}
+      />
+    )
+    expect(
+      screen.getByRole('button', { name: 'Agent activity: Reading package.json' })
+    ).toHaveAttribute('aria-expanded', 'true')
+  })
+})
+
+describe('Unfinished tool details', () => {
+  it('user opens a command when output is pending, then every command line is readable', () => {
+    render(
+      <ToolTrace
+        part={{
+          type: 'dynamic-tool',
+          toolName: 'bash',
+          toolCallId: 'multiline',
+          state: 'input-available',
+          input: { command: 'pnpm test\nprintf finished' }
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Run pnpm test Running' }))
+    expect(screen.getByText(/printf finished/)).toBeVisible()
+  })
+
+  it('user opens an unfinished write when generation stops, then it does not claim to be preparing or written', () => {
+    render(
+      <ToolTrace
+        isActive={false}
+        part={{
+          type: 'dynamic-tool',
+          toolName: 'write',
+          toolCallId: 'write-stopped',
+          state: 'input-available',
+          input: { path: 'index.ts', content: 'export {}' }
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Write index.ts Not completed' }))
+    expect(screen.getByText('Write not confirmed')).toBeVisible()
+    expect(screen.queryByText('Preparing file')).not.toBeInTheDocument()
+    expect(screen.queryByText('File written')).not.toBeInTheDocument()
+  })
+
+  it('user opens an unfinished edit when generation stops, then changes remain proposals without running feedback', () => {
+    render(
+      <ToolTrace
+        isActive={false}
+        part={{
+          type: 'dynamic-tool',
+          toolName: 'edit',
+          toolCallId: 'edit-stopped',
+          state: 'input-available',
+          input: { path: 'index.ts', edits: [{ oldText: 'old', newText: 'new' }] }
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Edit 1 changes index.ts Not completed' }))
+    expect(screen.getByText('Changes not confirmed')).toBeVisible()
+    expect(screen.getByText('Proposed change 1')).toBeVisible()
+    expect(screen.queryByText('Applying changes')).not.toBeInTheDocument()
   })
 })
