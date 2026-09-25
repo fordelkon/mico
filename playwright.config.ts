@@ -26,9 +26,10 @@ export default defineConfig({
   outputDir: './test-results',
 
   use: {
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    // The Electron fixture owns evidence for its externally launched context.
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
     actionTimeout: 15_000,
     navigationTimeout: 30_000
   },
@@ -36,7 +37,12 @@ export default defineConfig({
   projects: [
     {
       name: 'electron',
-      testMatch: '**/*.spec.ts'
+      testMatch: '**/*.spec.ts',
+      testIgnore: '**/real-provider.spec.ts'
+    },
+    {
+      name: 'real-provider',
+      testMatch: '**/real-provider.spec.ts'
     }
   ]
 })

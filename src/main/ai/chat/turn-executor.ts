@@ -360,10 +360,17 @@ class TurnExecutor {
                 status: 'completed',
                 assistant: {
                   role: 'assistant',
-                  parts: displayParts
+                  parts: displayParts,
+                  metadata: { completionState: 'complete' }
                 }
               })
             }
+            // A completed turn is durable before its UI gains completion-only actions.
+            emit({
+              type: 'chunk',
+              requestId: request.requestId,
+              chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
+            })
             this.emitTerminal(turn, { type: 'finish', requestId: request.requestId })
           }
           return

@@ -21,3 +21,16 @@ test.describe('App launch', () => {
     await expect(mainWindow.getByRole('textbox')).toBeVisible()
   })
 })
+
+test('user types a multiline draft when pressing Shift+Enter, then the unsent draft stays editable', async ({
+  mainWindow
+}) => {
+  await waitForAppReady(mainWindow)
+  const composer = mainWindow.getByRole('textbox')
+  await composer.fill('First line')
+  await composer.press('Shift+Enter')
+  await composer.pressSequentially('Second line')
+  await expect(composer).toHaveValue('First line\nSecond line')
+  await expect(composer).toBeFocused()
+  await expect(mainWindow.locator('[data-slot="message"]')).toHaveCount(0)
+})

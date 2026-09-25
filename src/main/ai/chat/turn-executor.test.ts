@@ -295,6 +295,11 @@ describe('TurnExecutor', () => {
     await recorded.terminal
     expect(recorded.events).toEqual([
       { type: 'chunk', requestId: 'request-1', chunk: textChunk },
+      {
+        type: 'chunk',
+        requestId: 'request-1',
+        chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
+      },
       { type: 'finish', requestId: 'request-1' }
     ])
   })
@@ -312,7 +317,11 @@ describe('TurnExecutor', () => {
     await recorded.terminal
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
-      { role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }
+      {
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Hi' }],
+        metadata: { completionState: 'complete' }
+      }
     ])
   })
 
@@ -396,7 +405,11 @@ describe('TurnExecutor', () => {
     await recorded.terminal
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
-      { role: 'assistant', parts: [{ type: 'text', text: 'abcde\u2026' }] }
+      {
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'abcde\u2026' }],
+        metadata: { completionState: 'complete' }
+      }
     ])
     expect(recorded.events).toEqual([
       {
@@ -408,6 +421,11 @@ describe('TurnExecutor', () => {
         type: 'chunk',
         requestId: 'request-1',
         chunk: { type: 'text-delta', id: 'part-1', delta: 'e\u2026' }
+      },
+      {
+        type: 'chunk',
+        requestId: 'request-1',
+        chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
       },
       { type: 'finish', requestId: 'request-1' }
     ])
@@ -436,13 +454,19 @@ describe('TurnExecutor', () => {
     // silently, so the transcript must not retroactively append a truncation marker.
     expect(runtime.loadSession(session.id).messages.at(-1)).toEqual({
       role: 'assistant',
-      parts: [{ type: 'text', text: 'abcdef' }]
+      parts: [{ type: 'text', text: 'abcdef' }],
+      metadata: { completionState: 'complete' }
     })
     expect(recorded.events).toEqual([
       {
         type: 'chunk',
         requestId: 'request-1',
         chunk: { type: 'text-delta', id: 'part-1', delta: 'abcdef' }
+      },
+      {
+        type: 'chunk',
+        requestId: 'request-1',
+        chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
       },
       { type: 'finish', requestId: 'request-1' }
     ])
@@ -464,7 +488,11 @@ describe('TurnExecutor', () => {
     ])
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
-      { role: 'assistant', parts: [{ type: 'text', text: '' }] }
+      {
+        role: 'assistant',
+        parts: [{ type: 'text', text: '' }],
+        metadata: { completionState: 'complete' }
+      }
     ])
   })
 
@@ -519,7 +547,11 @@ describe('TurnExecutor', () => {
     await recorded.terminal
     expect(runtime.loadSession(session.id).messages).toEqual([
       request.userMessage,
-      { role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }
+      {
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Hi' }],
+        metadata: { completionState: 'complete' }
+      }
     ])
   })
 
@@ -759,6 +791,11 @@ describe('TurnExecutor', () => {
         retryDelayMs: 0
       },
       { type: 'chunk', requestId: 'request-1', chunk: textChunk },
+      {
+        type: 'chunk',
+        requestId: 'request-1',
+        chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
+      },
       { type: 'finish', requestId: 'request-1' }
     ])
   })
@@ -942,7 +979,8 @@ describe('TurnExecutor', () => {
         { type: 'text', text: 'Found the entry point.' },
         { type: 'tool-trace', toolCallId: 'call-2', state: 'output-available' },
         { type: 'text', text: 'Done.' }
-      ]
+      ],
+      metadata: { completionState: 'complete' }
     })
   })
 
@@ -1009,7 +1047,8 @@ describe('TurnExecutor', () => {
       parts: [
         { type: 'reasoning', text: 'Visible thought.' },
         { type: 'text', text: 'Done.' }
-      ]
+      ],
+      metadata: { completionState: 'complete' }
     })
   })
 })

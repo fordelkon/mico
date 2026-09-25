@@ -1,47 +1,77 @@
 name: E2E
 
-# Real-provider scenarios make live LLM calls and cost credits, so the suite
-# only runs when manually dispatched with the configured credentials. Without
-# credentials the real-provider spec skips and only the launch smoke runs.
-
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      real_provider:
+        description: Run paid real-provider checks in addition to local regression
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
-  e2e:
-    runs-on: windows-latest
-    environment: e2e
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 11
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-
       - run: pnpm build
+      - run: pnpm test:e2e --project=electron
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.os }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
-      # Credentials reach the tests only through the environment; never echo
-      # them into logs and never pass them to the report upload.
-      - run: pnpm test:e2e
+  real-provider:
+    if: github.event_name == 'workflow_dispatch' && inputs.real_provider
+    runs-on: windows-latest
+    environment: e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test:e2e --project=real-provider
         env:
+          MICO_E2E_REAL_PROVIDER: '1'
           MICO_E2E_API_KEY: ${{ secrets.MICO_E2E_API_KEY }}
           MICO_E2E_OPENAI_BASE_URL: ${{ vars.MICO_E2E_OPENAI_BASE_URL }}
           MICO_E2E_OPENAI_MODEL: ${{ vars.MICO_E2E_OPENAI_MODEL }}
           MICO_E2E_ANTHROPIC_BASE_URL: ${{ vars.MICO_E2E_ANTHROPIC_BASE_URL }}
           MICO_E2E_ANTHROPIC_MODEL: ${{ vars.MICO_E2E_ANTHROPIC_MODEL }}
-
-      - name: Upload failure evidence
+      - name: Upload failure screenshots
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-report
+          name: e2e-real-provider
           path: |
             playwright-report/
             test-results/

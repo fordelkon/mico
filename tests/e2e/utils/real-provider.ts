@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 
-import { expect } from '../fixtures/electron.fixture'
+import { configureProvider } from './provider'
 
 /**
  * Configuration for the optional real-provider profile, following Cherry
@@ -46,41 +46,7 @@ export function isConfigured(endpoint: RealEndpoint): boolean {
   return Boolean(realApiKey && endpoint.baseUrl && endpoint.modelId)
 }
 
-const apiFormatLabels = {
-  'openai-compatible': 'Chat Completions (/chat/completions)',
-  'openai-responses': 'Responses (/responses)',
-  'anthropic-compatible': 'Anthropic Messages (v1/messages)'
-} as const
-
-/**
- * Create, enable, and give a model to a real provider entry — everything the
- * settings UI owns — then return to the chat page.
- */
+/** Keep credentials confined to the opt-in real-provider profile. */
 export async function configureRealProvider(page: Page, endpoint: RealEndpoint): Promise<void> {
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await expect(page.getByRole('heading', { name: 'Ollama' })).toBeVisible()
-  await page.getByRole('button', { name: 'Add custom provider' }).click()
-
-  // The ollama section behind the dialog has its own "Base URL" field, so
-  // scope every dialog field to the dialog itself.
-  const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Provider name').fill(endpoint.providerName)
-  await dialog.getByLabel('Base URL').fill(endpoint.baseUrl)
-  await dialog.getByLabel('API key (optional)').fill(realApiKey)
-
-  if (endpoint.apiFormat !== 'openai-compatible') {
-    // The dialog defaults to Chat Completions; switch the radio for Anthropic.
-    await dialog.getByRole('button', { name: apiFormatLabels['openai-compatible'] }).click()
-    await page.getByRole('menuitemradio', { name: apiFormatLabels[endpoint.apiFormat] }).click()
-  }
-  await dialog.getByRole('button', { name: 'Add Provider' }).click()
-
-  await expect(page.getByRole('heading', { name: endpoint.providerName })).toBeVisible()
-  await page.getByRole('switch', { name: `Enable ${endpoint.providerName}` }).click()
-
-  await page.getByLabel(`Model ID for ${endpoint.providerName}`).fill(endpoint.modelId)
-  await page.getByRole('button', { name: `Add ${endpoint.providerName} model` }).click()
-  await page.getByRole('switch', { name: `Enable ${endpoint.modelId}` }).click()
-
-  await page.getByRole('button', { name: 'Back' }).click()
+  await configureProvider(page, endpoint, realApiKey)
 }

@@ -3,6 +3,10 @@ import { sendUserMessage, selectChatModel } from '../utils/chat'
 import { configureRealProvider, isConfigured, realEndpoints } from '../utils/real-provider'
 
 test.describe('Real provider chat', () => {
+  test.skip(
+    process.env['MICO_E2E_REAL_PROVIDER'] !== '1',
+    'Set MICO_E2E_REAL_PROVIDER=1 to opt into paid endpoint calls'
+  )
   for (const endpoint of realEndpoints) {
     test(`user gets a reply when chatting through the ${endpoint.id} endpoint, then the assistant answers`, async ({
       mainWindow

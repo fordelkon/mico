@@ -1,125 +1,134 @@
 # E2E Testing Guide
 
-End-to-end tests for the Mico Electron application using Playwright. Each test
-launches the built application with an isolated `userData` directory, so tests
-verify complete user outcomes across processes without touching real
-application data.
+Playwright launches the built Electron application with a fresh `userData`
+directory and temporary workspace for every test. Relaunch tests reuse the same
+storage without repeating setup. The fixture closes the application and removes
+its temporary directories even when a scenario fails.
 
-## Directory structure
+## Run
 
-```
-tests/e2e/
-├── README.md                 # This guide
-├── global-setup.ts           # Loads .env; fails fast when the build is missing
-├── fixtures/
-│   └── electron.fixture.ts   # Launch fixture: app (window + relaunch)
-├── utils/
-│   ├── wait-helpers.ts       # App-ready waits
-│   ├── chat.ts               # Model selection and message send helpers
-│   ├── real-provider.ts      # Real endpoint configuration and setup flow
-│   └── index.ts              # Utility exports
-└── specs/                    # Test cases
-    ├── app-launch.spec.ts    # Application launch boundary tests
-    ├── persistence.spec.ts   # Theme and transcript persistence across restart
-    ├── real-provider.spec.ts # Real LLM endpoint profile (skipped without credentials)
-    ├── sessions.spec.ts      # Conversation rename and delete
-    └── workspaces.spec.ts    # Project folder management (stubbed OS dialog)
-```
+Install dependencies with `pnpm install`, then run `pnpm build`. Rebuild after
+application source changes: Electron loads `out/`, not the development server.
 
-## Running tests
+```sh
+# Deterministic local regression; no provider credentials or model charges
+pnpm test:e2e --project=electron
 
-### Prerequisites
-
-1. Install dependencies: `pnpm install`
-2. Build the application: `pnpm build` (the launch fixture loads `out/` via the
-   `main` entry in package.json)
-
-### Commands
-
-```bash
-# Run the e2e suite (the real-provider spec skips without credentials)
+# All projects; real-provider cases skip unless explicitly enabled
 pnpm test:e2e
 
-# Run with visible windows
-pnpm test:e2e --headed
+# Run one scenario file
+pnpm test:e2e --project=electron tests/e2e/specs/tools.spec.ts
 
-# Run a specific test file
-pnpm playwright test tests/e2e/specs/app-launch.spec.ts
-
-# Run in debug mode (pauses execution and opens the inspector)
-pnpm playwright test --debug
-
-# View the test report
+# Interactive debugging and failure report
+pnpm test:e2e --project=electron --debug
 pnpm playwright show-report
 ```
 
-## Writing E2E tests
+Runtime settings have one home in [playwright.config.ts](../../playwright.config.ts).
+Tests run sequentially within each platform. The [E2E workflow](../../.github/workflows/e2e.yml)
+runs local regression on Windows and macOS for pull requests and pushes to main.
+Paid endpoint checks run only on manual dispatch with `real_provider` enabled.
 
-Test design follows [docs/testing.md](../../docs/testing.md): BDD scenario
-titles, real dependencies, fakes only for external systems. Provider chat is
-verified against a real LLM endpoint configured by the user; the reply text is
-model-controlled, so scenarios assert observable outcomes (a streamed
-non-empty assistant message) instead of exact wording.
+## Coverage and ownership
 
-- Import `test` and `expect` from `fixtures/electron.fixture.ts`; the `app`
-  fixture exposes the current `window` and `relaunch()` for restart scenarios
-  (the derived `electronApp`/`mainWindow` fixtures are only valid until a
-  restart).
-- Anchor waits to observable conditions (`utils/wait-helpers.ts`), never to delays.
-- Refer to `playwright.config.ts` in the repository root for runtime settings.
+| Area | Scenarios |
+| --- | --- |
+| Launch and composer | Window opens, editable composer, Shift+Enter preserves an unsent multiline draft |
+| Appearance | Dark theme survives application restart |
+| Chat | Two completed turns, partial stream versus completion, stop then send, provider failure then retry |
+| Persistence | Completed answer and conversation title survive restart |
+| Sessions | Rename and delete remain effective after restart |
+| Workspaces | Add a real temporary directory through the settings flow |
+| Tools | Real file creation, tool result replay, transcript and file after restart, failed file read |
+| Real providers | Optional OpenAI-compatible and Anthropic-compatible completed replies |
 
-## Configuration
+The local regression replaces only the external model with a loopback HTTP server.
+It accepts Chat Completions requests and sends SSE text, held streams, tool calls,
+or errors. The application still uses its real provider adapter, IPC, tool
+execution, filesystem, and database. This validates application behavior; it does
+not establish compatibility with a deployed model endpoint.
 
-`playwright.config.ts` in the repository root:
+- `fixtures/electron.fixture.ts`: Electron lifecycle, isolated storage/workspace,
+  renderer error checks, and failure evidence.
+- `fixtures/local-provider.fixture.ts`: local endpoint lifecycle and model setup
+  through the real provider settings UI.
+- `utils/local-provider.ts`: external protocol boundary; every foreground request
+  consumes an explicitly queued response. Unexpected/malformed requests fail the
+  fixture. Background title requests receive a separate deterministic title.
+- `utils/provider.ts`: shared UI setup for local and real endpoints.
+- `utils/chat.ts`: waits for a new assistant answer and its completed-message
+  action, stopped generation, and restored editability. First text or a tool
+  status alone is not completion.
+- `specs/`: user scenarios; helpers do not register tests.
 
-- `testDir`: `./tests/e2e/specs`
-- `timeout`: 60 seconds per test, 10 seconds per assertion
-- `workers`: 1 (Electron tests run sequentially)
-- `retries`: 2 in CI, 0 locally
+## Writing scenarios
 
-Application-level isolation comes from the `MICO_USER_DATA_DIR` environment
-variable handled in `src/main/main.ts`: it redirects all persistence (databases,
-preferences, workspaces) to a temporary directory, which also scopes the
-single-instance lock so a test instance can run beside the installed app.
+Follow [docs/testing.md](../../docs/testing.md). Test full user outcomes with real
+internal dependencies. Do not inject successful assistant messages or tool
+results through IPC. File scenarios verify bytes in a new temporary workspace in
+addition to visible UI results. The native folder chooser is stubbed only at its
+OS boundary; directory management remains real.
 
-## Real provider credentials
+Queue the next provider response before sending. A held stream is released by an
+explicit test action after checking partial output, not by a sleep. For stop
+scenarios, wait for the HTTP connection to close. Protocol scenarios may assert
+the real application sends the executed tool result back to the provider.
 
-`real-provider.spec.ts` runs against real LLM endpoints and is skipped unless
-credentials are set. The profile follows one shared API key with one base URL
-per protocol: each protocol is a separate provider entry created through the
-settings UI, and a protocol's test runs only when its base URL and model are
-configured, so you can enable one or both. The reply text is model-controlled,
-so scenarios assert observable outcomes (a streamed non-empty assistant
-message) instead of exact wording. The key field is password-masked, so
-failure screenshots never expose it.
+Use `app.window` after `app.relaunch()`; derived `mainWindow` and `electronApp`
+fixtures refer to the previous instance. Scope locators to named regions and
+accessible controls. Existing `data-slot`/test-id boundaries distinguish actual
+assistant body content from reasoning and tool summaries.
 
-### Local setup
+## Failure evidence
 
-Copy the example file and fill in what you need:
+Electron's context is launched outside Playwright's default browser fixture.
+The fixture therefore explicitly records [context traces](https://playwright.dev/docs/api/class-tracing)
+and attaches [screenshots](https://playwright.dev/docs/api/class-testinfo#test-info-attach)
+on failure. Each restart creates a new trace segment; passing-test traces are
+removed. These context traces contain browser actions and snapshots, not the
+runner's full assertion history. Video recording is not configured.
 
-```bash
-cp .env.example .env
-```
+Real-provider scenarios never record traces because action arguments can contain
+credentials. Password entry uses a native input update through evaluation rather
+than `fill(secret)`, whose value Playwright includes in HTML report step titles. Failure screenshots mask password inputs. Renderer exceptions and
+crashes fail scenarios; attached error messages redact the configured API key.
+Keep credentials out of test titles, assertions, and application logs.
 
-`.env` is gitignored and loaded automatically by global setup (real
-environment variables win over `.env` entries). Uncomment the variables and
-set real values:
+## Real provider checks
 
-```bash
-MICO_E2E_API_KEY=...                    # shared across protocols
-MICO_E2E_ANTHROPIC_BASE_URL=https://api.anthropic.com
-MICO_E2E_ANTHROPIC_MODEL=claude-haiku-4-5
+Copy `.env.example` to `.env` and configure one or both protocols. Global setup
+loads `.env`; existing environment values take precedence. Never commit it.
+
+```dotenv
+MICO_E2E_API_KEY=...
 MICO_E2E_OPENAI_BASE_URL=https://api.openai.com/v1
 MICO_E2E_OPENAI_MODEL=gpt-4o-mini
+MICO_E2E_ANTHROPIC_BASE_URL=https://api.anthropic.com
+MICO_E2E_ANTHROPIC_MODEL=claude-haiku-4-5
 ```
 
-Model ids must match what the endpoint actually serves — the spec adds them
-manually instead of discovering them. Real runs cost LLM credits; comment a
-protocol's lines back out to skip it.
+Explicitly opt in when running these cases; they spend provider credits:
 
-### CI
+```sh
+# macOS / Linux
+MICO_E2E_REAL_PROVIDER=1 pnpm test:e2e --project=real-provider
+```
 
-Put the key in repository/environment **secrets** (`MICO_E2E_API_KEY`) and the
-endpoint values in **variables**; the `E2E` workflow passes them to the tests
-and never echoes them into logs. Real-provider runs cost LLM credits, so the
-workflow only runs them when manually dispatched.
+```powershell
+# PowerShell
+$env:MICO_E2E_REAL_PROVIDER = '1'
+pnpm test:e2e --project=real-provider
+Remove-Item Env:MICO_E2E_REAL_PROVIDER
+```
+
+A protocol skips if its key, URL, or model is absent. Replies are model-controlled,
+so real checks assert a nonempty completed assistant answer, not exact wording.
+CI takes the API key from the `e2e` environment secret and endpoint/model settings
+from environment variables in the workflow.
+
+## Remaining coverage
+
+Release-installer validation, real native dialogs, attachments, clipboard actions,
+provider discovery, and broader theme/scrolling regressions are not yet covered by
+this suite. Local protocol tests do not replace real-provider compatibility runs.

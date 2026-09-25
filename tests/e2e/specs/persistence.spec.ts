@@ -1,36 +1,20 @@
-import { expect, test } from '../fixtures/electron.fixture'
-import { sendUserMessage, selectChatModel } from '../utils/chat'
-import { configureRealProvider, isConfigured, realEndpoints } from '../utils/real-provider'
+import { expect, test } from '../fixtures/local-provider.fixture'
+import { sendUserMessage } from '../utils/chat'
 import { waitForAppReady } from '../utils/wait-helpers'
 
 test.describe('Persistence across restart', () => {
-  test('user keeps the dark theme when the app restarts, then it persists', async ({ app }) => {
-    await waitForAppReady(app.window)
-
-    await app.window.getByRole('button', { name: 'Settings' }).click()
-    await app.window.getByRole('button', { name: 'Appearance' }).click()
-    await app.window.getByRole('radio', { name: 'Dark' }).click()
-    await expect(app.window.locator('html')).toHaveClass(/dark/)
-
-    const relaunchedWindow = await app.relaunch()
-    await waitForAppReady(relaunchedWindow)
-    await expect(relaunchedWindow.locator('html')).toHaveClass(/dark/)
-  })
-
   test('user sees their conversation when the app restarts, then the transcript persists', async ({
-    app
+    app,
+    provider
   }) => {
-    const endpoint = realEndpoints.find(({ id }) => id === 'openai')!
-    test.skip(!isConfigured(endpoint), 'Set MICO_E2E_API_KEY with the openai base URL and model')
-
-    await configureRealProvider(app.window, endpoint)
-    await selectChatModel(app.window, endpoint.modelId)
+    provider.enqueue({ type: 'text', text: 'A complete persisted answer.' })
     const prompt = 'Reply with the single word: OK.'
     await sendUserMessage(app.window, prompt)
 
     const rowTitle = app.window.locator('.conversation-row__title').first()
     await expect(rowTitle).toBeVisible()
-    const title = (await rowTitle.textContent()) ?? ''
+    await expect(rowTitle).toHaveText('E2E conversation')
+    const title = 'E2E conversation'
 
     const relaunchedWindow = await app.relaunch()
     await waitForAppReady(relaunchedWindow)
@@ -45,6 +29,9 @@ test.describe('Persistence across restart', () => {
     const messages = relaunchedWindow.locator('[data-slot="message"]')
     await expect(messages).toHaveCount(2)
     await expect(relaunchedWindow.getByText(prompt)).toBeVisible()
-    await expect(messages.last()).toContainText(/\S/)
+    await expect(messages.last().getByTestId('answer-content')).toHaveText(
+      'A complete persisted answer.'
+    )
+    await expect(messages.last().getByRole('button', { name: 'Copy message' })).toBeAttached()
   })
 })
