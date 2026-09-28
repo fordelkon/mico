@@ -1,82 +1,76 @@
 import { readFile, writeFile } from 'node:fs/promises'
-
 import * as z from 'zod'
 
-import {
-  defineAgentTool,
-  emitToolOutputDelta,
-  MAX_EDIT_REPLACEMENTS,
-  type AgentTool
-} from './tool-contract'
+import { defineAgentTool, emitToolOutputDelta } from './tool-contract'
 import { resolveWorkspacePath } from './workspace-path-policy'
 
 const EditInputSchema = z.strictObject({
-  path: z
+  file_path: z
     .string()
     .min(1)
     .max(4_096)
-    .refine((value) => !value.includes('\0')),
-  edits: z
-    .array(z.strictObject({ oldText: z.string().min(1), newText: z.string() }))
+    .refine((value) => !value.includes('\0'))
+    .describe('Path of the file to edit inside the workspace; prefer an absolute path.'),
+  old_string: z
+    .string()
     .min(1)
-    .max(MAX_EDIT_REPLACEMENTS)
+    .describe(
+      'Exact text to replace, including whitespace. Must match uniquely unless replace_all is true.'
+    ),
+  new_string: z
+    .string()
+    .describe(
+      'Replacement text, different from old_string. Use an empty string to delete the matched text.'
+    ),
+  replace_all: z
+    .boolean()
+    .optional()
+    .describe('Replace every occurrence of old_string. Defaults to false.')
 })
-type EditInput = z.infer<typeof EditInputSchema>
-type Replacement = { start: number; end: number; newText: string }
 
-function formatEditPreview(edits: EditInput['edits']): string {
-  return edits
-    .flatMap(({ oldText, newText }) => [
-      ...oldText.split('\n').map((line) => `- ${line}`),
-      ...newText.split('\n').map((line) => `+ ${line}`)
-    ])
-    .join('\n')
-}
-
-function findUniqueReplacement(source: string, oldText: string, newText: string): Replacement {
-  const start = source.indexOf(oldText)
-  if (start < 0 || source.indexOf(oldText, start + 1) >= 0)
-    throw new Error('Each edit oldText must match exactly once.')
-  return { start, end: start + oldText.length, newText }
-}
-
-// No safety annotations: the fail-closed defaults apply (serial, treated as a write).
-function createEditTool(): AgentTool<EditInput> {
+function createEditTool() {
   return defineAgentTool({
-    name: 'edit',
-    description: 'Edit one project file using exact, unique text replacements.',
+    name: 'Edit',
+    description:
+      'Edit an existing workspace file by exact string replacement. Read the file first. Supply file_path, old_string and new_string. Use replace_all only when every occurrence should change. This is not a regex or patch tool; use Write to create a file.',
     inputSchema: EditInputSchema,
-    async validateInput({ edits }) {
-      const noOp = edits.find(({ oldText, newText }) => oldText === newText)
-      if (!noOp) return null
-      return {
-        message:
-          'Edit oldText and newText are identical. Re-read the file and provide an actual change.'
-      }
+    async validateInput({ old_string, new_string }) {
+      return old_string === new_string
+        ? {
+            message:
+              'Edit old_string and new_string are identical. Re-read the file and provide an actual change.'
+          }
+        : null
     },
-    async execute({ path, edits }, context) {
+    async execute({ file_path, old_string, new_string, replace_all = false }, context) {
       context.signal.throwIfAborted()
-      const target = await resolveWorkspacePath(context.cwd, path)
+      const target = await resolveWorkspacePath(context.cwd, file_path)
       const original = await readFile(target, 'utf8')
       const lineEnding = original.includes('\r\n') ? '\r\n' : '\n'
-      const normalized = original.replaceAll('\r\n', '\n')
-      const replacements = edits.map(({ oldText, newText }) =>
-        findUniqueReplacement(normalized, oldText, newText)
-      )
-      const ordered = replacements.toSorted((left, right) => right.start - left.start)
-      for (let index = 1; index < ordered.length; index += 1) {
-        if (ordered[index - 1].start < ordered[index].end)
-          throw new Error('Edit replacements must not overlap.')
-      }
-      let next = normalized
-      for (const replacement of ordered)
-        next = next.slice(0, replacement.start) + replacement.newText + next.slice(replacement.end)
+      const source = original.replaceAll('\r\n', '\n')
+      const before = old_string.replaceAll('\r\n', '\n')
+      const after = new_string.replaceAll('\r\n', '\n')
+      const matches = source.split(before)
+      const count = matches.length - 1
+      if (count === 0)
+        throw new Error(
+          'Edit old_string was not found. Read the file again and copy the exact text to replace.'
+        )
+      if (!replace_all && source.indexOf(before, source.indexOf(before) + 1) >= 0)
+        throw new Error(
+          'Edit old_string must match exactly once. Include more surrounding text, or set replace_all=true to change every occurrence.'
+        )
+      const next = matches.join(after)
       context.signal.throwIfAborted()
-      // Emit only after all exact-match and overlap checks pass, so the preview
-      // never depicts a patch that this tool has already rejected.
-      emitToolOutputDelta(context, { stream: 'preview', delta: formatEditPreview(edits) })
+      emitToolOutputDelta(context, {
+        stream: 'preview',
+        delta: [
+          ...before.split('\n').map((line) => `- ${line}`),
+          ...after.split('\n').map((line) => `+ ${line}`)
+        ].join('\n')
+      })
       await writeFile(target, lineEnding === '\r\n' ? next.replaceAll('\n', '\r\n') : next, 'utf8')
-      return { output: `Successfully replaced ${edits.length} block(s) in ${path}.` }
+      return { output: `Successfully replaced ${count} occurrence(s) in ${file_path}.` }
     }
   })
 }

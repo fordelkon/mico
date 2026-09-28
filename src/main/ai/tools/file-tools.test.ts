@@ -31,7 +31,10 @@ describe('workspace file tools', () => {
     const context = await createContext()
     await writeFile(join(context.cwd, 'a.txt'), 'one\ntwo\nthree\n')
 
-    const result = await createReadTool().execute({ path: 'a.txt', offset: 2, limit: 1 }, context)
+    const result = await createReadTool().execute(
+      { file_path: 'a.txt', offset: 2, limit: 1 },
+      context
+    )
 
     expect(result.output).toBe('two\n\n[More content available. Use offset=3.]')
   })
@@ -40,7 +43,7 @@ describe('workspace file tools', () => {
     const context = await createStreamingContext()
     await writeFile(join(context.cwd, 'a.txt'), 'one\ntwo\nthree\n')
 
-    await createReadTool().execute({ path: 'a.txt', limit: 2 }, context)
+    await createReadTool().execute({ file_path: 'a.txt', limit: 2 }, context)
 
     expect(context.deltas).toEqual([
       { stream: 'preview', delta: 'one\ntwo\n\n[More content available. Use offset=3.]' }
@@ -53,7 +56,7 @@ describe('workspace file tools', () => {
 
     await expect(
       createEditTool().execute(
-        { path: 'a.txt', edits: [{ oldText: 'same', newText: 'new' }] },
+        { file_path: 'a.txt', old_string: 'same', new_string: 'new' },
         context
       )
     ).rejects.toThrow('must match exactly once')
@@ -67,8 +70,8 @@ describe('workspace file tools', () => {
     const result = await registry.execute(
       {
         toolCallId: 'call-noop',
-        toolName: 'edit',
-        input: { path: 'a.txt', edits: [{ oldText: 'unchanged', newText: 'unchanged' }] }
+        toolName: 'Edit',
+        input: { file_path: 'a.txt', old_string: 'unchanged', new_string: 'unchanged' }
       },
       new AbortController().signal
     )
@@ -78,18 +81,34 @@ describe('workspace file tools', () => {
     await expect(readFile(join(cwd, 'a.txt'), 'utf8')).resolves.toBe('unchanged\n')
   })
 
+  it('user edits overlapping matches when replace_all is omitted, then the file stays unchanged', async () => {
+    const context = await createContext()
+    await writeFile(join(context.cwd, 'a.txt'), 'aaa')
+    await expect(
+      createEditTool().execute(
+        {
+          file_path: 'a.txt',
+          old_string: 'aa',
+          new_string: 'b'
+        },
+        context
+      )
+    ).rejects.toThrow('must match exactly once')
+    await expect(readFile(join(context.cwd, 'a.txt'), 'utf8')).resolves.toBe('aaa')
+  })
+
   it('user creates a nested file when writing a new path, then a rewrite replaces it', async () => {
     const context = await createContext()
 
     await expect(
-      createWriteTool().execute({ path: 'nested/a.txt', content: 'ok' }, context)
+      createWriteTool().execute({ file_path: 'nested/a.txt', content: 'ok' }, context)
     ).resolves.toEqual({
       output: 'Created nested/a.txt.'
     })
 
     await expect(readFile(join(context.cwd, 'nested/a.txt'), 'utf8')).resolves.toBe('ok')
     await expect(
-      createWriteTool().execute({ path: 'nested/a.txt', content: 'updated' }, context)
+      createWriteTool().execute({ file_path: 'nested/a.txt', content: 'updated' }, context)
     ).resolves.toEqual({
       output: 'Replaced nested/a.txt.'
     })
@@ -98,7 +117,10 @@ describe('workspace file tools', () => {
   it('user sees the content preview when a write starts, then the write succeeds', async () => {
     const context = await createStreamingContext()
 
-    await createWriteTool().execute({ path: 'nested/a.txt', content: 'const value = 1\n' }, context)
+    await createWriteTool().execute(
+      { file_path: 'nested/a.txt', content: 'const value = 1\n' },
+      context
+    )
 
     expect(context.deltas).toEqual([{ stream: 'preview', delta: 'const value = 1\n' }])
   })
@@ -108,7 +130,7 @@ describe('workspace file tools', () => {
     await writeFile(join(context.cwd, 'a.txt'), 'before\n')
 
     await createEditTool().execute(
-      { path: 'a.txt', edits: [{ oldText: 'before', newText: 'after\nnext' }] },
+      { file_path: 'a.txt', old_string: 'before', new_string: 'after\nnext' },
       context
     )
 

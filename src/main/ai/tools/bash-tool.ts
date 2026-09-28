@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import * as z from 'zod'
 
 import {
-  DEFAULT_BASH_TIMEOUT_SECONDS,
+  DEFAULT_BASH_TIMEOUT_MS,
   defineAgentTool,
   emitToolOutputDelta,
   MAX_BASH_OUTPUT_BYTES,
@@ -19,7 +19,17 @@ const BashInputSchema = z.strictObject({
     .string()
     .min(1)
     .max(64 * 1024),
-  timeout: z.number().positive().finite().max(300).optional()
+  timeout: z
+    .number()
+    .positive()
+    .finite()
+    .optional()
+    .describe('Timeout in milliseconds. Default 120000; capped at 600000.'),
+  description: z.string().optional().describe('Short description of what this command does.'),
+  run_in_background: z
+    .literal(false)
+    .optional()
+    .describe('Only foreground execution is supported. Omit or set false.')
 })
 type BashInput = z.infer<typeof BashInputSchema>
 
@@ -85,7 +95,7 @@ function truncateOutput(output: string): string {
 
 function executeShell(
   command: string,
-  timeoutSeconds: number,
+  timeoutMs: number,
   context: ToolExecutionContext
 ): Promise<string> {
   const { cwd, signal } = context
@@ -118,9 +128,9 @@ function executeShell(
     timeout = setTimeout(() => {
       timedOut = true
       void terminateProcessTree(child).then(() =>
-        settle(() => reject(new Error(`Command timed out after ${timeoutSeconds} seconds`)))
+        settle(() => reject(new Error(`Command timed out after ${timeoutMs} milliseconds`)))
       )
-    }, timeoutSeconds * 1_000)
+    }, timeoutMs)
     // Abort can win the race with OS process creation. Retrying after `spawn`
     // closes that gap; otherwise a Windows taskkill issued before the PID exists
     // succeeds nowhere and the command can outlive the cancelled agent turn.
@@ -189,14 +199,18 @@ async function boundedExit(process: ChildProcess): Promise<void> {
 
 function createBashTool(): AgentTool<BashInput> {
   return defineAgentTool({
-    name: 'bash',
+    name: 'Bash',
     description:
-      'Execute a local shell command starting in the project workspace. This tool is not sandboxed.',
+      'Execute a foreground shell command starting in the project workspace. timeout is in milliseconds. Background tasks are not supported. This tool is not sandboxed.',
     isConcurrencySafe: ({ command }) => isReadOnlyBashCommand(command),
     inputSchema: BashInputSchema,
     async execute({ command, timeout }, context) {
       return {
-        output: await executeShell(command, timeout ?? DEFAULT_BASH_TIMEOUT_SECONDS, context)
+        output: await executeShell(
+          command,
+          Math.min(timeout ?? DEFAULT_BASH_TIMEOUT_MS, 600_000),
+          context
+        )
       }
     }
   })

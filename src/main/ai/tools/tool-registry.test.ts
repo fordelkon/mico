@@ -30,14 +30,14 @@ describe('ToolRegistry', () => {
 
   it('user sees an error when tool input fails validation, then the tool never runs', async () => {
     const result = await (await createRegistry()).execute(
-      { toolCallId: 'call-2', toolName: 'read', input: { path: 1 } },
+      { toolCallId: 'call-2', toolName: 'Read', input: { file_path: 1 } },
       new AbortController().signal
     )
 
     expect(result).toMatchObject({
       type: 'tool-result',
       toolCallId: 'call-2',
-      toolName: 'read',
+      toolName: 'Read',
       isError: true
     })
     expect(result.output).toContain('Invalid tool input.')
@@ -47,14 +47,14 @@ describe('ToolRegistry', () => {
     const registry = await createRegistry()
 
     const result = await registry.execute(
-      { toolCallId: 'call-3', toolName: 'read', input: { path: 'missing.txt' } },
+      { toolCallId: 'call-3', toolName: 'Read', input: { file_path: 'missing.txt' } },
       new AbortController().signal
     )
 
     expect(result).toMatchObject({
       type: 'tool-result',
       toolCallId: 'call-3',
-      toolName: 'read',
+      toolName: 'Read',
       isError: true
     })
     expect(result.output).toContain('ENOENT')
@@ -66,7 +66,7 @@ describe('ToolRegistry', () => {
       [
         {
           toolCallId: 'call-command',
-          toolName: 'bash',
+          toolName: 'Bash',
           input: {
             command:
               "node -e \"const fs=require('node:fs'); if (fs.existsSync('created.txt')) process.exit(1)\""
@@ -74,8 +74,8 @@ describe('ToolRegistry', () => {
         },
         {
           toolCallId: 'call-write',
-          toolName: 'write',
-          input: { path: 'created.txt', content: 'created after command' }
+          toolName: 'Write',
+          input: { file_path: 'created.txt', content: 'created after command' }
         }
       ],
       new AbortController().signal
@@ -94,8 +94,8 @@ describe('ToolRegistry', () => {
 
     const results = await registry.executeBatch(
       [
-        { toolCallId: 'call-slow', toolName: 'read', input: { path: 'big.txt' } },
-        { toolCallId: 'call-fast', toolName: 'read', input: { path: 'small.txt' } }
+        { toolCallId: 'call-slow', toolName: 'Read', input: { file_path: 'big.txt' } },
+        { toolCallId: 'call-fast', toolName: 'Read', input: { file_path: 'small.txt' } }
       ],
       new AbortController().signal
     )
@@ -111,8 +111,8 @@ describe('ToolRegistry', () => {
 
     const results = await registry.executeBatch(
       [
-        { toolCallId: 'call-list', toolName: 'bash', input: { command: 'ls -la' } },
-        { toolCallId: 'call-read', toolName: 'read', input: { path: 'a.txt' } }
+        { toolCallId: 'call-list', toolName: 'Bash', input: { command: 'ls -la' } },
+        { toolCallId: 'call-read', toolName: 'Read', input: { file_path: 'a.txt' } }
       ],
       new AbortController().signal
     )
@@ -125,7 +125,7 @@ describe('ToolRegistry', () => {
     await writeFile(join(cwd, 'preview.txt'), 'preview text')
     const deltas: unknown[] = []
     const result = await ToolRegistry.forWorkspace(cwd).execute(
-      { toolCallId: 'call-preview', toolName: 'read', input: { path: 'preview.txt' } },
+      { toolCallId: 'call-preview', toolName: 'Read', input: { file_path: 'preview.txt' } },
       new AbortController().signal,
       (delta) => deltas.push(delta)
     )
@@ -133,7 +133,7 @@ describe('ToolRegistry', () => {
     expect(deltas).toEqual([
       {
         toolCallId: 'call-preview',
-        toolName: 'read',
+        toolName: 'Read',
         stream: 'preview',
         delta: 'preview text'
       }
@@ -149,8 +149,8 @@ describe('ToolRegistry', () => {
     await registry.execute(
       {
         toolCallId: 'call-large-preview',
-        toolName: 'write',
-        input: { path: 'large.txt', content }
+        toolName: 'Write',
+        input: { file_path: 'large.txt', content }
       },
       new AbortController().signal,
       (delta) => deltas.push(delta.delta)

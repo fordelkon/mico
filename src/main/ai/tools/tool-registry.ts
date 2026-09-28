@@ -11,6 +11,7 @@ import {
   type ToolOutputDelta
 } from './tool-contract'
 import { createWriteTool } from './write-tool'
+import { createGlobTool, createGrepTool } from './search-tool'
 
 type ToolCall = { toolCallId: string; toolName: string; input: ToolInput }
 
@@ -31,6 +32,8 @@ class ToolRegistry {
   static forWorkspace(cwd: string): ToolRegistry {
     return new ToolRegistry(cwd, [
       registerTool(createReadTool()),
+      registerTool(createGlobTool()),
+      registerTool(createGrepTool()),
       registerTool(createEditTool()),
       registerTool(createWriteTool()),
       registerTool(createBashTool())

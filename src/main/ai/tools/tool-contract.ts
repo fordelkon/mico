@@ -5,9 +5,8 @@ import * as z from 'zod'
 const MAX_READ_BYTES = 256 * 1024
 const MAX_READ_LINES = 2_000
 const MAX_WRITE_BYTES = 1024 * 1024
-const MAX_EDIT_REPLACEMENTS = 100
 const MAX_BASH_OUTPUT_BYTES = 256 * 1024
-const DEFAULT_BASH_TIMEOUT_SECONDS = 30
+const DEFAULT_BASH_TIMEOUT_MS = 120_000
 
 /** A bounded, in-progress fragment suitable for the chat's live tool output. */
 type ToolOutputDelta = {
@@ -82,9 +81,8 @@ function defineAgentTool<Input>(tool: AgentToolDefinition<Input>): AgentTool<Inp
  */
 function toProviderInputSchema<Input>(schema: z.ZodType<Input>): JsonObject {
   const { $schema: _omitted, ...jsonSchema } = z.toJSONSchema(schema, { io: 'input' })
-  // SAFETY: z.toJSONSchema emits a JSON-compatible plain object; stripping
-  // $schema leaves exactly the JsonObject shape the provider contract expects.
-  return jsonSchema as JsonObject
+  // SAFETY: z.record(z.string(), z.json()) parsed every value as JSON before this boundary.
+  return z.record(z.string(), z.json()).parse(jsonSchema) as JsonObject
 }
 
 function emitToolOutputDelta(context: ToolExecutionContext, delta: ToolOutputDelta): void {
@@ -141,9 +139,8 @@ function registerTool<Input>(tool: AgentTool<Input>): RegisteredAgentTool {
 }
 
 export {
-  DEFAULT_BASH_TIMEOUT_SECONDS,
+  DEFAULT_BASH_TIMEOUT_MS,
   MAX_BASH_OUTPUT_BYTES,
-  MAX_EDIT_REPLACEMENTS,
   MAX_READ_BYTES,
   MAX_READ_LINES,
   MAX_WRITE_BYTES,

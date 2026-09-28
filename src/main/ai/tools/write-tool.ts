@@ -13,27 +13,31 @@ import {
 import { resolveWorkspacePath } from './workspace-path-policy'
 
 const WriteInputSchema = z.strictObject({
-  path: z
+  file_path: z
     .string()
     .min(1)
     .max(4_096)
-    .refine((value) => !value.includes('\0')),
+    .refine((value) => !value.includes('\0'))
+    .describe(
+      'Path of the file to create or overwrite inside the workspace; prefer an absolute path.'
+    ),
   content: z
     .string()
     .refine((value) => new TextEncoder().encode(value).byteLength <= MAX_WRITE_BYTES)
+    .describe('Complete UTF-8 file content. An empty string creates or clears an empty file.')
 })
 type WriteInput = z.infer<typeof WriteInputSchema>
 
 // No safety annotations: the fail-closed defaults apply (serial, treated as a write).
 function createWriteTool(): AgentTool<WriteInput> {
   return defineAgentTool({
-    name: 'write',
+    name: 'Write',
     description:
-      'Write UTF-8 content to a file in the project workspace. Creates parent directories.',
+      'Create or overwrite a workspace file with complete UTF-8 content. Requires file_path and content. Creates parent directories. Read existing files before overwriting; prefer Edit for targeted replacements.',
     inputSchema: WriteInputSchema,
-    async execute({ path, content }, context) {
+    async execute({ file_path, content }, context) {
       context.signal.throwIfAborted()
-      const target = await resolveWorkspacePath(context.cwd, path, { allowMissing: true })
+      const target = await resolveWorkspacePath(context.cwd, file_path, { allowMissing: true })
       const existed = existsSync(target)
       // This is a preview of the already validated input, not a claim that the
       // file has been written. The final tool result remains the commit signal.
@@ -41,7 +45,7 @@ function createWriteTool(): AgentTool<WriteInput> {
       await mkdir(dirname(target), { recursive: true })
       context.signal.throwIfAborted()
       await writeFile(target, content, 'utf8')
-      return { output: `${existed ? 'Replaced' : 'Created'} ${path}.` }
+      return { output: `${existed ? 'Replaced' : 'Created'} ${file_path}.` }
     }
   })
 }

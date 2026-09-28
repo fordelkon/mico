@@ -12,11 +12,12 @@ import {
 import { resolveWorkspacePath } from './workspace-path-policy'
 
 const ReadInputSchema = z.strictObject({
-  path: z
+  file_path: z
     .string()
     .min(1)
     .max(4_096)
-    .refine((value) => !value.includes('\0')),
+    .refine((value) => !value.includes('\0'))
+    .describe('Path of the UTF-8 text file inside the workspace; prefer an absolute path.'),
   offset: z.number().int().min(1).optional(),
   limit: z.number().int().min(1).max(MAX_READ_LINES).optional()
 })
@@ -24,16 +25,16 @@ type ReadInput = z.infer<typeof ReadInputSchema>
 
 function createReadTool(): AgentTool<ReadInput> {
   return defineAgentTool({
-    name: 'read',
+    name: 'Read',
     description:
       'Read a UTF-8 text file in the project workspace. Use offset and limit for large files.',
     // Pure read with no side effects: always safe to run alongside other reads.
     isConcurrencySafe: () => true,
     isReadOnly: () => true,
     inputSchema: ReadInputSchema,
-    async execute({ path, offset = 1, limit = MAX_READ_LINES }, context) {
+    async execute({ file_path, offset = 1, limit = MAX_READ_LINES }, context) {
       context.signal.throwIfAborted()
-      const target = await resolveWorkspacePath(context.cwd, path)
+      const target = await resolveWorkspacePath(context.cwd, file_path)
       const bytes = await readFile(target)
       if (bytes.byteLength > MAX_READ_BYTES)
         throw new Error(`File is larger than the ${MAX_READ_BYTES / 1024} KiB read limit.`)
