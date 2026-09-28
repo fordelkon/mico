@@ -99,6 +99,8 @@
   position: relative;
   display: grid;
   place-items: center;
+  /* Opaque canvas patch masks the connector line behind the icon; trace rows
+     must not take the ghost hover fill, or the patch shows through it. */
   background: var(--chat-canvas);
   color: var(--text-tertiary);
   z-index: 1;
@@ -173,10 +175,62 @@
   font-size: 0.75rem;
 }
 
-.agent-activity__state {
-  flex: none;
-  margin-left: auto;
-  font-size: 0.6875rem;
+.agent-activity__result {
+  min-width: 0;
+  padding: 0 0.625rem 0.125rem 1.625rem;
+  color: var(--text-tertiary);
+  font-size: 0.75rem;
+}
+
+.agent-activity__result--error {
+  color: var(--destructive);
+}
+
+.agent-activity__result--output pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-activity__result-note {
+  padding-top: 0.125rem;
+  opacity: 0.8;
+}
+
+/* Row nodes share one marker treatment: the icon tints while a step runs and
+   settles once the step is done, replacing status words. */
+.agent-activity__node[data-state="running"] {
+  color: var(--chat-thinking-active-foreground);
+  animation: agent-activity-live-pulse 1.6s ease-in-out infinite;
+}
+
+.agent-activity__node[data-state="error"] {
+  color: var(--destructive);
+}
+
+/* The live thinking label shimmers while the thought streams, like the
+   terminal's animated status word; it settles into a static label once done. */
+.agent-activity__shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--text-tertiary) 0%,
+    var(--chat-thinking-active-foreground) 45%,
+    var(--text-tertiary) 80%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: agent-activity-shimmer 2.4s linear infinite;
+}
+
+@keyframes agent-activity-shimmer {
+  to {
+    background-position: -200% 0;
+  }
 }
 
 .thinking-block__chevron {
@@ -212,31 +266,13 @@
   padding: 0.25rem 0.25rem 0.5rem 0;
 }
 
-.agent-activity__error {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  margin: 0.125rem 0.25rem 0.5rem 1.75rem;
-  padding: 0.5rem 0.625rem;
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--destructive) 6%, transparent);
-  color: var(--destructive);
-  overflow-wrap: anywhere;
-  font-size: 0.75rem;
-}
-
-.agent-activity__error > span {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.thinking-block[data-open="true"] > .agent-activity__error > span {
-  -webkit-line-clamp: unset;
-}
-
 .agent-activity__action + .agent-activity__summary + .thinking-block__chevron {
+  margin-left: auto;
+}
+
+/* Rows without a summary span (thought, read group) still push their chevron
+   to the trailing edge like the tool rows do. */
+.agent-activity__action + .thinking-block__chevron {
   margin-left: auto;
 }
 
@@ -450,6 +486,16 @@
   }
 
   .agent-activity__live-dot::before {
+    animation: none;
+  }
+
+  .agent-activity__node[data-state="running"] {
+    animation: none;
+  }
+
+  .agent-activity__shimmer {
+    background: none;
+    color: var(--text-tertiary);
     animation: none;
   }
 }

@@ -3,7 +3,6 @@ import * as z from 'zod'
 
 import { BashToolTrace } from './bash-tool-trace'
 import { EditToolTrace } from './edit-tool-trace'
-import { ReadToolTrace } from './read-tool-trace'
 import { WriteToolTrace } from './write-tool-trace'
 import { ToolCodePreview } from './tool-code-preview'
 
@@ -105,14 +104,7 @@ function ToolTracePresentationView({
         isTruncated={presentation.isTruncated}
       />
     )
-  if (presentation.type === 'read')
-    return (
-      <ReadToolTrace
-        content={liveOutput?.preview ?? presentation.content}
-        isTruncated={presentation.isTruncated}
-        path={path}
-      />
-    )
+  if (presentation.type === 'read') return <></>
   if (presentation.type === 'write')
     return (
       <WriteToolTrace

@@ -68,8 +68,10 @@ describe('ThinkingBlock', () => {
       'Inspecting the request. Reading files.'
     )
   })
+})
 
-  it('user sees a write summarized in its trace, then file contents stay hidden when expanded', () => {
+describe('ToolTrace', () => {
+  it('user sees a write summarized in its result line, then file contents stay hidden when expanded', () => {
     render(
       <ToolTrace
         part={{
@@ -83,14 +85,17 @@ describe('ThinkingBlock', () => {
       />
     )
 
-    const write = screen.getByRole('button', { name: 'Write src/index.ts Created' })
+    const write = screen.getByRole('button', {
+      name: 'Write src/index.ts Wrote 1 line to src/index.ts.'
+    })
+    expect(screen.getByText('Wrote 1 line to src/index.ts.')).toBeVisible()
     fireEvent.click(write)
     expect(screen.getByText('File created')).toBeVisible()
     expect(screen.getByText('1 line')).toBeVisible()
     expect(screen.queryByText('private implementation details')).not.toBeInTheDocument()
   })
 
-  it('user sees edits as a file diff when expanding the trace, then both versions are shown', () => {
+  it('user sees edits summarized as line counts, then both diff versions show when expanded', () => {
     render(
       <ToolTrace
         part={{
@@ -104,7 +109,10 @@ describe('ThinkingBlock', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit 1 changes src/index.ts Updated' }))
+    const edit = screen.getByRole('button', {
+      name: 'Update src/index.ts Added 1 line, removed 1 line.'
+    })
+    fireEvent.click(edit)
     expect(screen.getByText('Applied change 1')).toBeVisible()
     expect(screen.getByText('File changes')).toBeVisible()
     const diff = screen.getByRole('log', { name: 'File diff' })
@@ -112,26 +120,7 @@ describe('ThinkingBlock', () => {
     expect(diff).toHaveTextContent('after')
   })
 
-  it('user sees structured bash output when the tool returns an object, then it is not marked unavailable', () => {
-    render(
-      <ToolTrace
-        part={{
-          type: 'dynamic-tool',
-          toolCallId: 'call-2',
-          toolName: 'bash',
-          state: 'output-available',
-          input: { command: 'pnpm test' },
-          output: { output: '12 tests passed' }
-        }}
-      />
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /Run pnpm test/ }))
-    expect(screen.getByText('12 tests passed')).toBeVisible()
-    expect(screen.queryByText('Output is unavailable.')).not.toBeInTheDocument()
-  })
-
-  it('user sees command and output paired when expanding a bash call, then both render', () => {
+  it('user sees the bash output head in the result line when the call completes, then the terminal pairs it with the command', () => {
     render(
       <ToolTrace
         part={{
@@ -139,21 +128,21 @@ describe('ThinkingBlock', () => {
           toolCallId: 'call-3',
           toolName: 'bash',
           state: 'output-available',
-          input: { command: 'printf first\\nprintf second' },
+          input: { command: 'printf first\nprintf second' },
           output: 'first\nsecond'
         }}
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Run printf first/ }))
+    expect(screen.getByText('first')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /Bash printf first/ }))
     expect(screen.getByText('Command')).toBeVisible()
     expect(screen.getByText('Output')).toBeVisible()
     const outputBlock = screen.getAllByTestId('code-block').at(-1)
-    expect(outputBlock).toHaveTextContent('first')
     expect(outputBlock).toHaveTextContent('second')
   })
 
-  it('user sees live tool deltas when the tool runs, then the code block marks them streaming', () => {
+  it('user sees live tool deltas when the tool runs, then the result line streams the output tail', () => {
     render(
       <ToolTrace
         part={{
@@ -167,17 +156,15 @@ describe('ThinkingBlock', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Run pnpm test/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Bash pnpm test 12 tests passed' }))
     const output = screen
       .getAllByTestId('code-block')
       .find((block) => block.getAttribute('data-state') === 'streaming')
     expect(output).toHaveAttribute('data-state', 'streaming')
-    expect(screen.getByText('12 tests passed')).toBeVisible()
+    expect(screen.getAllByText('12 tests passed').length).toBeGreaterThan(0)
     expect(screen.getByText('Standard error')).toBeVisible()
     expect(screen.getByText('warning: cached')).toBeVisible()
-    expect(screen.getByRole('button', { name: /Run pnpm test Streaming output/ })).toBeVisible()
     expect(screen.getAllByRole('log')).toHaveLength(1)
-    expect(screen.queryByText('Writing')).not.toBeInTheDocument()
   })
 
   it('user sees a draft write preview when the operation is incomplete, then it shows Preparing file', () => {
@@ -193,12 +180,12 @@ describe('ThinkingBlock', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Write src/index.ts Writing file' })).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Write src/index.ts Writing file' }))
+    expect(screen.getByRole('button', { name: 'Write src/index.ts Writing file…' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Write src/index.ts Writing file…' }))
     expect(screen.getByText('Preparing file')).toBeVisible()
   })
 
-  it('user sees a read preview pending when reading is unfinished, then no completed read appears', () => {
+  it('user sees a read as a single summary line when it runs, then no panel competes with it', () => {
     render(
       <ToolTrace
         part={{
@@ -211,13 +198,27 @@ describe('ThinkingBlock', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toBeVisible()
-    expect(screen.queryByText('Reading file…')).not.toBeInTheDocument()
-    expect(screen.queryByText('File read')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Reading file…')).toBeVisible()
+    expect(screen.getByText('(src/index.ts)')).toBeVisible()
+  })
+
+  it('user sees a completed read counted in lines when the header stays compact, then no panel appears', () => {
+    render(
+      <ToolTrace
+        part={{
+          type: 'dynamic-tool',
+          toolCallId: 'read-done-1',
+          toolName: 'read',
+          state: 'output-available',
+          input: { path: 'src/index.ts' },
+          output: 'export {}\nexport const done = true\n[More content available.]'
+        }}
+      />
     )
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Read 2 lines.')).toBeVisible()
   })
 
   it('user leaves tool details closed when the run completes, then they remain closed', () => {
@@ -229,17 +230,36 @@ describe('ThinkingBlock', () => {
     }
     const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
 
-    expect(screen.getByRole('button', { name: /Run pnpm test Running/ })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Bash pnpm test Running…' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
 
     rerender(<ToolTrace part={{ ...part, state: 'output-available', output: 'Tests passed' }} />)
 
-    expect(screen.getByRole('button', { name: /Run pnpm test Completed/ })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Bash pnpm test Tests passed' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
+  })
+
+  it('user sees a failed mutation refuse its proposal when the row renders, then the error names the recovery', () => {
+    render(
+      <ToolTrace
+        part={{
+          type: 'dynamic-tool',
+          toolCallId: 'edit-failed-1',
+          toolName: 'edit',
+          state: 'output-error',
+          input: { path: 'index.ts', edits: [{ oldText: 'old', newText: 'new' }] },
+          errorText: 'Could not edit index.ts.\nRead the file and try again.'
+        }}
+      />
+    )
+
+    expect(screen.getByText('Could not edit index.ts.')).toBeVisible()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByText('old')).not.toBeInTheDocument()
   })
 })
 
@@ -279,7 +299,7 @@ describe('AgentActivityTimeline', () => {
       'aria-expanded',
       'false'
     )
-    expect(screen.getByRole('button', { name: 'Run cat package.json Running' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Bash cat package.json Running…' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
@@ -297,11 +317,11 @@ describe('AgentActivityTimeline', () => {
       <AgentActivityTimeline id="step-batch" isStreaming parts={[bash('call-1'), bash('call-2')]} />
     )
 
-    expect(screen.getByRole('button', { name: 'Run run call-1 Running' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Bash run call-1 Running…' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
-    expect(screen.getByRole('button', { name: 'Run run call-2 Running' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Bash run call-2 Running…' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )
@@ -384,18 +404,80 @@ describe('AgentActivityTimeline', () => {
 
     fireEvent.click(activity)
 
-    const read = screen.getByRole('button', { name: 'Read src/index.ts Read' })
-    const run = screen.getByRole('button', { name: 'Run pnpm test Completed' })
-    fireEvent.click(read)
+    expect(screen.getByText('Read 1 line.')).toBeVisible()
+    const run = screen.getByRole('button', { name: 'Bash pnpm test Tests passed' })
     fireEvent.click(run)
 
-    expect(read).toHaveAttribute('aria-expanded', 'true')
     expect(run).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('File read')).toBeVisible()
-    expect(screen.getByText('1 line')).toBeVisible()
-    expect(screen.queryByText('export {}')).not.toBeInTheDocument()
     expect(screen.getByText('Output')).toBeVisible()
-    expect(screen.getByText('Tests passed')).toBeVisible()
+    expect(screen.getAllByText('Tests passed').length).toBeGreaterThan(0)
+  })
+})
+
+describe('Read group collapsing', () => {
+  it('user collapses consecutive reads into one group line when two arrive together, then expands to the individual traces', () => {
+    render(
+      <AgentActivityTimeline
+        id="group"
+        isStreaming={false}
+        parts={[
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'read-a',
+            toolName: 'read',
+            state: 'output-available',
+            input: { path: 'a.ts' },
+            output: 'one'
+          },
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'read-b',
+            toolName: 'read',
+            state: 'output-available',
+            input: { path: 'b.ts' },
+            output: 'two\nlines'
+          }
+        ]}
+      />
+    )
+
+    const activity = screen.getByRole('button', { name: 'Agent activity: 2 tool calls' })
+    fireEvent.click(activity)
+
+    const group = screen.getByRole('button', { name: 'Read 2 files' })
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('b.ts')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Read a.ts Read 1 line.' })).not.toBeInTheDocument()
+
+    fireEvent.click(group)
+
+    // Individual completed reads stay single-line rows: no buttons, only summaries.
+    expect(screen.getByText('Read 1 line.')).toBeVisible()
+    expect(screen.getByText('Read 2 lines.')).toBeVisible()
+    expect(screen.getByText('(a.ts)')).toBeVisible()
+    expect(screen.getByText('(b.ts)')).toBeVisible()
+  })
+
+  it('user sees a lone read keep its own invocation header when only one arrives, then no group wraps it', () => {
+    render(
+      <AgentActivityTimeline
+        id="lone-read"
+        isStreaming={false}
+        parts={[
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'read-only',
+            toolName: 'read',
+            state: 'output-available',
+            input: { path: 'a.ts' },
+            output: 'one'
+          }
+        ]}
+      />
+    )
+
+    expect(screen.queryByRole('button', { name: 'Read 1 file' })).not.toBeInTheDocument()
+    expect(screen.getByText('Read 1 line.')).toBeVisible()
   })
 })
 
@@ -438,11 +520,11 @@ describe('Activity disclosure and outcomes', () => {
       input: { command: 'pnpm test' }
     }
     const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
-    const trigger = screen.getByRole('button', { name: 'Run pnpm test Running' })
+    const trigger = screen.getByRole('button', { name: 'Bash pnpm test Running…' })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(trigger)
     rerender(<ToolTrace part={{ ...part, state: 'output-available', output: 'Tests passed' }} />)
-    expect(screen.getByRole('button', { name: 'Run pnpm test Completed' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Bash pnpm test Tests passed' })).toHaveAttribute(
       'aria-expanded',
       'true'
     )
@@ -490,11 +572,11 @@ describe('Activity disclosure and outcomes', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Agent activity: 1 tool call · 1 not completed' })
     )
-    expect(screen.getByRole('button', { name: 'Run pnpm test Not completed' })).toBeVisible()
-    expect(screen.queryByText('Completed')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Bash pnpm test Not completed.' })).toBeVisible()
+    expect(screen.queryByText('Completed.')).not.toBeInTheDocument()
   })
 
-  it('user sees parallel tools when the newest call finishes, then earlier running work stays identified', () => {
+  it('user sees parallel reads collapse when the newest call finishes, then the group line runs', () => {
     render(
       <AgentActivityTimeline
         id="parallel"
@@ -521,6 +603,7 @@ describe('Activity disclosure and outcomes', () => {
     expect(
       screen.getByRole('button', { name: 'Agent activity: Reading package.json' })
     ).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Reading 2 files…' })).toBeVisible()
   })
 })
 
@@ -537,7 +620,7 @@ describe('Unfinished tool details', () => {
         }}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Run pnpm test Running' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Bash pnpm test Running…' }))
     expect(screen.getByText(/printf finished/)).toBeVisible()
   })
 
@@ -554,7 +637,7 @@ describe('Unfinished tool details', () => {
         }}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Write index.ts Not completed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Write index.ts Not completed.' }))
     expect(screen.getByText('Write not confirmed')).toBeVisible()
     expect(screen.queryByText('Preparing file')).not.toBeInTheDocument()
     expect(screen.queryByText('File written')).not.toBeInTheDocument()
@@ -573,7 +656,7 @@ describe('Unfinished tool details', () => {
         }}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Edit 1 changes index.ts Not completed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Update index.ts Not completed.' }))
     expect(screen.getByText('Changes not confirmed')).toBeVisible()
     expect(screen.getByText('Proposed change 1')).toBeVisible()
     expect(screen.queryByText('Applying changes')).not.toBeInTheDocument()

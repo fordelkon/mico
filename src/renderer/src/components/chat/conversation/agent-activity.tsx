@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon, CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ThinkingTrace } from './tools/thinking-trace'
+import { ToolTraceGroup } from './tools/trace-group'
 import {
   getToolActivityState,
   getToolActivityLabel,
@@ -13,6 +14,32 @@ import {
 } from './tools/tool-trace'
 
 type AgentActivityPart = ReasoningUIPart | ToolActivityPart
+
+// Consecutive read calls collapse into one group line; any other part breaks the
+// group, matching Claude Code's read-group collapsing.
+type TimelineSegment =
+  | { kind: 'group'; parts: ToolActivityPart[] }
+  | { kind: 'single'; part: AgentActivityPart }
+
+function toTimelineSegments(parts: AgentActivityPart[]): TimelineSegment[] {
+  const segments: TimelineSegment[] = []
+  for (const part of parts) {
+    if (part.type === 'dynamic-tool' && part.toolName === 'read') {
+      const last = segments.at(-1)
+      if (last?.kind === 'group') last.parts.push(part)
+      else segments.push({ kind: 'group', parts: [part] })
+    } else {
+      segments.push({ kind: 'single', part })
+    }
+  }
+  // A lone read keeps its own invocation header; only runs of two or more
+  // collapse into a group line.
+  return segments.map((segment) =>
+    segment.kind === 'group' && segment.parts.length === 1
+      ? { kind: 'single', part: segment.parts[0] }
+      : segment
+  )
+}
 
 function AgentLoadingIndicator(): React.JSX.Element {
   return (
@@ -84,7 +111,7 @@ function AgentActivityTimeline({
         aria-label={`Agent activity: ${label}`}
         aria-controls={contentId}
         aria-expanded={expanded}
-        className="agent-activity__header"
+        className="agent-activity__header hover:bg-transparent hover:text-text-secondary aria-expanded:bg-transparent aria-expanded:text-text-secondary"
         variant="ghost"
         onClick={(event) => {
           setAnimateDisclosure(event.detail > 0)
@@ -116,20 +143,28 @@ function AgentActivityTimeline({
           inert={!expanded}
           role="list"
         >
-          {parts.map((part, index) => (
+          {toTimelineSegments(parts).map((segment, index) => (
             <div
               className="agent-activity__item"
-              key={part.type === 'dynamic-tool' ? part.toolCallId : `${id}-${index}`}
+              key={
+                segment.kind === 'group'
+                  ? `group-${segment.parts[0]?.toolCallId}`
+                  : segment.part.type === 'dynamic-tool'
+                    ? segment.part.toolCallId
+                    : `${id}-${index}`
+              }
               role="listitem"
             >
-              {part.type === 'reasoning' ? (
+              {segment.kind === 'group' ? (
+                <ToolTraceGroup isLive={isLive} parts={segment.parts} />
+              ) : segment.part.type === 'reasoning' ? (
                 <ThinkingTrace
                   id={`${id}-${index}`}
-                  isStreaming={isLive && part.state === 'streaming'}
-                  text={part.text}
+                  isStreaming={isLive && segment.part.state === 'streaming'}
+                  text={segment.part.text}
                 />
               ) : (
-                <ToolTrace isActive={isLive} part={part} />
+                <ToolTrace isActive={isLive} part={segment.part} />
               )}
             </div>
           ))}

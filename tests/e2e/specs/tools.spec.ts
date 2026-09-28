@@ -51,7 +51,9 @@ test('user asks for a file when a workspace is selected, then the file and tool 
     .getByRole('button', { name: 'E2E conversation', exact: true })
     .click()
   await app.window.getByRole('button', { name: 'Agent activity: 1 tool call', exact: true }).click()
-  await app.window.getByRole('button', { name: 'Write result.txt Created', exact: true }).click()
+  await app.window
+    .getByRole('button', { name: 'Write result.txt Wrote 1 line to result.txt.', exact: true })
+    .click()
   await expect(app.window.getByText('File created', { exact: true })).toBeVisible()
   await expect(assistantMessages(app.window).last().getByTestId('answer-content')).toHaveText(
     'Created result.txt in the workspace.'
@@ -78,10 +80,9 @@ test('user sees a failed file read when the tool cannot find it, then the error 
   await expect(activity).toBeVisible()
   // A live group stays open; reopen only when restored/mounted as historical content.
   if ((await activity.getAttribute('aria-expanded')) === 'false') await activity.click()
-  await expect(
-    app.window.getByRole('button', { name: /Read missing-e2e-file.txt Failed/ })
-  ).toBeVisible()
-  await expect(app.window.locator('.agent-activity__error')).toContainText(
+  // A failed read has no panel: its invocation header and error line are the whole row.
+  await expect(app.window.getByText('(missing-e2e-file.txt)', { exact: true })).toBeVisible()
+  await expect(app.window.locator('.agent-activity__result--error')).toContainText(
     /missing-e2e-file|exist|ENOENT/i
   )
 })

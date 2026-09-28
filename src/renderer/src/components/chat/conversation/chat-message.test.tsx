@@ -282,10 +282,8 @@ describe('ChatMessage', () => {
       'aria-expanded',
       'false'
     )
-    expect(screen.getByRole('button', { name: 'Read src/index.ts Reading file' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
+    expect(screen.getByText('Reading file…')).toBeVisible()
+    expect(screen.getByText('(src/index.ts)')).toBeVisible()
   })
 
   it('user sees a completed tool compacted when reasoning follows, then its details collapse', () => {
@@ -314,7 +312,7 @@ describe('ChatMessage', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Run printf sequence Completed' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Bash printf sequence sequence' })).toHaveAttribute(
       'aria-expanded',
       'false'
     )

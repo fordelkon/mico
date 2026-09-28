@@ -8,7 +8,9 @@ type ThinkingTraceProps = {
   text: string
 }
 
-/** A reasoning trace owns streamed text and disclosure; the transcript owns scrolling. */
+/** A reasoning trace owns streamed text and disclosure; the transcript owns scrolling.
+ * Like Claude Code's collapsed thinking, the header never summarizes: the label
+ * shimmers while thinking, and the full thought opens after it settles. */
 function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX.Element | null {
   // The reasoning part's own lifecycle state gates isStreaming upstream, so the
   // label follows the reasoning-end chunk instead of list position.
@@ -32,7 +34,7 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
         aria-label={label}
         aria-controls={text ? contentId : undefined}
         aria-expanded={text ? expanded : undefined}
-        className="agent-activity__trigger"
+        className="agent-activity__trigger hover:bg-transparent hover:text-text-secondary aria-expanded:bg-transparent aria-expanded:text-text-secondary"
         {...(text ? { variant: 'ghost' as const } : {})}
         onClick={(event) => {
           if (!text) return
@@ -40,15 +42,12 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
           setExpanded((current) => !current)
         }}
       >
-        <span className="agent-activity__node">
+        <span className="agent-activity__node" data-state={isThinking ? 'running' : undefined}>
           <BrainIcon aria-hidden="true" className="size-3.5" />
         </span>
-        <span className="agent-activity__action">{label}</span>
-        {text ? (
-          <span className="agent-activity__summary" title={text}>
-            {text}
-          </span>
-        ) : null}
+        <span className={isThinking ? 'agent-activity__shimmer' : 'agent-activity__action'}>
+          {label}
+        </span>
         {text ? (
           <span aria-hidden="true" className="thinking-block__chevron">
             <ChevronDownIcon className="size-3.5" />
