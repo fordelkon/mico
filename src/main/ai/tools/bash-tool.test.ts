@@ -2,7 +2,7 @@ import { realpath } from 'node:fs/promises'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createBashTool } from './bash-tool'
+import { createBashTool, isReadOnlyBashCommand } from './bash-tool'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('bash tool', () => {
@@ -117,5 +117,23 @@ describe('bash tool', () => {
     controller.abort()
 
     await expect(pending).rejects.toThrow('Command aborted')
+  })
+
+  it('user requests a read-only command when every segment only reads, then it is classified safe', () => {
+    expect(isReadOnlyBashCommand('ls -la')).toBe(true)
+    expect(isReadOnlyBashCommand('cat a.md && grep pattern b.md')).toBe(true)
+    expect(isReadOnlyBashCommand('git status')).toBe(true)
+  })
+
+  it('user requests a mutating command when it writes, redirects, or pushes, then it is classified unsafe', () => {
+    expect(isReadOnlyBashCommand('rm -rf build/')).toBe(false)
+    expect(isReadOnlyBashCommand('ls; rm x')).toBe(false)
+    expect(isReadOnlyBashCommand('echo hi > f.txt')).toBe(false)
+    expect(isReadOnlyBashCommand('git push')).toBe(false)
+  })
+
+  it('user requests an unclassifiable command when it cannot be parsed into segments, then it fails closed to unsafe', () => {
+    expect(isReadOnlyBashCommand('ls |')).toBe(false)
+    expect(isReadOnlyBashCommand('node script.js')).toBe(false)
   })
 })

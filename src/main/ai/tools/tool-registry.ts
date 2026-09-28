@@ -78,33 +78,38 @@ class ToolRegistry {
     }
   }
 
+  /**
+   * Executes calls in submission order. Consecutive concurrency-safe calls
+   * merge into one parallel batch; a call classified unsafe (per its input,
+   * fail-closed) breaks the run and executes alone, so the next call observes
+   * its effects. Results always come back indexed by submission order.
+   */
   async executeBatch(
     calls: readonly ToolCall[],
     signal: AbortSignal,
     onOutputDelta?: (delta: ToolOutputDeltaData) => void
   ): Promise<ChatProviderToolResultPart[]> {
     const results: ChatProviderToolResultPart[] = []
-    let parallel: Array<Promise<void>> = []
-
-    const drainParallel = async (): Promise<void> => {
-      await Promise.all(parallel)
-      parallel = []
-    }
-
-    for (const [index, call] of calls.entries()) {
-      signal.throwIfAborted()
-      const run = async (): Promise<void> => {
-        results[index] = await this.execute(call, signal, onOutputDelta)
+    for (const batch of partitionCalls(calls, (call) => this.isConcurrencySafe(call))) {
+      if (batch.isConcurrencySafe) {
+        signal.throwIfAborted()
+        await Promise.all(
+          batch.calls.map(async (call) => {
+            results[call.index] = await this.execute(call.toolCall, signal, onOutputDelta)
+          })
+        )
+      } else {
+        for (const { index, toolCall } of batch.calls) {
+          signal.throwIfAborted()
+          results[index] = await this.execute(toolCall, signal, onOutputDelta)
+        }
       }
-      if (this.#tools.get(call.toolName)?.executionMode === 'parallel-safe') {
-        parallel.push(run())
-        continue
-      }
-      await drainParallel()
-      await run()
     }
-    await drainParallel()
     return results
+  }
+
+  private isConcurrencySafe(call: ToolCall): boolean {
+    return this.#tools.get(call.toolName)?.isConcurrencySafe(call.input) ?? false
   }
 
   private errorResult(call: ToolCall, output: string): ChatProviderToolResultPart {
@@ -116,6 +121,24 @@ class ToolRegistry {
       type: 'tool-result'
     }
   }
+}
+
+type PartitionedCall = { index: number; toolCall: ToolCall }
+type Batch = { isConcurrencySafe: boolean; calls: PartitionedCall[] }
+
+/** Greedy, order-preserving: consecutive safe calls merge; an unsafe call breaks the run. */
+function partitionCalls(
+  calls: readonly ToolCall[],
+  isConcurrencySafe: (call: ToolCall) => boolean
+): Batch[] {
+  return calls.reduce((batches: Batch[], toolCall, index) => {
+    const safe = isConcurrencySafe(toolCall)
+    const call = { index, toolCall }
+    const last = batches.at(-1)
+    if (safe && last?.isConcurrencySafe) last.calls.push(call)
+    else batches.push({ isConcurrencySafe: safe, calls: [call] })
+    return batches
+  }, [])
 }
 
 export { ToolRegistry, type ToolCall }

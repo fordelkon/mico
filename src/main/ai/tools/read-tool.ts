@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import * as z from 'zod'
 
 import {
+  defineAgentTool,
   emitToolOutputDelta,
   MAX_READ_BYTES,
   MAX_READ_LINES,
@@ -10,7 +11,7 @@ import {
 } from './tool-contract'
 import { resolveWorkspacePath } from './workspace-path-policy'
 
-const ReadInputSchema = z.object({
+const ReadInputSchema = z.strictObject({
   path: z
     .string()
     .min(1)
@@ -22,23 +23,13 @@ const ReadInputSchema = z.object({
 type ReadInput = z.infer<typeof ReadInputSchema>
 
 function createReadTool(): AgentTool<ReadInput> {
-  return {
-    definition: {
-      name: 'read',
-      description:
-        'Read a UTF-8 text file in the project workspace. Use offset and limit for large files.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          path: { type: 'string' },
-          offset: { type: 'integer', minimum: 1 },
-          limit: { type: 'integer', minimum: 1, maximum: MAX_READ_LINES }
-        },
-        required: ['path'],
-        additionalProperties: false
-      }
-    },
-    executionMode: 'parallel-safe',
+  return defineAgentTool({
+    name: 'read',
+    description:
+      'Read a UTF-8 text file in the project workspace. Use offset and limit for large files.',
+    // Pure read with no side effects: always safe to run alongside other reads.
+    isConcurrencySafe: () => true,
+    isReadOnly: () => true,
     inputSchema: ReadInputSchema,
     async execute({ path, offset = 1, limit = MAX_READ_LINES }, context) {
       context.signal.throwIfAborted()
@@ -63,7 +54,7 @@ function createReadTool(): AgentTool<ReadInput> {
       emitToolOutputDelta(context, { stream: 'preview', delta: output })
       return { output }
     }
-  }
+  })
 }
 
 export { createReadTool }

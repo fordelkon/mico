@@ -84,6 +84,42 @@ describe('ToolRegistry', () => {
     expect(results.map((result) => result.isError)).toEqual([false, false])
   })
 
+  it('user gets results in submission order when a slow read runs with a fast read, then order is preserved', async () => {
+    const cwd = await createTemporaryWorkspace('mico-tool-registry-')
+    // The first read moves the most bytes, so completion order alone would
+    // put it last; batching must keep results aligned with the requests.
+    await writeFile(join(cwd, 'big.txt'), 'x'.repeat(200 * 1024))
+    await writeFile(join(cwd, 'small.txt'), 'small')
+    const registry = ToolRegistry.forWorkspace(cwd)
+
+    const results = await registry.executeBatch(
+      [
+        { toolCallId: 'call-slow', toolName: 'read', input: { path: 'big.txt' } },
+        { toolCallId: 'call-fast', toolName: 'read', input: { path: 'small.txt' } }
+      ],
+      new AbortController().signal
+    )
+
+    expect(results.map((result) => result.toolCallId)).toEqual(['call-slow', 'call-fast'])
+    expect(results.map((result) => result.isError)).toEqual([false, false])
+  })
+
+  it('user batches a read-only command with a read when both are concurrency-safe, then both results arrive', async () => {
+    const cwd = await createTemporaryWorkspace('mico-tool-registry-')
+    await writeFile(join(cwd, 'a.txt'), 'content')
+    const registry = ToolRegistry.forWorkspace(cwd)
+
+    const results = await registry.executeBatch(
+      [
+        { toolCallId: 'call-list', toolName: 'bash', input: { command: 'ls -la' } },
+        { toolCallId: 'call-read', toolName: 'read', input: { path: 'a.txt' } }
+      ],
+      new AbortController().signal
+    )
+
+    expect(results.map((result) => result.isError)).toEqual([false, false])
+  })
+
   it('user sees live output attributed when a tool streams, then the result is intact', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'preview.txt'), 'preview text')

@@ -2,17 +2,22 @@ import { readFile, writeFile } from 'node:fs/promises'
 
 import * as z from 'zod'
 
-import { emitToolOutputDelta, MAX_EDIT_REPLACEMENTS, type AgentTool } from './tool-contract'
+import {
+  defineAgentTool,
+  emitToolOutputDelta,
+  MAX_EDIT_REPLACEMENTS,
+  type AgentTool
+} from './tool-contract'
 import { resolveWorkspacePath } from './workspace-path-policy'
 
-const EditInputSchema = z.object({
+const EditInputSchema = z.strictObject({
   path: z
     .string()
     .min(1)
     .max(4_096)
     .refine((value) => !value.includes('\0')),
   edits: z
-    .array(z.object({ oldText: z.string().min(1), newText: z.string() }))
+    .array(z.strictObject({ oldText: z.string().min(1), newText: z.string() }))
     .min(1)
     .max(MAX_EDIT_REPLACEMENTS)
 })
@@ -35,30 +40,20 @@ function findUniqueReplacement(source: string, oldText: string, newText: string)
   return { start, end: start + oldText.length, newText }
 }
 
+// No safety annotations: the fail-closed defaults apply (serial, treated as a write).
 function createEditTool(): AgentTool<EditInput> {
-  return {
-    definition: {
-      name: 'edit',
-      description: 'Edit one project file using exact, unique text replacements.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          path: { type: 'string' },
-          edits: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: { oldText: { type: 'string' }, newText: { type: 'string' } },
-              required: ['oldText', 'newText'],
-              additionalProperties: false
-            }
-          }
-        },
-        required: ['path', 'edits'],
-        additionalProperties: false
+  return defineAgentTool({
+    name: 'edit',
+    description: 'Edit one project file using exact, unique text replacements.',
+    inputSchema: EditInputSchema,
+    async validateInput({ edits }) {
+      const noOp = edits.find(({ oldText, newText }) => oldText === newText)
+      if (!noOp) return null
+      return {
+        message:
+          'Edit oldText and newText are identical. Re-read the file and provide an actual change.'
       }
     },
-    inputSchema: EditInputSchema,
     async execute({ path, edits }, context) {
       context.signal.throwIfAborted()
       const target = await resolveWorkspacePath(context.cwd, path)
@@ -83,7 +78,7 @@ function createEditTool(): AgentTool<EditInput> {
       await writeFile(target, lineEnding === '\r\n' ? next.replaceAll('\n', '\r\n') : next, 'utf8')
       return { output: `Successfully replaced ${edits.length} block(s) in ${path}.` }
     }
-  }
+  })
 }
 
 export { createEditTool }

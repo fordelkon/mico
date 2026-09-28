@@ -4,10 +4,15 @@ import { dirname } from 'node:path'
 
 import * as z from 'zod'
 
-import { emitToolOutputDelta, MAX_WRITE_BYTES, type AgentTool } from './tool-contract'
+import {
+  defineAgentTool,
+  emitToolOutputDelta,
+  MAX_WRITE_BYTES,
+  type AgentTool
+} from './tool-contract'
 import { resolveWorkspacePath } from './workspace-path-policy'
 
-const WriteInputSchema = z.object({
+const WriteInputSchema = z.strictObject({
   path: z
     .string()
     .min(1)
@@ -19,19 +24,12 @@ const WriteInputSchema = z.object({
 })
 type WriteInput = z.infer<typeof WriteInputSchema>
 
+// No safety annotations: the fail-closed defaults apply (serial, treated as a write).
 function createWriteTool(): AgentTool<WriteInput> {
-  return {
-    definition: {
-      name: 'write',
-      description:
-        'Write UTF-8 content to a file in the project workspace. Creates parent directories.',
-      inputSchema: {
-        type: 'object',
-        properties: { path: { type: 'string' }, content: { type: 'string' } },
-        required: ['path', 'content'],
-        additionalProperties: false
-      }
-    },
+  return defineAgentTool({
+    name: 'write',
+    description:
+      'Write UTF-8 content to a file in the project workspace. Creates parent directories.',
     inputSchema: WriteInputSchema,
     async execute({ path, content }, context) {
       context.signal.throwIfAborted()
@@ -45,7 +43,7 @@ function createWriteTool(): AgentTool<WriteInput> {
       await writeFile(target, content, 'utf8')
       return { output: `${existed ? 'Replaced' : 'Created'} ${path}.` }
     }
-  }
+  })
 }
 
 export { createWriteTool }

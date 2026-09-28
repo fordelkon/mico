@@ -7,13 +7,14 @@ import * as z from 'zod'
 
 import {
   DEFAULT_BASH_TIMEOUT_SECONDS,
+  defineAgentTool,
   emitToolOutputDelta,
   MAX_BASH_OUTPUT_BYTES,
   type AgentTool,
   type ToolExecutionContext
 } from './tool-contract'
 
-const BashInputSchema = z.object({
+const BashInputSchema = z.strictObject({
   command: z
     .string()
     .min(1)
@@ -21,6 +22,41 @@ const BashInputSchema = z.object({
   timeout: z.number().positive().finite().max(300).optional()
 })
 type BashInput = z.infer<typeof BashInputSchema>
+
+// Segments classified by their leading program. A compound command is
+// read-only only when EVERY segment is in the read sets (or the neutral set,
+// whose members have no side effects but do not make a command a read).
+// Anything unclassifiable — including any redirect — fails closed to serial.
+const BASH_SEARCH_SEGMENTS = new Set(['grep', 'rg', 'find', 'fd'])
+const BASH_READ_SEGMENTS = new Set(['cat', 'head', 'tail', 'wc', 'jq', 'file', 'stat'])
+const BASH_LIST_SEGMENTS = new Set(['ls', 'tree', 'du', 'df'])
+const BASH_NEUTRAL_SEGMENTS = new Set(['echo', 'printf'])
+// git is writable overall, but these read-only subcommands are common in agent turns.
+const BASH_GIT_READ_SUBCOMMANDS = new Set(['status', 'log', 'diff', 'show', 'ls-files'])
+
+/**
+ * Concurrency-safety classification for a bash command. Splitting is plain and
+ * conservative: quoted operators over-split, which lands unknown segments in
+ * the serial bucket — a performance loss, never a safety one.
+ */
+function isReadOnlyBashCommand(command: string): boolean {
+  // Any redirect writes, wherever it appears in a segment.
+  if (/[<>]/.test(command)) return false
+  const segments = command.split(/&&|\|\||[;|\n]/)
+  return segments.every((segment) => {
+    const program = segment.trim().split(/\s+/).filter(Boolean)[0]
+    if (!program) return false
+    if (BASH_SEARCH_SEGMENTS.has(program)) return true
+    if (BASH_READ_SEGMENTS.has(program)) return true
+    if (BASH_LIST_SEGMENTS.has(program)) return true
+    if (BASH_NEUTRAL_SEGMENTS.has(program)) return true
+    if (program === 'git') {
+      const subcommand = segment.trim().split(/\s+/).filter(Boolean)[1]
+      return subcommand !== undefined && BASH_GIT_READ_SUBCOMMANDS.has(subcommand)
+    }
+    return false
+  })
+}
 type ShellConfig = { executable: string; arguments: string[] }
 
 /**
@@ -152,28 +188,18 @@ async function boundedExit(process: ChildProcess): Promise<void> {
 }
 
 function createBashTool(): AgentTool<BashInput> {
-  return {
-    definition: {
-      name: 'bash',
-      description:
-        'Execute a local shell command starting in the project workspace. This tool is not sandboxed.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          command: { type: 'string' },
-          timeout: { type: 'number', exclusiveMinimum: 0, maximum: 300 }
-        },
-        required: ['command'],
-        additionalProperties: false
-      }
-    },
+  return defineAgentTool({
+    name: 'bash',
+    description:
+      'Execute a local shell command starting in the project workspace. This tool is not sandboxed.',
+    isConcurrencySafe: ({ command }) => isReadOnlyBashCommand(command),
     inputSchema: BashInputSchema,
     async execute({ command, timeout }, context) {
       return {
         output: await executeShell(command, timeout ?? DEFAULT_BASH_TIMEOUT_SECONDS, context)
       }
     }
-  }
+  })
 }
 
-export { createBashTool }
+export { createBashTool, isReadOnlyBashCommand }

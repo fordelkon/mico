@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createEditTool } from './edit-tool'
 import { createReadTool } from './read-tool'
+import { ToolRegistry } from './tool-registry'
 import { createWriteTool } from './write-tool'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
@@ -56,6 +57,25 @@ describe('workspace file tools', () => {
         context
       )
     ).rejects.toThrow('must match exactly once')
+  })
+
+  it('user gets a recovery hint when an edit changes nothing, then the tool refuses before writing', async () => {
+    const cwd = await createTemporaryWorkspace('mico-file-tool-')
+    await writeFile(join(cwd, 'a.txt'), 'unchanged\n')
+    const registry = ToolRegistry.forWorkspace(cwd)
+
+    const result = await registry.execute(
+      {
+        toolCallId: 'call-noop',
+        toolName: 'edit',
+        input: { path: 'a.txt', edits: [{ oldText: 'unchanged', newText: 'unchanged' }] }
+      },
+      new AbortController().signal
+    )
+
+    expect(result).toMatchObject({ isError: true })
+    expect(result.output).toContain('Re-read the file and provide an actual change.')
+    await expect(readFile(join(cwd, 'a.txt'), 'utf8')).resolves.toBe('unchanged\n')
   })
 
   it('user creates a nested file when writing a new path, then a rewrite replaces it', async () => {
