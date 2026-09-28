@@ -859,8 +859,8 @@ describe('TurnExecutor', () => {
             {
               type: 'tool-input-available',
               toolCallId: 'call-1',
-              toolName: 'read',
-              input: { path: 'package.json', limit: 1 }
+              toolName: 'Read',
+              input: { file_path: 'package.json', limit: 1 }
             } as UIMessageChunk
           ])
         : streamFrom([{ type: 'text-delta', id: 'answer', delta: 'Done' }])
@@ -878,7 +878,7 @@ describe('TurnExecutor', () => {
         {
           type: 'tool-trace',
           toolCallId: 'call-1',
-          toolName: 'read',
+          toolName: 'Read',
           input: { path: 'package.json' },
           state: 'output-available',
           output: 'Read 1 line.'
@@ -903,8 +903,8 @@ describe('TurnExecutor', () => {
         {
           type: 'tool-input-available',
           toolCallId: `call-${agentRequests}`,
-          toolName: 'read',
-          input: { path: 'package.json', limit: 1 }
+          toolName: 'Read',
+          input: { file_path: 'package.json', limit: 1 }
         } as UIMessageChunk
       ])
     }, runtime)
@@ -947,8 +947,8 @@ describe('TurnExecutor', () => {
           {
             type: 'tool-input-available',
             toolCallId: 'call-1',
-            toolName: 'read',
-            input: { path: 'package.json', limit: 1 }
+            toolName: 'Read',
+            input: { file_path: 'package.json', limit: 1 }
           } as UIMessageChunk
         ])
       if (agentRequests === 2)
@@ -958,8 +958,8 @@ describe('TurnExecutor', () => {
           {
             type: 'tool-input-available',
             toolCallId: 'call-2',
-            toolName: 'read',
-            input: { path: 'package.json', limit: 1 }
+            toolName: 'Read',
+            input: { file_path: 'package.json', limit: 1 }
           } as UIMessageChunk
         ])
       return streamFrom([{ type: 'text-delta', id: 'final', delta: 'Done.' }])

@@ -27,18 +27,26 @@ const RequestSchema = z.object({
 type ProviderRequest = z.infer<typeof RequestSchema>
 const ToolInputSchema = z.record(z.string(), z.json())
 type CompletionDelta = {
+  reasoning_content?: string
   content?: string
   tool_calls?: Array<{
     index: number
-    id: string
-    type: 'function'
-    function: { name: string; arguments: string }
+    id?: string
+    type?: 'function'
+    function: { name?: string; arguments: string }
   }>
 }
 type Reply =
   | { type: 'text'; text: string; hold?: boolean }
   | { type: 'error'; status: number }
-  | { type: 'tool'; name: string; input: z.infer<typeof ToolInputSchema>; id: string }
+  | {
+      type: 'tool'
+      name: string
+      input: z.infer<typeof ToolInputSchema>
+      id: string
+      reasoning?: string
+      holdArguments?: boolean
+    }
 
 function writeChunk(
   response: ServerResponse,
@@ -61,6 +69,7 @@ export async function startLocalProvider() {
     received: (request: ProviderRequest) => void
     closed: () => void
     response?: ServerResponse
+    finishArguments?: () => void
   }> = []
   const errors: string[] = []
   const server = createServer((request, response) => {
@@ -97,18 +106,33 @@ export async function startLocalProvider() {
       }
       response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
       if (entry.reply.type === 'tool') {
+        if (entry.reply.reasoning)
+          writeChunk(response, { reasoning_content: entry.reply.reasoning })
         writeChunk(response, {
           tool_calls: [
             {
               index: 0,
               id: entry.reply.id,
               type: 'function',
-              function: { name: entry.reply.name, arguments: JSON.stringify(entry.reply.input) }
+              function: { name: entry.reply.name, arguments: '' }
             }
           ]
         })
-        writeChunk(response, {}, 'tool_calls')
-        response.end('data: [DONE]\n\n')
+        const argumentsText = JSON.stringify(entry.reply.input)
+        const prefix = argumentsText.slice(0, -1)
+        for (let offset = 0; offset < prefix.length; offset += 7) {
+          writeChunk(response, {
+            tool_calls: [{ index: 0, function: { arguments: prefix.slice(offset, offset + 7) } }]
+          })
+        }
+        entry.finishArguments = () => {
+          writeChunk(response, {
+            tool_calls: [{ index: 0, function: { arguments: argumentsText.slice(-1) } }]
+          })
+          writeChunk(response, {}, 'tool_calls')
+          response.end('data: [DONE]\n\n')
+        }
+        if (!entry.reply.holdArguments) entry.finishArguments()
       } else {
         writeChunk(response, { content: entry.reply.text })
         if (!entry.reply.hold) finish(response)
@@ -139,6 +163,10 @@ export async function startLocalProvider() {
       return {
         received: received.promise,
         closed: closed.promise,
+        finishArguments() {
+          if (!entry.finishArguments) throw new Error('No tool argument stream to finish.')
+          entry.finishArguments()
+        },
         finish(text = '') {
           const response = entry.response
           if (!response || response.destroyed)

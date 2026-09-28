@@ -110,8 +110,8 @@ describe('ToolAgentRunner', () => {
         {
           type: 'tool-input-available',
           toolCallId: 'call-1',
-          toolName: 'read',
-          input: { path: 'a.txt' }
+          toolName: 'Read',
+          input: { file_path: 'a.txt' }
         } as UIMessageChunk
       ],
       [{ type: 'text-delta', id: 'answer', delta: 'done' }]
@@ -123,7 +123,7 @@ describe('ToolAgentRunner', () => {
 
     expect(result.displaySequence).toEqual([
       { type: 'reasoning', text: 'Read the file first.' },
-      { type: 'tool-call', toolCallId: 'call-1', toolName: 'read' },
+      { type: 'tool-call', toolCallId: 'call-1', toolName: 'Read' },
       { type: 'text', textId: 'answer', text: 'done' }
     ])
   })
@@ -141,20 +141,20 @@ describe('ToolAgentRunner', () => {
           {
             type: 'tool-input-start',
             toolCallId: 'call-1',
-            toolName: 'read'
+            toolName: 'Read'
           } as UIMessageChunk,
           // SAFETY: this fixture continues the preceding documented dynamic-tool input stream.
           {
             type: 'tool-input-delta',
             toolCallId: 'call-1',
-            inputTextDelta: '{"path":"a.txt"}'
+            inputTextDelta: '{"file_path":"a.txt"}'
           } as UIMessageChunk,
           // SAFETY: this fixture completes the preceding documented dynamic-tool input stream.
           {
             type: 'tool-input-available',
             toolCallId: 'call-1',
-            toolName: 'read',
-            input: { path: 'a.txt' }
+            toolName: 'Read',
+            input: { file_path: 'a.txt' }
           } as UIMessageChunk
         ],
         [{ type: 'text-delta', id: 'answer', delta: 'done' }]
@@ -175,31 +175,29 @@ describe('ToolAgentRunner', () => {
       {
         type: 'tool-input-start',
         toolCallId: 'call-1',
-        toolName: 'read',
+        toolName: 'Read',
         dynamic: true
       },
       {
         type: 'tool-input-delta',
         toolCallId: 'call-1',
-        inputTextDelta: '{"path":"a.txt"}'
+        inputTextDelta: '{"file_path":"a.txt"}'
       },
       {
         type: 'tool-input-available',
         toolCallId: 'call-1',
-        toolName: 'read',
-        input: { path: 'a.txt' },
+        toolName: 'Read',
+        input: { file_path: 'a.txt' },
         dynamic: true
       },
       {
         type: 'data-tool-output-delta',
-        id: 'call-1',
         data: {
           toolCallId: 'call-1',
-          toolName: 'read',
+          toolName: 'Read',
           stream: 'preview',
           delta: 'contents'
-        },
-        transient: true
+        }
       },
       {
         type: 'tool-output-available',
@@ -225,8 +223,8 @@ describe('ToolAgentRunner', () => {
           {
             type: 'tool-call',
             toolCallId: 'call-1',
-            toolName: 'read',
-            argumentsJson: '{"path":"a.txt"}'
+            toolName: 'Read',
+            argumentsJson: '{"file_path":"a.txt"}'
           }
         ]
       },
@@ -236,7 +234,7 @@ describe('ToolAgentRunner', () => {
           {
             type: 'tool-result',
             toolCallId: 'call-1',
-            toolName: 'read',
+            toolName: 'Read',
             output: 'contents',
             isError: false
           }
@@ -258,8 +256,8 @@ describe('ToolAgentRunner', () => {
             ({
               type: 'tool-input-available',
               toolCallId: `call-${index}`,
-              toolName: 'read',
-              input: { path: `file-${index}.txt` }
+              toolName: 'Read',
+              input: { file_path: `file-${index}.txt` }
             }) as UIMessageChunk
         ),
         [{ type: 'text-delta', id: 'answer', delta: 'Best effort answer.' }]
@@ -291,8 +289,8 @@ describe('ToolAgentRunner', () => {
           {
             type: 'tool-input-available',
             toolCallId: 'call-large',
-            toolName: 'read',
-            input: { path: 'large.txt', limit: 2_000 }
+            toolName: 'Read',
+            input: { file_path: 'large.txt', limit: 2_000 }
           } as UIMessageChunk
         ],
         [{ type: 'text-delta', id: 'answer', delta: 'done' }]
@@ -331,8 +329,8 @@ describe('ToolAgentRunner', () => {
         {
           type: 'tool-input-available',
           toolCallId: 'call-1',
-          toolName: 'read',
-          input: { path: 'a.txt' }
+          toolName: 'Read',
+          input: { file_path: 'a.txt' }
         } as UIMessageChunk
       ],
       []
@@ -348,8 +346,8 @@ describe('ToolAgentRunner', () => {
     expect(traces).toHaveLength(1)
     expect(traces[0]).toMatchObject({
       toolCallId: 'call-1',
-      toolName: 'read',
-      input: { path: 'a.txt' },
+      toolName: 'Read',
+      input: { file_path: 'a.txt' },
       output: 'contents',
       isError: false
     })
@@ -363,8 +361,8 @@ describe('ToolAgentRunner', () => {
         {
           type: 'tool-input-available',
           toolCallId: 'call-1',
-          toolName: 'read',
-          input: { path: 'a.txt' }
+          toolName: 'Read',
+          input: { file_path: 'a.txt' }
         } as UIMessageChunk
       ]
     ])
@@ -456,7 +454,7 @@ async function* streamWithCompletedToolCall(
   yield {
     type: 'tool-input-available',
     toolCallId: 'call-streaming',
-    toolName: 'bash',
+    toolName: 'Bash',
     input: { command }
   } as UIMessageChunk
   events.push('stream-complete')
