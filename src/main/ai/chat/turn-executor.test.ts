@@ -888,8 +888,8 @@ describe('TurnExecutor', () => {
     })
   })
 
-  it('user sees the step limit recorded when the model never finishes, then the failure names the budget', async () => {
-    const { database, runtime, session } = await createSession('Project chat', {
+  it('user runs a long task when tools need many rounds, then the final answer is saved', async () => {
+    const { runtime, session } = await createSession('Project chat', {
       projectId: 'project-1',
       cwd: process.cwd()
     })
@@ -898,6 +898,8 @@ describe('TurnExecutor', () => {
     const service = createConfiguredExecutor(async (input) => {
       if (isTitleStream(input)) return streamFrom([])
       agentRequests += 1
+      if (agentRequests === 31)
+        return streamFrom([{ type: 'text-delta', id: 'final', delta: 'All work completed.' }])
       return streamFrom([
         // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
         {
@@ -915,13 +917,13 @@ describe('TurnExecutor', () => {
     )
     await recorded.terminal
 
-    // SAFETY: runs stores exactly the failure_json column written by finishRun.
-    const run = database.connection
-      .prepare('SELECT failure_json FROM runs WHERE session_id = ?')
-      .get(session.id) as { failure_json: string } | undefined
-    expect(JSON.parse(run?.failure_json ?? '{}')).toEqual({
-      code: 'step_limit',
-      message: 'The agent reached its model step limit before producing a final answer.'
+    expect(agentRequests).toBe(31)
+    expect(recorded.events.some((event) => event.type === 'error')).toBe(false)
+    expect(recorded.events.at(-1)?.type).toBe('finish')
+    expect(runtime.loadSession(session.id).messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: expect.arrayContaining([{ type: 'text', text: 'All work completed.' }]),
+      metadata: { completionState: 'complete' }
     })
   })
 

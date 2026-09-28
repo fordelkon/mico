@@ -16,14 +16,8 @@ import type { ToolExecutionTrace } from './tool-contract'
 import { AgentBudgetError } from '../chat/turn-failure'
 import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
 
-// MODEL_STEP is one provider.stream() request. The final step is reserved for
-// a text answer, so this budget bounds model cost without cutting off a turn.
-const MAX_MODEL_STEPS = 24
-// TOOL_CALL is one executed side effect. All calls emitted by one model step
-// form a tool round and are accepted or rejected as a single batch.
-const MAX_TOOL_CALLS = 64
 // OUTPUT_TOKEN_RECOVERY is a model-only continuation after a length stop; it is
-// intentionally separate from tool and model-step budgets.
+// bounded independently of successful tool rounds.
 const MAX_OUTPUT_TOKEN_RECOVERIES = 1
 // TOOL_RESULT_HISTORY_BYTES bounds one tool result before it enters the next
 // provider request. It does not affect the complete result persisted for UI.
@@ -31,8 +25,6 @@ const MAX_TOOL_RESULT_HISTORY_BYTES = 64 * 1024
 const TOOL_RESULT_TRUNCATION_MARKER = '\n\n[Tool output shortened for model context.]\n\n'
 const OUTPUT_TOKEN_RECOVERY_MESSAGE =
   'Output token limit hit. Resume directly from where you stopped. Do not apologize or recap.'
-const TOOL_BUDGET_EXHAUSTED_MESSAGE =
-  'Tool execution budget reached. Use the completed observations and provide your best final answer without calling more tools.'
 
 type ToolAgentRunnerInput = {
   provider: ChatProvider
@@ -107,22 +99,19 @@ class ToolAgentRunner {
   }> {
     let history = [...messages]
     let assistantText = ''
-    let callCount = 0
     let outputTokenRecoveries = 0
     let toolRoundCount = 0
-    let mustFinish = false
     const displaySequence: AgentDisplayPart[] = []
-    for (let modelStep = 1; modelStep <= MAX_MODEL_STEPS; modelStep += 1) {
+    // Interactive tasks continue until the model finishes, the user cancels, or a
+    // real failure occurs. Successful tool use must not silently remove capabilities.
+    for (;;) {
       signal.throwIfAborted()
       const request = {
         messages: history,
         thinkingEffort,
         signal
       }
-      // Reserve the final model step for a text response. Tool rounds are bounded by
-      // model steps, while a separate call budget limits side effects.
-      if (registry && !mustFinish && modelStep < MAX_MODEL_STEPS)
-        Object.assign(request, { tools: registry.definitions })
+      if (registry) Object.assign(request, { tools: registry.definitions })
       const stream = await provider.stream(request)
       const calls: ToolCall[] = []
       const parts: Array<
@@ -244,23 +233,19 @@ class ToolAgentRunner {
       }
       if (!registry) throw new Error('The model requested a tool outside a project session.')
       toolRoundCount += 1
-      const exceedsCallBudget = callCount + calls.length > MAX_TOOL_CALLS
       const executionStartedAt = Date.now()
-      const rawResults = exceedsCallBudget
-        ? calls.map((call) => toolBudgetExceededResult(call))
-        : await registry.executeBatch(calls, signal, (delta) => {
-            // The renderer reads message parts, so each delta must append there.
-            // A shared id would replace earlier deltas; transient parts only reach
-            // onData. Durable history still stores the completed tool trace.
-            const parsed = ToolOutputDeltaDataSchema.safeParse(delta)
-            if (!parsed.success) return
-            emit({
-              type: 'data-tool-output-delta',
-              data: parsed.data
-            })
-          })
+      const rawResults = await registry.executeBatch(calls, signal, (delta) => {
+        // The renderer reads message parts, so each delta must append there.
+        // A shared id would replace earlier deltas; transient parts only reach
+        // onData. Durable history still stores the completed tool trace.
+        const parsed = ToolOutputDeltaDataSchema.safeParse(delta)
+        if (!parsed.success) return
+        emit({
+          type: 'data-tool-output-delta',
+          data: parsed.data
+        })
+      })
       const executionFinishedAt = Date.now()
-      if (!exceedsCallBudget) callCount += calls.length
       const results = rawResults.map(boundToolResultForHistory)
       onStep?.({ index: toolRoundCount, assistant: replayAssistant, toolResults: results })
       for (const [index, result] of rawResults.entries()) {
@@ -285,28 +270,7 @@ class ToolAgentRunner {
           parts: results
         }
       ]
-      if (exceedsCallBudget) {
-        mustFinish = true
-        history.push({
-          role: 'user',
-          parts: [{ type: 'text', text: TOOL_BUDGET_EXHAUSTED_MESSAGE }]
-        })
-      }
     }
-    throw new AgentBudgetError(
-      'step_limit',
-      'The agent reached its model step limit before producing a final answer.'
-    )
-  }
-}
-
-function toolBudgetExceededResult(call: ToolCall): Awaited<ReturnType<ToolRegistry['execute']>> {
-  return {
-    type: 'tool-result',
-    toolCallId: call.toolCallId,
-    toolName: call.toolName,
-    output: TOOL_BUDGET_EXHAUSTED_MESSAGE,
-    isError: true
   }
 }
 

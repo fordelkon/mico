@@ -243,39 +243,72 @@ describe('ToolAgentRunner', () => {
     ])
   })
 
-  it('user still gets an answer when the tool budget is hit, then tools are dropped', async () => {
+  it('user needs many tool rounds when a task is long, then it completes with tools available throughout', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-runner-')
+    await writeFile(join(cwd, 'a.txt'), 'contents')
     const requests: ChatProviderStreamInput[] = []
-    const emitted: UIMessageChunk[] = []
-    const provider = createScriptedProvider(
-      [
-        // SAFETY: every generated fixture is a complete documented tool-input-available UI chunk.
-        Array.from(
-          { length: 65 },
-          (_, index) =>
-            ({
-              type: 'tool-input-available',
-              toolCallId: `call-${index}`,
-              toolName: 'Read',
-              input: { file_path: `file-${index}.txt` }
-            }) as UIMessageChunk
-        ),
-        [{ type: 'text-delta', id: 'answer', delta: 'Best effort answer.' }]
-      ],
-      requests
+    const turns: ProviderStreamPart[][] = Array.from({ length: 30 }, (_, round) =>
+      Array.from({ length: 3 }, (_, index) => ({
+        type: 'tool-input-available',
+        toolCallId: `call-${round}-${index}`,
+        toolName: 'Read',
+        input: { file_path: 'a.txt' },
+        dynamic: true
+      }))
     )
+    turns.push([{ type: 'text-delta', id: 'answer', delta: 'Finished the task.' }])
+    const emitted: UIMessageChunk[] = []
 
     const result = await new ToolAgentRunner().run(
-      createRunInput(provider, 'Inspect every file.', {
+      createRunInput(createScriptedProvider(turns, requests), 'Inspect the project.', {
         registry: ToolRegistry.forWorkspace(cwd),
         emit: (chunk) => emitted.push(chunk)
       })
     )
 
-    expect(result.assistantText).toBe('Best effort answer.')
-    expect(requests).toHaveLength(2)
-    expect(requests[1]?.tools).toBeUndefined()
-    expect(emitted.filter((chunk) => chunk.type === 'tool-output-error')).toHaveLength(65)
+    expect(result.assistantText).toBe('Finished the task.')
+    expect(requests).toHaveLength(31)
+    expect(requests.every((input) => input.tools?.some((tool) => tool.name === 'Read'))).toBe(true)
+    expect(emitted.filter((chunk) => chunk.type === 'tool-output-available')).toHaveLength(90)
+    expect(requests.at(-1)?.messages.filter((message) => message.role === 'tool')).toHaveLength(30)
+  })
+
+  it('user stops a long tool loop when cancelling, then no further request starts', async () => {
+    const cwd = await createTemporaryWorkspace('mico-tool-runner-')
+    await writeFile(join(cwd, 'a.txt'), 'contents')
+    const controller = new AbortController()
+    const requests: ChatProviderStreamInput[] = []
+    const provider = createScriptedProvider(
+      [
+        [
+          {
+            type: 'tool-input-available',
+            toolCallId: 'read',
+            toolName: 'Read',
+            input: { file_path: 'a.txt' },
+            dynamic: true
+          }
+        ]
+      ],
+      requests
+    )
+    let completed = 0
+
+    await expect(
+      new ToolAgentRunner().run(
+        createRunInput(provider, 'Keep inspecting.', {
+          registry: ToolRegistry.forWorkspace(cwd),
+          signal: controller.signal,
+          onToolResult: () => {
+            completed += 1
+            if (completed === 30) controller.abort(new Error('Stopped by user.'))
+          }
+        })
+      )
+    ).rejects.toThrow('Stopped by user.')
+
+    expect(completed).toBe(30)
+    expect(requests).toHaveLength(30)
   })
 
   it('user keeps model context small when tool output is huge, then it is bounded', async () => {
