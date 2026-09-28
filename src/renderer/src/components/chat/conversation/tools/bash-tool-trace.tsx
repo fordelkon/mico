@@ -47,6 +47,14 @@ function BashToolTrace({
         <SquareTerminalIcon aria-hidden="true" className="size-3.5 shrink-0 text-text-tertiary" />
         <span className="shrink-0 font-medium text-foreground">Command</span>
       </div>
+      {command ? (
+        <pre className="tool-trace__command m-0 max-h-32 overflow-auto border-b border-border-subtle px-3 py-2 font-mono text-xs leading-5 text-foreground">
+          <span aria-hidden="true" className="select-none text-text-tertiary">
+            ${' '}
+          </span>
+          {command}
+        </pre>
+      ) : null}
       <div
         aria-label="Terminal output"
         aria-live="off"
@@ -63,17 +71,9 @@ function BashToolTrace({
         role="log"
       >
         <div ref={contentRef}>
-          {command ? (
-            <div className="whitespace-pre-wrap break-all border-b border-border-subtle px-2.5 py-1.5 font-mono text-xs text-text-secondary">
-              <span aria-hidden="true" className="select-none text-text-tertiary">
-                $
-              </span>
-              {command}
-            </div>
-          ) : null}
           <div className="border-b border-border-subtle last:border-b-0">
             <ChatCodeBlock
-              code={output}
+              code={output || (isStreaming ? 'Waiting for output…' : 'No output.')}
               isStreaming={isStreaming}
               language="text"
               outputLabel="Output"

@@ -290,7 +290,7 @@ describe('useChatWorkspaceState', () => {
               {
                 type: 'tool-trace' as const,
                 toolCallId: 'call-1',
-                toolName: 'read',
+                toolName: 'Read',
                 input: { path: 'package.json' },
                 state: 'output-available' as const,
                 output: 'Read 1 line.'
@@ -309,7 +309,7 @@ describe('useChatWorkspaceState', () => {
         {
           type: 'dynamic-tool',
           toolCallId: 'call-1',
-          toolName: 'read',
+          toolName: 'Read',
           input: { path: 'package.json' },
           state: 'output-available',
           output: 'Read 1 line.'

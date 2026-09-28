@@ -11,9 +11,16 @@ type ChatReasoningPart = {
   text: string
   providerMetadata?: ProviderMetadata
 }
-type ChatToolTraceInput = { command?: string; editCount?: number; path?: string }
+type ChatToolTraceInput = {
+  command?: string
+  editCount?: number
+  path?: string
+  query?: string
+  mode?: 'files' | 'content'
+  glob?: string
+}
 type ChatToolTracePresentation =
-  | { content: string; isTruncated: boolean; type: 'bash' | 'read' }
+  | { content: string; isTruncated: boolean; type: 'bash' | 'read' | 'search' }
   | {
       content: string
       isTruncated: boolean
@@ -117,6 +124,9 @@ const ChatReasoningPartSchema: z.ZodType<ChatReasoningPart> = defineSchema(
 )
 const ChatToolTraceInputSchema: z.ZodType<ChatToolTraceInput> = defineSchema(
   z.object({
+    query: z.string().min(1).max(512).optional(),
+    mode: z.enum(['files', 'content']).optional(),
+    glob: z.string().min(1).max(512).optional(),
     command: z.string().trim().min(1).max(240).optional(),
     editCount: z.number().int().positive().max(100).optional(),
     path: z.string().trim().min(1).max(4_096).optional()
@@ -128,7 +138,7 @@ const isBoundedToolPresentationText = (text: string): boolean =>
 const ChatToolTracePresentationSchema: z.ZodType<ChatToolTracePresentation> = defineSchema(
   z.discriminatedUnion('type', [
     z.object({
-      type: z.enum(['bash', 'read']),
+      type: z.enum(['bash', 'read', 'search']),
       content: z.string().refine(isBoundedToolPresentationText),
       isTruncated: z.boolean()
     }),

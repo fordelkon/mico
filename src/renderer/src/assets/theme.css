@@ -7,6 +7,8 @@
   --chat-canvas: var(--background);
   --chat-composer: var(--surface-primary);
   --chat-border: var(--border-subtle);
+  --chat-diff-added: #28633e;
+  --chat-diff-added-surface: color-mix(in srgb, var(--chat-diff-added) 10%, transparent);
   --chat-user: var(--surface-user-message);
   --chat-user-foreground: var(--text-primary);
   --chat-paper-pattern:
@@ -112,6 +114,7 @@
 }
 
 .dark {
+  --chat-diff-added: #8bcea0;
   --chat-paper-top-shadow: linear-gradient(
     to bottom,
     rgb(0 0 0 / 38%) 0%,

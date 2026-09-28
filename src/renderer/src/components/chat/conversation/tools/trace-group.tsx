@@ -55,7 +55,7 @@ function ToolTraceGroup({
           setExpanded((current) => !current)
         }}
       >
-        <ToolNode state={nodeState} toolName="read" />
+        <ToolNode state={nodeState} toolName="Read" />
         <span className="agent-activity__action">{label}</span>
         <span aria-hidden="true" className="thinking-block__chevron">
           <ChevronDownIcon className="size-3.5" />

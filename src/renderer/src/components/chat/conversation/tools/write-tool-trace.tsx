@@ -1,6 +1,7 @@
 import * as React from 'react'
 
 import { CheckIcon, FilePlus2Icon, FilePenLineIcon } from 'lucide-react'
+import { ChatCodeBlock } from '../../markdown/chat-code-block'
 
 function WriteToolTrace({
   content,
@@ -53,6 +54,9 @@ function WriteToolTrace({
         </span>
         <span>{byteCount.toLocaleString('en-US')} bytes</span>
         {isTruncated ? <span className="text-text-tertiary">Preview truncated</span> : null}
+      </div>
+      <div className="tool-trace__content overflow-auto border-t border-border-subtle">
+        <ChatCodeBlock code={content} isStreaming={isStreaming} outputLabel="File content" />
       </div>
     </div>
   )

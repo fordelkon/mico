@@ -96,8 +96,8 @@ describe('SessionRuntimeService', () => {
           {
             type: 'tool-call',
             toolCallId: 'call-1',
-            toolName: 'read',
-            argumentsJson: '{"path":"package.json"}'
+            toolName: 'Read',
+            argumentsJson: '{"file_path":"package.json"}'
           }
         ]
       },
@@ -105,7 +105,7 @@ describe('SessionRuntimeService', () => {
         {
           type: 'tool-result',
           toolCallId: 'call-1',
-          toolName: 'read',
+          toolName: 'Read',
           output: '{"name":"mico"}',
           isError: false
         }
@@ -113,8 +113,8 @@ describe('SessionRuntimeService', () => {
     })
     service.recordToolTrace(run.runId, {
       toolCallId: 'call-1',
-      toolName: 'read',
-      input: { path: 'package.json' },
+      toolName: 'Read',
+      input: { file_path: 'package.json' },
       isError: false,
       output: '{"name":"mico"}',
       startedAt: 1,
@@ -131,7 +131,7 @@ describe('SessionRuntimeService', () => {
           {
             type: 'tool-trace',
             toolCallId: 'call-1',
-            toolName: 'read',
+            toolName: 'Read',
             input: { path: 'package.json' },
             presentation: {
               type: 'read',
@@ -159,8 +159,8 @@ describe('SessionRuntimeService', () => {
           {
             type: 'tool-call',
             toolCallId: 'call-1',
-            toolName: 'read',
-            argumentsJson: '{"path":"package.json"}'
+            toolName: 'Read',
+            argumentsJson: '{"file_path":"package.json"}'
           }
         ]
       },
@@ -168,7 +168,7 @@ describe('SessionRuntimeService', () => {
         {
           type: 'tool-result',
           toolCallId: 'call-1',
-          toolName: 'read',
+          toolName: 'Read',
           output: '{"name":"mico"}',
           isError: false
         }
@@ -176,8 +176,8 @@ describe('SessionRuntimeService', () => {
     })
     service.recordToolTrace(run.runId, {
       toolCallId: 'call-1',
-      toolName: 'read',
-      input: { path: 'package.json' },
+      toolName: 'Read',
+      input: { file_path: 'package.json' },
       isError: false,
       output: '{"name":"mico"}',
       startedAt: 1,
@@ -192,7 +192,7 @@ describe('SessionRuntimeService', () => {
           {
             type: 'tool-trace',
             toolCallId: 'call-1',
-            toolName: 'read',
+            toolName: 'Read',
             input: { path: 'package.json' },
             state: 'output-available',
             output: 'Read 1 line.'
@@ -212,7 +212,7 @@ describe('SessionRuntimeService', () => {
           {
             type: 'tool-trace',
             toolCallId: 'call-1',
-            toolName: 'read',
+            toolName: 'Read',
             input: { path: 'package.json' },
             state: 'output-available',
             output: 'Read 1 line.'
@@ -238,8 +238,8 @@ describe('SessionRuntimeService', () => {
         {
           type: 'tool-call',
           toolCallId: 'call-1',
-          toolName: 'read',
-          argumentsJson: '{"path":"a.txt"}'
+          toolName: 'Read',
+          argumentsJson: '{"file_path":"a.txt"}'
         }
       ]
     }
@@ -250,7 +250,7 @@ describe('SessionRuntimeService', () => {
         {
           type: 'tool-result',
           toolCallId: 'call-1',
-          toolName: 'read',
+          toolName: 'Read',
           output: 'contents',
           isError: false
         }
@@ -268,7 +268,7 @@ describe('SessionRuntimeService', () => {
           {
             type: 'tool-result',
             toolCallId: 'call-1',
-            toolName: 'read',
+            toolName: 'Read',
             output: 'contents',
             isError: false
           }
@@ -353,8 +353,8 @@ describe('SessionRuntimeService', () => {
 
     service.recordToolTrace(run.runId, {
       toolCallId: 'call-1',
-      toolName: 'write',
-      input: { path: 'notes.md', content: 'private draft' },
+      toolName: 'Write',
+      input: { file_path: 'notes.md', content: 'private draft' },
       isError: false,
       output: 'Successfully wrote notes.md.',
       startedAt: 1_010,
@@ -371,7 +371,7 @@ describe('SessionRuntimeService', () => {
           {
             type: 'tool-trace',
             toolCallId: 'call-1',
-            toolName: 'write',
+            toolName: 'Write',
             input: { path: 'notes.md' },
             presentation: {
               type: 'write',
@@ -394,8 +394,8 @@ describe('SessionRuntimeService', () => {
 
     service.recordToolTrace(run.runId, {
       toolCallId: 'call-1',
-      toolName: 'write',
-      input: { path: 'notes.md', content: 'a'.repeat(64 * 1024 + 1) },
+      toolName: 'Write',
+      input: { file_path: 'notes.md', content: 'a'.repeat(64 * 1024 + 1) },
       isError: false,
       output: 'Successfully wrote notes.md.',
       startedAt: 1_010,

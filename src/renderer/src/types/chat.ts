@@ -1,5 +1,6 @@
 import type { ProviderMetadata, UIMessage } from 'ai'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
 
 type AssistantCompletionState = 'complete' | 'streaming' | 'stopped'
 
@@ -8,7 +9,10 @@ type MicoMessageMetadata = {
   providerMetadata?: ProviderMetadata
 }
 
-type MicoUIMessage = UIMessage<MicoMessageMetadata, { document: ChatDocumentPart }>
+type MicoUIMessage = UIMessage<
+  MicoMessageMetadata,
+  { document: ChatDocumentPart; 'tool-output-delta': ToolOutputDeltaData }
+>
 
 type ChatRetryState = {
   attempt: number

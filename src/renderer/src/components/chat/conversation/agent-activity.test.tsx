@@ -11,6 +11,21 @@ import {
 } from './agent-activity'
 
 describe('ThinkingBlock', () => {
+  it('user follows a thought when it settles, then its excerpt appears and the full text remains expandable', () => {
+    const text = 'Checking the file layout.\nThen inspect the output rendering.'
+    const { rerender } = render(<ThinkingBlock id="excerpt" isStreaming text={text} />)
+    expect(screen.getByRole('button', { name: 'Thinking' })).not.toHaveTextContent(
+      'Checking the file layout.'
+    )
+    rerender(<ThinkingBlock id="excerpt" isStreaming={false} text={text} />)
+    const trigger = screen.getByRole('button', { name: 'Thought' })
+    expect(trigger).toHaveTextContent('Checking the file layout.')
+    fireEvent.click(trigger)
+    expect(screen.getByLabelText('Reasoning')).toHaveTextContent(
+      'Then inspect the output rendering.'
+    )
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  })
   it('user sees compact reasoning when text streams, then details remain optional', () => {
     render(<ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />)
 
@@ -71,15 +86,51 @@ describe('ThinkingBlock', () => {
 })
 
 describe('ToolTrace', () => {
-  it('user sees a write summarized in its result line, then file contents stay hidden when expanded', () => {
+  it('user expands an update when its diff streams, then the same readable diff survives completion', () => {
+    const part = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'diff-stream',
+      toolName: 'Edit',
+      input: {
+        file_path: 'index.ts',
+        old_string: 'header\nbefore\nfooter',
+        new_string: 'header\nafter\nfooter'
+      }
+    }
+    const { rerender } = render(
+      <ToolTrace
+        part={{
+          ...part,
+          state: 'input-available',
+          liveOutput: { preview: '- before\n+ after', stdout: '', stderr: '' }
+        }}
+      />
+    )
+    expect(screen.queryByRole('log')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Update index.ts Applying changes…' }))
+    const diff = screen.getByRole('log', { name: 'File diff' })
+    expect(diff).toHaveTextContent('-before+after')
+    expect(screen.getByText('+1')).toBeVisible()
+    expect(screen.getByText('-1')).toBeVisible()
+    expect(screen.getByText('Proposed change 1')).toBeVisible()
+    rerender(
+      <ToolTrace part={{ ...part, state: 'output-available', output: 'Updated index.ts.' }} />
+    )
+    expect(screen.getByRole('log', { name: 'File diff' })).toBe(diff)
+    expect(screen.getByText('Changes applied')).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Update index.ts Added 1 line, removed 1 line.' })
+    ).toHaveAttribute('aria-expanded', 'true')
+  })
+  it('user sees a write summarized when collapsed, then expanding reveals the written contents', () => {
     render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
           toolCallId: 'call-1',
-          toolName: 'write',
+          toolName: 'Write',
           state: 'output-available',
-          input: { path: 'src/index.ts', content: 'private implementation details' },
+          input: { file_path: 'src/index.ts', content: 'private implementation details' },
           output: 'Created src/index.ts.'
         }}
       />
@@ -92,7 +143,7 @@ describe('ToolTrace', () => {
     fireEvent.click(write)
     expect(screen.getByText('File created')).toBeVisible()
     expect(screen.getByText('1 line')).toBeVisible()
-    expect(screen.queryByText('private implementation details')).not.toBeInTheDocument()
+    expect(screen.getByText('private implementation details')).toBeVisible()
   })
 
   it('user sees edits summarized as line counts, then both diff versions show when expanded', () => {
@@ -101,9 +152,9 @@ describe('ToolTrace', () => {
         part={{
           type: 'dynamic-tool',
           toolCallId: 'edit-1',
-          toolName: 'edit',
+          toolName: 'Edit',
           state: 'output-available',
-          input: { path: 'src/index.ts', edits: [{ oldText: 'before', newText: 'after' }] },
+          input: { file_path: 'src/index.ts', old_string: 'before', new_string: 'after' },
           output: 'Edited src/index.ts.'
         }}
       />
@@ -126,7 +177,7 @@ describe('ToolTrace', () => {
         part={{
           type: 'dynamic-tool',
           toolCallId: 'call-3',
-          toolName: 'bash',
+          toolName: 'Bash',
           state: 'output-available',
           input: { command: 'printf first\nprintf second' },
           output: 'first\nsecond'
@@ -142,13 +193,13 @@ describe('ToolTrace', () => {
     expect(outputBlock).toHaveTextContent('second')
   })
 
-  it('user sees live tool deltas when the tool runs, then the result line streams the output tail', () => {
+  it('user opens a running command when output arrives, then stdout and stderr appear in its details', () => {
     render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
           toolCallId: 'bash-stream-1',
-          toolName: 'bash',
+          toolName: 'Bash',
           state: 'input-available',
           input: { command: 'pnpm test' },
           liveOutput: { preview: '', stderr: 'warning: cached', stdout: '12 tests passed' }
@@ -156,7 +207,8 @@ describe('ToolTrace', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Bash pnpm test 12 tests passed' }))
+    expect(screen.queryByRole('log')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Bash pnpm test Running…' }))
     const output = screen
       .getAllByTestId('code-block')
       .find((block) => block.getAttribute('data-state') === 'streaming')
@@ -173,9 +225,9 @@ describe('ToolTrace', () => {
         part={{
           type: 'dynamic-tool',
           toolCallId: 'write-draft-1',
-          toolName: 'write',
+          toolName: 'Write',
           state: 'input-available',
-          input: { path: 'src/index.ts', content: 'export const answer = 42' }
+          input: { file_path: 'src/index.ts', content: 'export const answer = 42' }
         }}
       />
     )
@@ -191,9 +243,9 @@ describe('ToolTrace', () => {
         part={{
           type: 'dynamic-tool',
           toolCallId: 'read-running-1',
-          toolName: 'read',
+          toolName: 'Read',
           state: 'input-available',
-          input: { path: 'src/index.ts' }
+          input: { file_path: 'src/index.ts' }
         }}
       />
     )
@@ -203,29 +255,32 @@ describe('ToolTrace', () => {
     expect(screen.getByText('(src/index.ts)')).toBeVisible()
   })
 
-  it('user sees a completed read counted in lines when the header stays compact, then no panel appears', () => {
+  it('user sees a completed read counted in lines when collapsed, then expanding reveals its contents', () => {
     render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
           toolCallId: 'read-done-1',
-          toolName: 'read',
+          toolName: 'Read',
           state: 'output-available',
-          input: { path: 'src/index.ts' },
+          input: { file_path: 'src/index.ts' },
           output: 'export {}\nexport const done = true\n[More content available.]'
         }}
       />
     )
 
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.getByText('Read 2 lines.')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Read src/index.ts Read 2 lines.' }))
+    expect(screen.getByRole('log', { name: 'File content' })).toHaveTextContent(
+      'export const done = true'
+    )
   })
 
   it('user leaves tool details closed when the run completes, then they remain closed', () => {
     const part = {
       type: 'dynamic-tool' as const,
       toolCallId: 'bash-collapse-1',
-      toolName: 'bash',
+      toolName: 'Bash',
       input: { command: 'pnpm test' }
     }
     const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
@@ -249,9 +304,9 @@ describe('ToolTrace', () => {
         part={{
           type: 'dynamic-tool',
           toolCallId: 'edit-failed-1',
-          toolName: 'edit',
+          toolName: 'Edit',
           state: 'output-error',
-          input: { path: 'index.ts', edits: [{ oldText: 'old', newText: 'new' }] },
+          input: { file_path: 'index.ts', old_string: 'old', new_string: 'new' },
           errorText: 'Could not edit index.ts.\nRead the file and try again.'
         }}
       />
@@ -273,7 +328,7 @@ describe('AgentActivityTimeline', () => {
     const tool = {
       type: 'dynamic-tool' as const,
       toolCallId: 'bash-live-1',
-      toolName: 'bash',
+      toolName: 'Bash',
       state: 'input-available' as const,
       input: { command: 'cat package.json' }
     }
@@ -309,7 +364,7 @@ describe('AgentActivityTimeline', () => {
     const bash = (toolCallId: string) => ({
       type: 'dynamic-tool' as const,
       toolCallId,
-      toolName: 'bash' as const,
+      toolName: 'Bash' as const,
       state: 'input-available' as const,
       input: { command: `run ${toolCallId}` }
     })
@@ -336,9 +391,9 @@ describe('AgentActivityTimeline', () => {
     const read = {
       type: 'dynamic-tool' as const,
       toolCallId: 'read-seq-1',
-      toolName: 'read',
+      toolName: 'Read',
       state: 'input-available' as const,
-      input: { path: 'src/index.ts' }
+      input: { file_path: 'src/index.ts' }
     }
     const readDone = { ...read, state: 'output-available' as const, output: 'export {}' }
     const { rerender } = render(
@@ -382,15 +437,15 @@ describe('AgentActivityTimeline', () => {
           {
             type: 'dynamic-tool',
             toolCallId: 'read-1',
-            toolName: 'read',
+            toolName: 'Read',
             state: 'output-available',
-            input: { path: 'src/index.ts' },
+            input: { file_path: 'src/index.ts' },
             output: 'export {}'
           },
           {
             type: 'dynamic-tool',
             toolCallId: 'bash-1',
-            toolName: 'bash',
+            toolName: 'Bash',
             state: 'output-available',
             input: { command: 'pnpm test' },
             output: 'Tests passed'
@@ -424,17 +479,17 @@ describe('Read group collapsing', () => {
           {
             type: 'dynamic-tool',
             toolCallId: 'read-a',
-            toolName: 'read',
+            toolName: 'Read',
             state: 'output-available',
-            input: { path: 'a.ts' },
+            input: { file_path: 'a.ts' },
             output: 'one'
           },
           {
             type: 'dynamic-tool',
             toolCallId: 'read-b',
-            toolName: 'read',
+            toolName: 'Read',
             state: 'output-available',
-            input: { path: 'b.ts' },
+            input: { file_path: 'b.ts' },
             output: 'two\nlines'
           }
         ]}
@@ -451,7 +506,7 @@ describe('Read group collapsing', () => {
 
     fireEvent.click(group)
 
-    // Individual completed reads stay single-line rows: no buttons, only summaries.
+    // Each read keeps its own summary and optional content disclosure.
     expect(screen.getByText('Read 1 line.')).toBeVisible()
     expect(screen.getByText('Read 2 lines.')).toBeVisible()
     expect(screen.getByText('(a.ts)')).toBeVisible()
@@ -467,9 +522,9 @@ describe('Read group collapsing', () => {
           {
             type: 'dynamic-tool',
             toolCallId: 'read-only',
-            toolName: 'read',
+            toolName: 'Read',
             state: 'output-available',
-            input: { path: 'a.ts' },
+            input: { file_path: 'a.ts' },
             output: 'one'
           }
         ]}
@@ -490,9 +545,9 @@ describe('Activity disclosure and outcomes', () => {
     const tool = {
       type: 'dynamic-tool' as const,
       toolCallId: 'read',
-      toolName: 'read',
+      toolName: 'Read',
       state: 'input-available' as const,
-      input: { path: 'package.json' }
+      input: { file_path: 'package.json' }
     }
     rerender(<AgentActivityTimeline id="live" isStreaming parts={[tool]} />)
     expect(
@@ -516,7 +571,7 @@ describe('Activity disclosure and outcomes', () => {
     const part = {
       type: 'dynamic-tool' as const,
       toolCallId: 'terminal',
-      toolName: 'bash',
+      toolName: 'Bash',
       input: { command: 'pnpm test' }
     }
     const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
@@ -540,9 +595,9 @@ describe('Activity disclosure and outcomes', () => {
           {
             type: 'dynamic-tool',
             toolCallId: 'edit-error',
-            toolName: 'edit',
+            toolName: 'Edit',
             state: 'output-error',
-            input: { path: 'index.ts', edits: [{ oldText: 'old', newText: 'new' }] },
+            input: { file_path: 'index.ts', old_string: 'old', new_string: 'new' },
             errorText: 'Could not edit index.ts. Read the file and try again.'
           }
         ]}
@@ -562,7 +617,7 @@ describe('Activity disclosure and outcomes', () => {
           {
             type: 'dynamic-tool',
             toolCallId: 'pending',
-            toolName: 'bash',
+            toolName: 'Bash',
             state: 'input-available',
             input: { command: 'pnpm test' }
           }
@@ -585,16 +640,16 @@ describe('Activity disclosure and outcomes', () => {
           {
             type: 'dynamic-tool',
             toolCallId: 'a',
-            toolName: 'read',
+            toolName: 'Read',
             state: 'input-available',
-            input: { path: 'package.json' }
+            input: { file_path: 'package.json' }
           },
           {
             type: 'dynamic-tool',
             toolCallId: 'b',
-            toolName: 'read',
+            toolName: 'Read',
             state: 'output-available',
-            input: { path: 'README.md' },
+            input: { file_path: 'README.md' },
             output: 'Readme'
           }
         ]}
@@ -613,7 +668,7 @@ describe('Unfinished tool details', () => {
       <ToolTrace
         part={{
           type: 'dynamic-tool',
-          toolName: 'bash',
+          toolName: 'Bash',
           toolCallId: 'multiline',
           state: 'input-available',
           input: { command: 'pnpm test\nprintf finished' }
@@ -630,10 +685,10 @@ describe('Unfinished tool details', () => {
         isActive={false}
         part={{
           type: 'dynamic-tool',
-          toolName: 'write',
+          toolName: 'Write',
           toolCallId: 'write-stopped',
           state: 'input-available',
-          input: { path: 'index.ts', content: 'export {}' }
+          input: { file_path: 'index.ts', content: 'export {}' }
         }}
       />
     )
@@ -649,10 +704,10 @@ describe('Unfinished tool details', () => {
         isActive={false}
         part={{
           type: 'dynamic-tool',
-          toolName: 'edit',
+          toolName: 'Edit',
           toolCallId: 'edit-stopped',
           state: 'input-available',
-          input: { path: 'index.ts', edits: [{ oldText: 'old', newText: 'new' }] }
+          input: { file_path: 'index.ts', old_string: 'old', new_string: 'new' }
         }}
       />
     )

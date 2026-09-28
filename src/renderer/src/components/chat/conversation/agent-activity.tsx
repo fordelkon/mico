@@ -2,6 +2,7 @@ import { Button } from '@mico/ui'
 import type { ReasoningUIPart } from 'ai'
 import { CheckIcon, ChevronDownIcon, CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
+import { toolLabel } from '@shared/ai/tool-presentation'
 
 import { ThinkingTrace } from './tools/thinking-trace'
 import { ToolTraceGroup } from './tools/trace-group'
@@ -24,7 +25,7 @@ type TimelineSegment =
 function toTimelineSegments(parts: AgentActivityPart[]): TimelineSegment[] {
   const segments: TimelineSegment[] = []
   for (const part of parts) {
-    if (part.type === 'dynamic-tool' && part.toolName === 'read') {
+    if (part.type === 'dynamic-tool' && part.toolName === 'Read') {
       const last = segments.at(-1)
       if (last?.kind === 'group') last.parts.push(part)
       else segments.push({ kind: 'group', parts: [part] })
@@ -98,6 +99,18 @@ function AgentActivityTimeline({
     .filter(Boolean)
     .join(' · ')
   const OutcomeIcon = failed || incomplete ? CircleAlertIcon : CheckIcon
+  const counts = new Map<string, number>()
+  for (const tool of tools) {
+    const name = toolLabel(tool.toolName)
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  const hasThought = parts.some((part) => part.type === 'reasoning' && part.text.trim())
+  const overview = [
+    hasThought ? 'Thought' : null,
+    ...Array.from(counts, ([name, count]) => `${name} ${count}`)
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <section
@@ -133,6 +146,11 @@ function AgentActivityTimeline({
         </span>
         <ChevronDownIcon aria-hidden="true" className="agent-activity__group-chevron size-3.5" />
       </Button>
+      {!expanded && overview ? (
+        <div className="agent-activity__overview" title={overview}>
+          {overview}
+        </div>
+      ) : null}
       <span className="sr-only" role="status">
         {label}
       </span>

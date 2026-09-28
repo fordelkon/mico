@@ -40,16 +40,8 @@ type ActivitySourcePart = Extract<
   MicoUIMessage['parts'][number],
   { type: 'reasoning' } | { type: 'dynamic-tool' }
 >
-type ToolOutputDeltaPart = {
-  data: {
-    delta: string
-    stream: 'preview' | 'stderr' | 'stdout'
-    toolCallId: string
-    toolName: string
-  }
-  type: 'data-tool-output-delta'
-}
-type AssistantSourcePart = MicoUIMessage['parts'][number] | ToolOutputDeltaPart
+type AssistantSourcePart = MicoUIMessage['parts'][number]
+type ToolOutputDeltaPart = Extract<AssistantSourcePart, { type: 'data-tool-output-delta' }>
 
 function isActivityPart(part: AssistantSourcePart): part is ActivitySourcePart {
   return part.type === 'reasoning' || part.type === 'dynamic-tool'
@@ -78,8 +70,9 @@ function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): Assista
       const previous = blocks.at(-1)
       // Consecutive tool/reasoning events share one model step. Any text part is
       // body copy — interim or final — and closes the step before it.
-      if (previous?.type === 'activity') previous.parts.push(part)
-      else blocks.push({ parts: [part], type: 'activity' })
+      // Accumulated output belongs to this render, never to the provider's message object.
+      if (previous?.type === 'activity') previous.parts.push({ ...part })
+      else blocks.push({ parts: [{ ...part }], type: 'activity' })
     } else if (isToolOutputDeltaPart(part)) {
       const activity = blocks.findLast((block) => block.type === 'activity')
       const target = activity?.parts.findLast(

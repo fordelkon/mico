@@ -28,6 +28,31 @@ function renderAssistantMessage(
 }
 
 describe('ChatMessage', () => {
+  it('user reads tool output when the message rerenders, then earlier output is not appended twice', async () => {
+    const user = userEvent.setup()
+    const message: MicoUIMessage = {
+      id: 'streamed-output',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolCallId: 'shell',
+          toolName: 'Bash',
+          state: 'input-available',
+          input: { command: 'echo first' }
+        },
+        {
+          type: 'data-tool-output-delta',
+          data: { toolCallId: 'shell', toolName: 'Bash', stream: 'stdout', delta: 'first\n' }
+        }
+      ]
+    }
+    const { rerender } = render(<ChatMessage message={message} isStreaming />)
+    await user.click(screen.getByRole('button', { name: 'Bash echo first Running…' }))
+    rerender(<ChatMessage message={{ ...message }} isStreaming />)
+    const output = screen.getByRole('log', { name: 'Terminal output' })
+    expect(output.textContent?.match(/first/g)).toHaveLength(1)
+  })
   it.each(['', 'Review these files'])(
     'user sees document names and sizes with text %j when rendering, then copying includes them',
     async (text) => {
@@ -177,7 +202,7 @@ describe('ChatMessage', () => {
         {
           type: 'dynamic-tool',
           toolCallId: 'call-1',
-          toolName: 'read',
+          toolName: 'Read',
           state: 'output-available',
           input: { path: 'src/index.ts' },
           output: 'export {}'
@@ -203,7 +228,7 @@ describe('ChatMessage', () => {
         {
           type: 'dynamic-tool',
           toolCallId: 'call-stage-output',
-          toolName: 'read',
+          toolName: 'Read',
           state: 'output-available',
           input: { path: 'src/index.ts' },
           output: 'export {}'
@@ -244,7 +269,7 @@ describe('ChatMessage', () => {
     const tool = {
       type: 'dynamic-tool' as const,
       toolCallId: 'call-next-step',
-      toolName: 'read',
+      toolName: 'Read',
       input: { path: 'src/index.ts' }
     }
     const { rerender } = renderAssistantMessage(
@@ -290,7 +315,7 @@ describe('ChatMessage', () => {
     const tool = {
       type: 'dynamic-tool' as const,
       toolCallId: 'call-sequence',
-      toolName: 'bash',
+      toolName: 'Bash',
       input: { command: 'printf sequence' }
     }
     const { rerender } = renderAssistantMessage([{ ...tool, state: 'input-available' }], {

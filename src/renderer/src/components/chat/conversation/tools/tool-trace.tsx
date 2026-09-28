@@ -4,6 +4,7 @@ import {
   FilePenLineIcon,
   FilePlus2Icon,
   FileSearchIcon,
+  SearchIcon,
   TerminalIcon,
   WrenchIcon
 } from 'lucide-react'
@@ -12,8 +13,8 @@ import * as React from 'react'
 import * as z from 'zod'
 
 import { toolLabel } from '@shared/ai/tool-presentation'
+import { editPreview } from './edit-preview'
 
-import { ToolCodePreview } from './tool-code-preview'
 import {
   getToolTracePresentation,
   ToolTraceInputSchema,
@@ -32,12 +33,9 @@ type ToolActivityState =
   | 'preparing'
   | 'streaming-output'
 
-// Collapsed traces keep a visible result line, like Claude Code's ⎿ output rows:
-// a completed bash call shows its first lines, a running one the live tail.
+// Keep live summaries stable; full streaming output belongs to the disclosure.
 const MAX_SUMMARY_CHARACTERS = 2_000
 const COMPLETED_OUTPUT_LINES = 3
-const LIVE_OUTPUT_LINES = 5
-const LIVE_DIFF_PREVIEW_CHARACTERS = 2_000
 const ToolOutputSchema = z.union([
   z.string(),
   z.object({ output: z.string() }).transform(({ output }) => output),
@@ -52,7 +50,7 @@ function getToolActivityState(part: ToolActivityPart, isActive = true): ToolActi
   if (!isActive) return 'incomplete'
   if (part.state === 'input-streaming') return 'preparing'
   if (part.state === 'input-available') {
-    if (part.toolName === 'bash' && (part.liveOutput?.stdout || part.liveOutput?.stderr))
+    if (part.toolName === 'Bash' && (part.liveOutput?.stdout || part.liveOutput?.stderr))
       return 'streaming-output'
     return 'executing'
   }
@@ -89,14 +87,19 @@ function firstErrorLine(errorText: string | undefined): string {
 
 type ToolSummary =
   | { kind: 'message'; isError: boolean; text: string }
-  | { kind: 'output'; hiddenCount: number; isLive: boolean; text: string }
-  | { kind: 'preview'; text: string }
+  | { kind: 'output'; hiddenCount: number; text: string }
 
 function getRunningSummary(toolName: string): string {
   return (
-    { bash: 'Running…', edit: 'Applying changes…', read: 'Reading file…', write: 'Writing file…' }[
-      toolName
-    ] ?? 'Running…'
+    {
+      Bash: 'Running…',
+      Edit: 'Applying changes…',
+
+      Glob: 'Searching…',
+      Grep: 'Searching…',
+      Read: 'Reading file…',
+      Write: 'Writing file…'
+    }[toolName] ?? 'Running…'
   )
 }
 
@@ -113,47 +116,38 @@ function getToolSummary(
   if (state === 'incomplete') return { kind: 'message', isError: false, text: 'Not completed.' }
 
   if (state === 'executing' || state === 'streaming-output') {
-    if (part.toolName === 'edit' && part.liveOutput?.preview) {
-      // The streamed diff preview is the edit's inline progress: it shows the
-      // change taking effect like bash's streamed output tail does.
-      return { kind: 'preview', text: part.liveOutput.preview }
-    }
-    if (part.toolName === 'bash' && part.liveOutput) {
-      const stream = part.liveOutput.stdout || part.liveOutput.stderr
-      const lines = toLines(stream)
-      while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
-      if (lines.length) {
-        const tail = lines.slice(-LIVE_OUTPUT_LINES)
-        return {
-          kind: 'output',
-          hiddenCount: lines.length - tail.length,
-          isLive: true,
-          text: truncateSummary(tail.join('\n'))
-        }
-      }
-    }
     return { kind: 'message', isError: false, text: getRunningSummary(part.toolName) }
   }
 
   switch (part.toolName) {
-    case 'read':
+    case 'Glob':
+    case 'Grep':
       return {
         kind: 'message',
         isError: false,
-        text: output ? `Read ${countUnits(countOutputLines(output), 'line')}.` : 'Completed.'
+        text:
+          (presentation?.type === 'search' ? presentation.content : output)?.split('\n')[0] ||
+          'Search completed.'
       }
-    case 'edit': {
+    case 'Read':
+      return {
+        kind: 'message',
+        isError: false,
+        text: `Read ${countUnits(countOutputLines(presentation?.type === 'read' ? presentation.content : (output ?? '')), 'line')}.`
+      }
+    case 'Edit': {
       const edits = presentation?.type === 'edit' ? presentation.edits : input?.edits
       if (!edits) return { kind: 'message', isError: false, text: 'Updated file.' }
-      const added = edits.reduce((count, edit) => count + countLines(edit.newText), 0)
-      const removed = edits.reduce((count, edit) => count + countLines(edit.oldText), 0)
+      const previews = edits.map(editPreview)
+      const added = previews.reduce((count, edit) => count + edit.added.length, 0)
+      const removed = previews.reduce((count, edit) => count + edit.removed.length, 0)
       return {
         kind: 'message',
         isError: false,
         text: `Added ${countUnits(added, 'line')}, removed ${countUnits(removed, 'line')}.`
       }
     }
-    case 'write': {
+    case 'Write': {
       // Restored traces strip input.content for storage; the presentation payload
       // retains it, so fall back before counting zero lines.
       const content = input?.content ?? (presentation?.type === 'write' ? presentation.content : '')
@@ -164,7 +158,7 @@ function getToolSummary(
         text: `Wrote ${countUnits(countLines(content), 'line')}${target}.`
       }
     }
-    case 'bash': {
+    case 'Bash': {
       if (output === undefined) return { kind: 'message', isError: false, text: 'Completed.' }
       const lines = toLines(output)
       while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
@@ -173,7 +167,6 @@ function getToolSummary(
       return {
         kind: 'output',
         hiddenCount: Math.max(0, lines.length - head.length),
-        isLive: false,
         text: truncateSummary(head.join('\n'))
       }
     }
@@ -185,13 +178,19 @@ function getToolSummary(
 function describeTool(toolName: string, input: ToolTraceInput): ToolDescription {
   // The invocation-label convention: ToolName(key input), e.g. Bash(npm test).
   switch (toolName) {
-    case 'bash':
+    case 'Glob':
+    case 'Grep':
+      return {
+        title: toolLabel(toolName),
+        detail: [input.query, input.path].filter(Boolean).join(' · ') || null
+      }
+    case 'Bash':
       return input.command
         ? { title: toolLabel(toolName), detail: input.command.split('\n')[0] }
         : { title: 'Bash command', detail: null }
-    case 'edit':
-    case 'read':
-    case 'write':
+    case 'Edit':
+    case 'Read':
+    case 'Write':
       return input.path
         ? { title: toolLabel(toolName), detail: input.path }
         : { title: `${toolLabel(toolName)} file`, detail: null }
@@ -217,9 +216,15 @@ function getToolNodeState(state: ToolActivityState): ToolNodeState {
 
 function ToolIcon({ toolName }: { toolName: string }): React.JSX.Element {
   const Icon =
-    { bash: TerminalIcon, edit: FilePenLineIcon, read: FileSearchIcon, write: FilePlus2Icon }[
-      toolName
-    ] ?? WrenchIcon
+    {
+      Bash: TerminalIcon,
+      Edit: FilePenLineIcon,
+
+      Glob: SearchIcon,
+      Grep: SearchIcon,
+      Read: FileSearchIcon,
+      Write: FilePlus2Icon
+    }[toolName] ?? WrenchIcon
   return <Icon aria-hidden="true" className="size-3.5" />
 }
 
@@ -239,17 +244,6 @@ function ToolNode({
 }
 
 function ToolSummaryLine({ summary }: { summary: ToolSummary }): React.JSX.Element {
-  if (summary.kind === 'preview') {
-    return (
-      <div className="agent-activity__result">
-        <ToolCodePreview
-          content={summary.text.slice(0, LIVE_DIFF_PREVIEW_CHARACTERS)}
-          isStreaming
-          label="Diff preview"
-        />
-      </div>
-    )
-  }
   if (summary.kind === 'message') {
     return (
       <div
@@ -268,7 +262,7 @@ function ToolSummaryLine({ summary }: { summary: ToolSummary }): React.JSX.Eleme
       <pre>{summary.text}</pre>
       {summary.hiddenCount > 0 ? (
         <div className="agent-activity__result-note">
-          {summary.isLive ? '… ' : ''}+{countUnits(summary.hiddenCount, 'line')}
+          +{countUnits(summary.hiddenCount, 'line')}
         </div>
       ) : null}
     </div>
@@ -278,9 +272,15 @@ function ToolSummaryLine({ summary }: { summary: ToolSummary }): React.JSX.Eleme
 /** A timeline summary uses the same validated input as the tool row. */
 function getToolActivityLabel(part: ToolActivityPart): string {
   const input = ToolTraceInputSchema.safeParse(part.input)
-  const action = { read: 'Reading', write: 'Writing', edit: 'Editing', bash: 'Running' }[
-    part.toolName
-  ]
+  const action = {
+    Read: 'Reading',
+    Write: 'Writing',
+    Edit: 'Updating',
+
+    Glob: 'Searching',
+    Grep: 'Searching',
+    Bash: 'Running'
+  }[part.toolName]
   const target = input.success ? describeTool(part.toolName, input.data).detail : null
   return [action ?? toolLabel(part.toolName), target].filter(Boolean).join(' ')
 }
@@ -315,13 +315,8 @@ function ToolTrace({
     output?.success ? output.data : undefined,
     presentation
   )
-  // Read traces carry their whole result in the summary line, so they have no
-  // panel; Claude Code shows reads the same single line. Failed mutations must
-  // not render their proposed edits as successfully applied.
-  const hasPanel =
-    presentation != null &&
-    presentation.type !== 'read' &&
-    (activityState !== 'failed' || part.toolName === 'bash')
+  // Failed mutations must not render their proposed edits as successfully applied.
+  const hasPanel = presentation != null && (activityState !== 'failed' || part.toolName === 'Bash')
   const contentId = `tool-trace-${part.toolCallId}`
   const isRunning = nodeState === 'running'
   const accessibleName = [tool.title, tool.detail, summary.text].filter(Boolean).join(' ')
@@ -367,18 +362,21 @@ function ToolTrace({
       ) : (
         <div className="agent-activity__trigger">{header}</div>
       )}
-      <ToolSummaryLine summary={summary} />
+      {(!isExpanded || activityState === 'failed' || activityState === 'incomplete') && (
+        <ToolSummaryLine summary={summary} />
+      )}
       {hasPanel ? (
         <div className="thinking-block__panel">
           <div
             aria-hidden={!isExpanded}
-            className="thinking-block__panel-inner whitespace-pre-wrap font-mono text-xs"
+            className="thinking-block__panel-inner text-xs"
             id={contentId}
             inert={!isExpanded}
           >
             <ToolTracePresentationView
               command={input.success ? input.data.command : undefined}
               isDraft={activityState !== 'completed'}
+              isPreparing={activityState === 'preparing'}
               isStreaming={isRunning}
               liveOutput={part.liveOutput}
               path={input.success ? input.data.path : undefined}

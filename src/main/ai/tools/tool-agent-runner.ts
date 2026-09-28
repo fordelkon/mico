@@ -249,15 +249,14 @@ class ToolAgentRunner {
       const rawResults = exceedsCallBudget
         ? calls.map((call) => toolBudgetExceededResult(call))
         : await registry.executeBatch(calls, signal, (delta) => {
-            // Validate before crossing the main/renderer boundary. Deltas are
-            // transient; completion still emits and persists the full trace.
+            // The renderer reads message parts, so each delta must append there.
+            // A shared id would replace earlier deltas; transient parts only reach
+            // onData. Durable history still stores the completed tool trace.
             const parsed = ToolOutputDeltaDataSchema.safeParse(delta)
             if (!parsed.success) return
             emit({
               type: 'data-tool-output-delta',
-              id: parsed.data.toolCallId,
-              data: parsed.data,
-              transient: true
+              data: parsed.data
             })
           })
       const executionFinishedAt = Date.now()

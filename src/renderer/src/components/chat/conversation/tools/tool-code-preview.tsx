@@ -16,8 +16,8 @@ function ToolCodePreview({
   return (
     <div
       aria-label={label}
-      aria-live={isStreaming ? 'polite' : 'off'}
-      className="overflow-hidden rounded-md border border-border-subtle bg-surface-secondary"
+      aria-live="off"
+      className="tool-trace__content overflow-auto rounded-md border border-border-subtle bg-surface-secondary"
       role="log"
     >
       <ChatCodeBlock

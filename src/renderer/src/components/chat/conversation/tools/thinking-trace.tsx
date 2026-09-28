@@ -1,5 +1,5 @@
 import { Button } from '@mico/ui'
-import { BrainIcon, ChevronDownIcon } from 'lucide-react'
+import { LightbulbIcon, ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
 
 type ThinkingTraceProps = {
@@ -8,9 +8,7 @@ type ThinkingTraceProps = {
   text: string
 }
 
-/** A reasoning trace owns streamed text and disclosure; the transcript owns scrolling.
- * Like Claude Code's collapsed thinking, the header never summarizes: the label
- * shimmers while thinking, and the full thought opens after it settles. */
+/** The settled excerpt is taken from the provider's text, never generated separately. */
 function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX.Element | null {
   // The reasoning part's own lifecycle state gates isStreaming upstream, so the
   // label follows the reasoning-end chunk instead of list position.
@@ -19,6 +17,7 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
   const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
   const contentId = `thinking-${id}`
   const label = isThinking ? 'Thinking' : 'Thought'
+  const excerpt = !isThinking ? text.trim().split('\n')[0].slice(0, 160) : ''
 
   if (!text && !isThinking) return null
 
@@ -43,11 +42,16 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
         }}
       >
         <span className="agent-activity__node" data-state={isThinking ? 'running' : undefined}>
-          <BrainIcon aria-hidden="true" className="size-3.5" />
+          <LightbulbIcon aria-hidden="true" className="size-3.5" />
         </span>
         <span className={isThinking ? 'agent-activity__shimmer' : 'agent-activity__action'}>
           {label}
         </span>
+        {!expanded && excerpt ? (
+          <span className="thinking-block__excerpt" title={excerpt}>
+            {excerpt}
+          </span>
+        ) : null}
         {text ? (
           <span aria-hidden="true" className="thinking-block__chevron">
             <ChevronDownIcon className="size-3.5" />
@@ -61,7 +65,9 @@ function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX
           id={contentId}
           inert={!expanded}
         >
-          <div className="agent-activity__detail">{text}</div>
+          <div className="thinking-block__reading" aria-label="Reasoning" tabIndex={0}>
+            {text}
+          </div>
         </div>
       </div>
     </section>

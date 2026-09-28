@@ -191,8 +191,82 @@
   font-family: var(--font-mono);
   font-size: inherit;
   line-height: inherit;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-trace__content {
+  max-height: 20rem;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.tool-trace__command {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.tool-trace__diff-line {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  min-height: 1.25rem;
+  padding-right: 0.75rem;
+  white-space: pre;
+}
+
+.tool-trace__diff-marker {
+  text-align: center;
+  user-select: none;
+  color: var(--text-tertiary);
+}
+
+.tool-trace__diff-line[data-kind="added"] {
+  background: var(--chat-diff-added-surface);
+}
+
+.tool-trace__diff-line[data-kind="added"] .tool-trace__diff-marker {
+  color: var(--chat-diff-added);
+}
+
+.tool-trace__diff-line[data-kind="removed"] {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+}
+
+.tool-trace__diff-line[data-kind="removed"] .tool-trace__diff-marker {
+  color: var(--destructive);
+}
+
+.agent-activity__overview {
+  padding: 0 1.75rem 0.375rem;
+  color: var(--text-tertiary);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinking-block__excerpt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.thinking-block__reading {
+  max-height: 20rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border-left: 1px solid var(--border-subtle);
+  padding: 0.375rem 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.75;
 }
 
 .agent-activity__result-note {
