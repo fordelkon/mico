@@ -1,5 +1,7 @@
 appId: com.mico.app
 productName: Mico
+asarUnpack:
+  - 'node_modules/@vscode/ripgrep*/**'
 directories:
   buildResources: build
 afterPack: scripts/prune-native-prebuilds.cjs

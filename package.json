@@ -36,6 +36,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@mico/ai-providers": "workspace:*",
+    "@vscode/ripgrep": "1.18.0",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
