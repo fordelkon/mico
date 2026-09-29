@@ -44,4 +44,41 @@ describe('resolveWorkspacePath', () => {
       resolveWorkspacePath(workspace, 'linked-directory/new.txt', { allowMissing: true })
     ).rejects.toThrow('Path must be inside the session workspace.')
   })
+
+  it('user opens an absolute path when workspace uses an alias, then the equivalent path is accepted', async () => {
+    const root = await createTemporaryWorkspace('mico-tool-path-')
+    const workspace = join(root, 'workspace')
+    const workspaceAlias = join(root, 'workspace-alias')
+    await mkdir(workspace)
+    await symlink(workspace, workspaceAlias, process.platform === 'win32' ? 'junction' : 'dir')
+    const filePath = join(workspaceAlias, 'file.txt')
+    await writeFile(join(workspace, 'file.txt'), 'contents')
+
+    await expect(resolveWorkspacePath(workspaceAlias, filePath)).resolves.toBe(filePath)
+  })
+
+  it('user reads an outside alias when it points into workspace, then lexical escape is rejected', async () => {
+    const root = await createTemporaryWorkspace('mico-tool-path-')
+    const workspace = join(root, 'workspace')
+    const outsideAlias = join(root, 'outside-alias')
+    await mkdir(workspace)
+    await writeFile(join(workspace, 'file.txt'), 'contents')
+    await symlink(workspace, outsideAlias, process.platform === 'win32' ? 'junction' : 'dir')
+
+    await expect(resolveWorkspacePath(workspace, join(outsideAlias, 'file.txt'))).rejects.toThrow(
+      'Path must be inside the session workspace.'
+    )
+  })
+
+  it('user creates through an outside alias when it points into workspace, then lexical escape is rejected', async () => {
+    const root = await createTemporaryWorkspace('mico-tool-path-')
+    const workspace = join(root, 'workspace')
+    const outsideAlias = join(root, 'outside-alias')
+    await mkdir(workspace)
+    await symlink(workspace, outsideAlias, process.platform === 'win32' ? 'junction' : 'dir')
+
+    await expect(
+      resolveWorkspacePath(workspace, join(outsideAlias, 'new.txt'), { allowMissing: true })
+    ).rejects.toThrow('Path must be inside the session workspace.')
+  })
 })

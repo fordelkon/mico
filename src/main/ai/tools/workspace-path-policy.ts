@@ -36,9 +36,10 @@ async function resolveWorkspacePath(
   requestedPath: string,
   { allowMissing = false }: ResolveWorkspacePathOptions = {}
 ): Promise<string> {
-  const workspace = await realpath(cwd)
-  const candidate = resolve(workspace, requestedPath)
-  if (!isWithinWorkspace(workspace, candidate))
+  const lexicalWorkspace = resolve(cwd)
+  const workspace = await realpath(lexicalWorkspace)
+  const candidate = resolve(lexicalWorkspace, requestedPath)
+  if (!isWithinWorkspace(lexicalWorkspace, candidate))
     throw new Error('Path must be inside the session workspace.')
   const resolvedTarget = allowMissing
     ? await resolveExistingParent(candidate)
