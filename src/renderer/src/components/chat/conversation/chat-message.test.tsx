@@ -48,7 +48,7 @@ describe('ChatMessage', () => {
       ]
     }
     const { rerender } = render(<ChatMessage message={message} isStreaming />)
-    await user.click(screen.getByRole('button', { name: 'Bash echo first Running…' }))
+    await user.click(screen.getByRole('button', { name: /Bash echo first/ }))
     rerender(<ChatMessage message={{ ...message }} isStreaming />)
     const output = screen.getByRole('log', { name: 'Terminal output' })
     expect(output.textContent?.match(/first/g)).toHaveLength(1)
@@ -297,16 +297,13 @@ describe('ChatMessage', () => {
       />
     )
 
-    // The finished group preserves its disclosure while the next step starts.
+    // The untouched finished group compacts when the next step starts.
     expect(
       screen.getByRole('button', { name: 'Agent activity: Reasoning finished' })
-    ).toHaveAttribute('aria-expanded', 'true')
+    ).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getAllByRole('status')).toHaveLength(2)
 
-    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
+    expect(screen.queryByRole('button', { name: 'Thought' })).not.toBeInTheDocument()
     expect(screen.getByText('Reading file…')).toBeVisible()
     expect(screen.getByText('(src/index.ts)')).toBeVisible()
   })
@@ -337,10 +334,9 @@ describe('ChatMessage', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Bash printf sequence sequence' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
+    expect(
+      screen.getByRole('button', { name: 'Bash printf sequence Output available' })
+    ).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getAllByTestId('agent-activity-event')).toHaveLength(1)
   })
 })

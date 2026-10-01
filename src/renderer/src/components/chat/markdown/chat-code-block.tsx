@@ -13,6 +13,7 @@ type ChatCodeBlockProps = {
   language?: string
   /** Embedded output delegates its surface and live announcements to the enclosing trace. */
   outputLabel?: string
+  showLineNumbers?: boolean
 }
 type CodeThemes = { dark: string; light: string }
 type CodeToken = { content: string; offset: number; style?: React.CSSProperties }
@@ -130,7 +131,8 @@ function ChatCodeBlock({
   code,
   isStreaming,
   language,
-  outputLabel
+  outputLabel,
+  showLineNumbers = true
 }: ChatCodeBlockProps): React.JSX.Element {
   const copyTimerRef = React.useRef<number | undefined>(undefined)
   const [copied, setCopied] = React.useState(false)
@@ -227,11 +229,18 @@ function ChatCodeBlock({
             {lines.map((line, index) => (
               <span
                 key={`${index}-${line}`}
-                className={cn('grid min-h-5 grid-cols-[2.75rem_minmax(0,1fr)]')}
+                className={cn(
+                  'grid min-h-5',
+                  showLineNumbers
+                    ? 'grid-cols-[2.75rem_minmax(0,1fr)]'
+                    : 'grid-cols-[minmax(0,1fr)] pl-2'
+                )}
               >
-                <span className="select-none pr-3 text-right tabular-nums text-muted-foreground/35">
-                  {index + 1}
-                </span>
+                {showLineNumbers ? (
+                  <span className="select-none pr-3 text-right tabular-nums text-muted-foreground/35">
+                    {index + 1}
+                  </span>
+                ) : null}
                 <CodeLine code={line} tokens={tokens?.[index]} />
               </span>
             ))}

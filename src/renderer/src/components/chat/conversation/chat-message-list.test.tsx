@@ -169,9 +169,9 @@ describe('ChatMessageList', () => {
       onRetry: () => undefined
     })
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'The chat provider could not complete the response.'
-    )
+    const outcome = screen.getByRole('alert')
+    expect(outcome).toHaveTextContent('Stopped')
+    expect(outcome).toHaveTextContent('The chat provider could not complete the response.')
   })
 
   it('user retries the response when pressing Try again, then the retry callback runs', async () => {

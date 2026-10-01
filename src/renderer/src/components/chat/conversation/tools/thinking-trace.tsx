@@ -3,21 +3,29 @@ import { LightbulbIcon, ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
 
 type ThinkingTraceProps = {
+  excerptText?: string
   id: string
   isStreaming: boolean
+  labelOverride?: string
   text: string
 }
 
 /** The settled excerpt is taken from the provider's text, never generated separately. */
-function ThinkingTrace({ id, isStreaming, text }: ThinkingTraceProps): React.JSX.Element | null {
+function ThinkingTrace({
+  excerptText,
+  id,
+  isStreaming,
+  labelOverride,
+  text
+}: ThinkingTraceProps): React.JSX.Element | null {
   // The reasoning part's own lifecycle state gates isStreaming upstream, so the
   // label follows the reasoning-end chunk instead of list position.
   const isThinking = isStreaming
   const [expanded, setExpanded] = React.useState(false)
   const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
   const contentId = `thinking-${id}`
-  const label = isThinking ? 'Thinking' : 'Thought'
-  const excerpt = !isThinking ? text.trim().split('\n')[0].slice(0, 160) : ''
+  const label = labelOverride ?? (isThinking ? 'Thinking' : 'Thought')
+  const excerpt = !isThinking ? (excerptText ?? text).trim().split('\n')[0].slice(0, 160) : ''
 
   if (!text && !isThinking) return null
 

@@ -20,12 +20,43 @@ type AgentActivityPart = ReasoningUIPart | ToolActivityPart
 // group, matching Claude Code's read-group collapsing.
 type TimelineSegment =
   | { kind: 'group'; parts: ToolActivityPart[] }
+  | { kind: 'reasoning-group'; parts: ReasoningUIPart[] }
   | { kind: 'single'; part: AgentActivityPart }
+
+function completedToolSummary(tools: ToolActivityPart[]): string {
+  const summaries = new Map<string, { count: number; unit: string; verb: string }>()
+  for (const tool of tools) {
+    const definition = {
+      Bash: { key: 'bash', unit: 'command', verb: 'Ran' },
+      Edit: { key: 'edit', unit: 'file', verb: 'Updated' },
+      Glob: { key: 'search', unit: 'pattern', verb: 'Searched' },
+      Grep: { key: 'search', unit: 'pattern', verb: 'Searched' },
+      Read: { key: 'read', unit: 'file', verb: 'Read' },
+      Write: { key: 'write', unit: 'file', verb: 'Wrote' }
+    }[tool.toolName] ?? {
+      key: tool.toolName,
+      unit: 'call',
+      verb: toolLabel(tool.toolName)
+    }
+    const current = summaries.get(definition.key)
+    if (current) current.count += 1
+    else summaries.set(definition.key, { count: 1, unit: definition.unit, verb: definition.verb })
+  }
+
+  return Array.from(
+    summaries.values(),
+    ({ count, unit, verb }) => `${verb} ${count} ${unit}${count === 1 ? '' : 's'}`
+  ).join(' · ')
+}
 
 function toTimelineSegments(parts: AgentActivityPart[]): TimelineSegment[] {
   const segments: TimelineSegment[] = []
   for (const part of parts) {
-    if (part.type === 'dynamic-tool' && part.toolName === 'Read') {
+    if (part.type === 'reasoning' && part.state !== 'streaming') {
+      const last = segments.at(-1)
+      if (last?.kind === 'reasoning-group') last.parts.push(part)
+      else segments.push({ kind: 'reasoning-group', parts: [part] })
+    } else if (part.type === 'dynamic-tool' && part.toolName === 'Read') {
       const last = segments.at(-1)
       if (last?.kind === 'group') last.parts.push(part)
       else segments.push({ kind: 'group', parts: [part] })
@@ -38,7 +69,9 @@ function toTimelineSegments(parts: AgentActivityPart[]): TimelineSegment[] {
   return segments.map((segment) =>
     segment.kind === 'group' && segment.parts.length === 1
       ? { kind: 'single', part: segment.parts[0] }
-      : segment
+      : segment.kind === 'reasoning-group' && segment.parts.length === 1
+        ? { kind: 'single', part: segment.parts[0] }
+        : segment
   )
 }
 
@@ -66,10 +99,17 @@ function AgentActivityTimeline({
   parts: AgentActivityPart[]
 }): React.JSX.Element {
   const isLive = isStreaming && !isSettled
-  // Initialize from the mounting context only. Settling must not displace content
-  // or override a user's choice; historical runs start compact when revisited.
+  // Live runs start open. Untouched runs compact when they settle, while any
+  // explicit disclosure choice remains authoritative.
   const [expanded, setExpanded] = React.useState(isLive)
   const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
+  const userControlledDisclosure = React.useRef(false)
+  React.useEffect(() => {
+    if (!isLive && !userControlledDisclosure.current) {
+      setAnimateDisclosure(false)
+      setExpanded(false)
+    }
+  }, [isLive])
   const contentId = `agent-activity-${id}`
   const tools = parts.filter((part): part is ToolActivityPart => part.type === 'dynamic-tool')
   const failed = tools.filter((part) => getToolActivityState(part, isLive) === 'failed').length
@@ -79,9 +119,12 @@ function AgentActivityTimeline({
   const active = tools.filter((part) =>
     ['preparing', 'executing', 'streaming-output'].includes(getToolActivityState(part, isLive))
   )
-  const summary = tools.length
-    ? `${tools.length} tool call${tools.length === 1 ? '' : 's'}`
-    : 'Reasoning finished'
+  const completed = tools.filter((part) => getToolActivityState(part, isLive) === 'completed')
+  const summary = completed.length
+    ? completedToolSummary(completed)
+    : tools.length
+      ? null
+      : 'Reasoning finished'
   const liveLabel =
     active.length > 1
       ? `Running ${active.length} tools`
@@ -93,29 +136,17 @@ function AgentActivityTimeline({
           : 'Working'
   const label = [
     isLive ? liveLabel : summary,
-    failed ? `${failed} failed` : null,
-    incomplete ? `${incomplete} not completed` : null
+    failed ? `${failed} ${failed === 1 ? 'tool' : 'tools'} failed` : null,
+    incomplete ? `${incomplete} ${incomplete === 1 ? 'tool' : 'tools'} not completed` : null
   ]
     .filter(Boolean)
     .join(' · ')
   const OutcomeIcon = failed || incomplete ? CircleAlertIcon : CheckIcon
-  const counts = new Map<string, number>()
-  for (const tool of tools) {
-    const name = toolLabel(tool.toolName)
-    counts.set(name, (counts.get(name) ?? 0) + 1)
-  }
-  const hasThought = parts.some((part) => part.type === 'reasoning' && part.text.trim())
-  const overview = [
-    hasThought ? 'Thought' : null,
-    ...Array.from(counts, ([name, count]) => `${name} ${count}`)
-  ]
-    .filter(Boolean)
-    .join(' · ')
-
   return (
     <section
       aria-label="Agent activity"
       className="agent-activity"
+      data-live={isLive}
       data-open={expanded}
       data-animate-disclosure={animateDisclosure}
       data-testid="agent-activity-event"
@@ -127,6 +158,7 @@ function AgentActivityTimeline({
         className="agent-activity__header hover:bg-transparent hover:text-text-secondary aria-expanded:bg-transparent aria-expanded:text-text-secondary"
         variant="ghost"
         onClick={(event) => {
+          userControlledDisclosure.current = true
           setAnimateDisclosure(event.detail > 0)
           setExpanded((current) => !current)
         }}
@@ -146,11 +178,6 @@ function AgentActivityTimeline({
         </span>
         <ChevronDownIcon aria-hidden="true" className="agent-activity__group-chevron size-3.5" />
       </Button>
-      {!expanded && overview ? (
-        <div className="agent-activity__overview" title={overview}>
-          {overview}
-        </div>
-      ) : null}
       <span className="sr-only" role="status">
         {label}
       </span>
@@ -167,14 +194,24 @@ function AgentActivityTimeline({
               key={
                 segment.kind === 'group'
                   ? `group-${segment.parts[0]?.toolCallId}`
-                  : segment.part.type === 'dynamic-tool'
-                    ? segment.part.toolCallId
-                    : `${id}-${index}`
+                  : segment.kind === 'reasoning-group'
+                    ? `reasoning-group-${id}-${index}`
+                    : segment.part.type === 'dynamic-tool'
+                      ? segment.part.toolCallId
+                      : `${id}-${index}`
               }
               role="listitem"
             >
               {segment.kind === 'group' ? (
                 <ToolTraceGroup isLive={isLive} parts={segment.parts} />
+              ) : segment.kind === 'reasoning-group' ? (
+                <ThinkingTrace
+                  excerptText={segment.parts.at(-1)?.text}
+                  id={`${id}-${index}`}
+                  isStreaming={false}
+                  labelOverride={`Reasoning · ${segment.parts.length} steps`}
+                  text={segment.parts.map((part) => part.text).join('\n\n')}
+                />
               ) : segment.part.type === 'reasoning' ? (
                 <ThinkingTrace
                   id={`${id}-${index}`}

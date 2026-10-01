@@ -7,15 +7,14 @@ import {
   ToolTrace,
   firstErrorLine,
   getToolActivityState,
-  getTraceInputPath,
   type ToolActivityPart,
   type ToolNodeState
 } from './tool-trace'
 
 /**
  * Consecutive read calls collapse into one group line, like Claude Code's
- * collapsed read groups: `Read N files` with the latest path as the hint.
- * Expanding the group reveals the individual traces.
+ * collapsed read groups: `Read N files`, with individual paths and results
+ * available after expanding the group.
  */
 function ToolTraceGroup({
   isLive = true,
@@ -31,11 +30,28 @@ function ToolTraceGroup({
     ['executing', 'preparing', 'streaming-output'].includes(state)
   )
   const hasError = states.includes('failed')
-  const nodeState: ToolNodeState = hasError ? 'error' : isRunning ? 'running' : 'success'
+  const incomplete = states.filter((state) => state === 'incomplete').length
+  const failed = states.filter((state) => state === 'failed').length
+  const nodeState: ToolNodeState = hasError
+    ? 'error'
+    : isRunning
+      ? 'running'
+      : incomplete
+        ? 'incomplete'
+        : 'success'
   const fileCount = `${parts.length} ${parts.length === 1 ? 'file' : 'files'}`
-  const label = isRunning ? `Reading ${fileCount}…` : `Read ${fileCount}`
+  const label = isRunning
+    ? `Reading ${fileCount}…`
+    : failed || incomplete
+      ? [
+          `${parts.length} ${parts.length === 1 ? 'file read' : 'file reads'}`,
+          failed ? `${failed} failed` : null,
+          incomplete ? `${incomplete} not completed` : null
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : `Read ${fileCount}`
   const firstFailure = parts.find((part) => getToolActivityState(part, isLive) === 'failed')
-  const hint = getTraceInputPath(parts.at(-1) ?? parts[0])
   const contentId = `tool-trace-group-${parts[0]?.toolCallId ?? '0'}`
 
   return (
@@ -61,15 +77,11 @@ function ToolTraceGroup({
           <ChevronDownIcon className="size-3.5" />
         </span>
       </Button>
-      <div
-        className={
-          firstFailure
-            ? 'agent-activity__result agent-activity__result--error'
-            : 'agent-activity__result'
-        }
-      >
-        {firstFailure ? firstErrorLine(firstFailure.errorText) : hint}
-      </div>
+      {firstFailure ? (
+        <div className="agent-activity__result agent-activity__result--error">
+          {firstErrorLine(firstFailure.errorText)}
+        </div>
+      ) : null}
       <div className="thinking-block__panel">
         <div
           aria-hidden={!isExpanded}
@@ -78,7 +90,7 @@ function ToolTraceGroup({
           inert={!isExpanded}
         >
           {parts.map((part) => (
-            <ToolTrace isActive={isLive} key={part.toolCallId} part={part} />
+            <ToolTrace isActive={isLive} key={part.toolCallId} part={part} showDetails={false} />
           ))}
         </div>
       </div>

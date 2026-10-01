@@ -11,6 +11,7 @@ import {
 
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
 import { Chat, useChat } from '@ai-sdk/react'
+import { CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
@@ -125,11 +126,12 @@ function ChatMessageList({
               )}
             </>
             {errorMessage && (
-              <div
-                className="flex items-center justify-between gap-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
-                role="alert"
-              >
-                <p>{errorMessage}</p>
+              <div className="agent-turn-outcome" role="alert">
+                <CircleAlertIcon aria-hidden="true" className="size-4 flex-none" />
+                <div className="min-w-0 flex-1">
+                  <div className="agent-turn-outcome__heading">Stopped</div>
+                  <p className="agent-turn-outcome__detail">{errorMessage}</p>
+                </div>
                 {onRetry && (
                   <Button size="sm" variant="outline" onClick={onRetry}>
                     Try again

@@ -1,21 +1,21 @@
-import { SquareTerminalIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatCodeBlock } from '../../markdown/chat-code-block'
+import { stripTerminalControlSequences } from './terminal-output'
 
 function BashToolTrace({
-  command,
   isStreaming = false,
   output,
   stderr,
   isTruncated
 }: {
-  command?: string
   isStreaming?: boolean
   output: string
   stderr?: string
   isTruncated: boolean
 }): React.JSX.Element {
+  const cleanOutput = stripTerminalControlSequences(output)
+  const cleanStderr = stderr ? stripTerminalControlSequences(stderr) : undefined
   const viewportRef = React.useRef<HTMLDivElement>(null)
   const contentRef = React.useRef<HTMLDivElement>(null)
   const followOutput = React.useRef(true)
@@ -26,7 +26,7 @@ function BashToolTrace({
     }
   }, [])
 
-  React.useLayoutEffect(follow, [follow, output, stderr])
+  React.useLayoutEffect(follow, [follow, cleanOutput, cleanStderr])
   React.useLayoutEffect(() => {
     const viewport = viewportRef.current
     const content = contentRef.current
@@ -39,22 +39,7 @@ function BashToolTrace({
   }, [follow])
 
   return (
-    <div
-      aria-busy={isStreaming}
-      className="overflow-hidden rounded-lg border border-border-subtle bg-surface-secondary"
-    >
-      <div className="flex min-w-0 items-center gap-2 border-b border-border-subtle px-2.5 py-1.5 text-[11px]">
-        <SquareTerminalIcon aria-hidden="true" className="size-3.5 shrink-0 text-text-tertiary" />
-        <span className="shrink-0 font-medium text-foreground">Command</span>
-      </div>
-      {command ? (
-        <pre className="tool-trace__command m-0 max-h-32 overflow-auto border-b border-border-subtle px-3 py-2 font-mono text-xs leading-5 text-foreground">
-          <span aria-hidden="true" className="select-none text-text-tertiary">
-            ${' '}
-          </span>
-          {command}
-        </pre>
-      ) : null}
+    <div aria-busy={isStreaming} className="tool-trace__detail overflow-hidden">
       <div
         aria-label="Terminal output"
         aria-live="off"
@@ -73,19 +58,21 @@ function BashToolTrace({
         <div ref={contentRef}>
           <div className="border-b border-border-subtle last:border-b-0">
             <ChatCodeBlock
-              code={output || (isStreaming ? 'Waiting for output…' : 'No output.')}
+              code={cleanOutput || (isStreaming ? 'Waiting for output…' : 'No output.')}
               isStreaming={isStreaming}
               language="text"
               outputLabel="Output"
+              showLineNumbers={false}
             />
           </div>
-          {stderr ? (
+          {cleanStderr ? (
             <div className="bg-surface-secondary">
               <ChatCodeBlock
-                code={stderr}
+                code={cleanStderr}
                 isStreaming={isStreaming}
                 language="text"
                 outputLabel="Standard error"
+                showLineNumbers={false}
               />
             </div>
           ) : null}

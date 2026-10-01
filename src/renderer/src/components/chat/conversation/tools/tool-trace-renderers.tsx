@@ -6,6 +6,7 @@ import { BashToolTrace } from './bash-tool-trace'
 import { EditToolTrace } from './edit-tool-trace'
 import { WriteToolTrace } from './write-tool-trace'
 import { ToolCodePreview } from './tool-code-preview'
+import { getToolCodeLanguage } from './tool-code-preview'
 
 const ToolTraceInputSchema = z
   .object({
@@ -65,18 +66,21 @@ function getToolTracePresentation(
   return undefined
 }
 
+function searchDetails(content: string): string {
+  const lines = content.split('\n')
+  return /^(Found \d+|No matches found\.|No entries at this offset\.)/.test(lines[0] ?? '')
+    ? lines.slice(1).join('\n')
+    : content
+}
+
 function ToolTracePresentationView({
-  command,
   isDraft = false,
-  isPreparing = false,
   isStreaming = false,
   liveOutput,
   path,
   presentation
 }: {
-  command?: string
   isDraft?: boolean
-  isPreparing?: boolean
   isStreaming?: boolean
   liveOutput?: { preview: string; stderr: string; stdout: string }
   path?: string
@@ -87,15 +91,14 @@ function ToolTracePresentationView({
       <EditToolTrace
         edits={presentation.edits}
         isDraft={isDraft}
-        isPreparing={isPreparing}
         isStreaming={isStreaming}
         isTruncated={presentation.isTruncated}
+        language={getToolCodeLanguage(path)}
       />
     )
   if (presentation.type === 'bash')
     return (
       <BashToolTrace
-        command={command}
         isStreaming={isStreaming}
         output={liveOutput ? liveOutput.stdout : presentation.content}
         stderr={liveOutput?.stderr}
@@ -103,9 +106,21 @@ function ToolTracePresentationView({
       />
     )
   if (presentation.type === 'read')
-    return <ToolCodePreview content={presentation.content} label="File content" />
+    return (
+      <ToolCodePreview
+        content={presentation.content}
+        label="File content"
+        language={getToolCodeLanguage(path)}
+      />
+    )
   if (presentation.type === 'search')
-    return <ToolCodePreview content={presentation.content} label="Search results" />
+    return (
+      <ToolCodePreview
+        content={searchDetails(presentation.content)}
+        label="Search results"
+        showLineNumbers={false}
+      />
+    )
   if (presentation.type === 'write')
     return (
       <WriteToolTrace
@@ -113,8 +128,7 @@ function ToolTracePresentationView({
         isDraft={isDraft}
         isStreaming={isStreaming}
         isTruncated={presentation.isTruncated}
-        operation={presentation.operation}
-        path={path}
+        language={getToolCodeLanguage(path)}
       />
     )
   return <></>
