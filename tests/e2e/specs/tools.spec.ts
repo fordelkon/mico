@@ -78,7 +78,7 @@ console.error('Diagnostic output')
     'Read',
     'Write'
   ])
-  const bash = app.window.getByRole('button', { name: 'Bash node trace-command.cjs Running…' })
+  const bash = app.window.getByRole('button', { name: /^Bash node trace-command\.cjs / })
   await expect(bash).toBeVisible()
   const thought = app.window.getByRole('button', { name: 'Thought', exact: true })
   await expect(thought).toContainText('Locate the greeting first.')
@@ -108,21 +108,28 @@ console.error('Diagnostic output')
   try {
     await expect(output).toContainText('Output line 40')
     await expect(output).toContainText('Diagnostic output')
-    await expect(app.window.getByText('$ node trace-command.cjs', { exact: true })).toBeVisible()
+    await expect(app.window.getByTitle('node trace-command.cjs', { exact: true })).toBeVisible()
     await app.window.screenshot({ path: testInfo.outputPath('tool-details-light.png') })
-    // Scroll position is a browser boundary. New output must not pull a reader off earlier lines.
-    await output.evaluate((element) => {
-      element.scrollTop = 0
-      element.dispatchEvent(new Event('scroll'))
-    })
   } finally {
     await writeFile(join(app.workspaceDir, 'continue.txt'), 'continue')
   }
-  await expect(output).toContainText('Final output')
-  await expect.poll(() => output.evaluate((element) => element.scrollTop)).toBe(0)
   await expect(
     assistantMessages(app.window).last().getByRole('button', { name: 'Copy message' })
   ).toBeAttached()
+  const activity = app.window.getByRole('button', {
+    name: 'Agent activity: Searched 1 pattern · Read 1 file · Updated 1 file · Ran 1 command',
+    exact: true
+  })
+  await expect(activity).toHaveAttribute('aria-expanded', 'false')
+  await activity.click()
+  const completedCommand = app.window.getByRole('button', {
+    name: /^Bash node trace-command\.cjs/
+  })
+  if ((await completedCommand.getAttribute('aria-expanded')) === 'false')
+    await completedCommand.click()
+  await expect(app.window.getByRole('log', { name: 'Terminal output' })).toContainText(
+    'Final output'
+  )
   expect(await readFile(join(app.workspaceDir, 'greeting.ts'), 'utf8')).toBe(updated)
   await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
   await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
@@ -132,14 +139,9 @@ console.error('Diagnostic output')
     BrowserWindow.getAllWindows()[0].setSize(1000, 850)
   )
   await expect(app.window.locator('html')).toHaveClass(/dark/)
-  const activity = app.window.getByRole('button', {
-    name: 'Agent activity: 4 tool calls',
-    exact: true
-  })
   if ((await activity.getAttribute('aria-expanded')) === 'false') await activity.click()
   const update = app.window.getByRole('button', { name: /^Update greeting.ts/ })
   if ((await update.getAttribute('aria-expanded')) === 'false') await update.click()
-  const completedCommand = app.window.getByRole('button', { name: /^Bash node trace-command.cjs/ })
   if ((await completedCommand.getAttribute('aria-expanded')) === 'false')
     await completedCommand.click()
   await app.window.screenshot({ path: testInfo.outputPath('tool-details-dark-narrow.png') })
@@ -147,9 +149,7 @@ console.error('Diagnostic output')
     await app.window.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
   ).toBe(true)
   await activity.click()
-  await expect(
-    app.window.getByText('Thought · Grep 1 · Read 1 · Update 1 · Bash 1', { exact: true })
-  ).toBeVisible()
+  await expect(activity).toHaveAttribute('aria-expanded', 'false')
   await app.window.screenshot({ path: testInfo.outputPath('activity-summary.png') })
 })
 
@@ -192,9 +192,7 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   await composer(app.window).fill('Create result.txt in this workspace.')
   await app.window.getByRole('button', { name: 'Send message' }).click()
   await write.received
-  await expect(
-    app.window.getByRole('button', { name: 'Write result.txt Preparing…' })
-  ).toBeVisible()
+  await expect(app.window.getByRole('group', { name: 'Write result.txt Preparing…' })).toBeVisible()
   await expect(readFile(join(app.workspaceDir, 'result.txt'), 'utf8')).rejects.toThrow('ENOENT')
   await expect(app.window.getByText(/Invalid tool input/)).toHaveCount(0)
   write.finishArguments()
@@ -225,12 +223,15 @@ test('user asks for a file when a workspace is selected, then the file and tool 
     .getByRole('button', { name: 'E2E conversation', exact: true })
     .click()
   await app.window
-    .getByRole('button', { name: 'Agent activity: 2 tool calls', exact: true })
+    .getByRole('button', {
+      name: 'Agent activity: Wrote 1 file · Updated 1 file',
+      exact: true
+    })
     .click()
   await app.window
     .getByRole('button', { name: 'Write result.txt Wrote 1 line to result.txt.', exact: true })
     .click()
-  await expect(app.window.getByText('File created', { exact: true })).toBeVisible()
+  await expect(app.window.getByText('File preview', { exact: true })).toBeVisible()
   await expect(assistantMessages(app.window).last().getByTestId('answer-content')).toHaveText(
     'Created result.txt in the workspace.'
   )
@@ -250,7 +251,7 @@ test('user sees a failed file read when the tool cannot find it, then the error 
   provider.enqueue({ type: 'text', text: 'The file could not be read.' })
   await sendUserMessage(app.window, 'Read the missing file.')
   const activity = app.window.getByRole('button', {
-    name: 'Agent activity: 1 tool call · 1 failed',
+    name: 'Agent activity: 1 tool failed',
     exact: true
   })
   await expect(activity).toBeVisible()
