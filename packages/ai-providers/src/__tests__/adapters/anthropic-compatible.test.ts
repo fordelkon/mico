@@ -264,47 +264,6 @@ describe('Anthropic-compatible provider', () => {
     })
   })
 
-  it('user gets a thinking budget when a max cap is set, then thinking is enabled', async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(new Response('', { status: 400 }))
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
-    const provider = createChatProvider(
-      providerConfig({ maxTokens: 8192 }),
-      streamDependencies(fetch)
-    )
-
-    await collect(await provider.stream(streamInput('Hi', { thinkingEffort: 'high' })))
-
-    expect(await fetchCallRequestBody(fetch, 1)).toMatchObject({
-      max_tokens: 8192,
-      thinking: { type: 'enabled', budget_tokens: 6144 }
-    })
-  })
-
-  it('user gets budget thinking when adaptive is rejected, then it is remembered', async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(new Response('', { status: 422 }))
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
-    const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
-    const input = streamInput('Hi', { thinkingEffort: 'high' })
-
-    await collect(await provider.stream(input))
-    await collect(await provider.stream(input))
-
-    expect(fetch).toHaveBeenCalledTimes(3)
-    expect(await fetchCallRequestBody(fetch, 0)).toMatchObject({
-      thinking: { type: 'adaptive' }
-    })
-    expect(await fetchCallRequestBody(fetch, 1)).toMatchObject({
-      thinking: { type: 'enabled' }
-    })
-    expect(await fetchCallRequestBody(fetch, 2)).toMatchObject({
-      thinking: { type: 'enabled' }
-    })
-  })
-
   it('user gets no thinking field when thinking is disabled, then the request omits it', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
@@ -376,26 +335,38 @@ describe('Anthropic-compatible provider', () => {
     expect(await fetchCallRequestBody(fetch)).toMatchObject({ thinking: { type: 'adaptive' } })
   })
 
-  it('user gets budget thinking when adaptive is rejected, then the fallback is cached', async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(new Response('', { status: 400 }))
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
-    const provider = createChatProvider(
-      providerConfig({ baseUrl: 'https://gateway.example', modelId: 'third-party-reasoner' }),
-      streamDependencies(fetch)
-    )
+  it.each([400, 422])(
+    'user gets budget thinking when adaptive returns %s, then the capped fallback is cached',
+    async (status) => {
+      const fetch = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(new Response('', { status }))
+        .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+      const provider = createChatProvider(
+        providerConfig({
+          baseUrl: 'https://gateway.example',
+          modelId: 'third-party-reasoner',
+          maxTokens: 8192
+        }),
+        streamDependencies(fetch)
+      )
 
-    await collect(await provider.stream(streamInput('Hi', { thinkingEffort: 'high' })))
+      await collect(await provider.stream(streamInput('Hi', { thinkingEffort: 'high' })))
 
-    const first = await fetchCallRequestBody(fetch, 0)
-    const second = await fetchCallRequestBody(fetch, 1)
-    expect(first).toMatchObject({ thinking: { type: 'adaptive' } })
-    expect(second).toMatchObject({ thinking: { type: 'enabled', budget_tokens: 6144 } })
+      const first = await fetchCallRequestBody(fetch, 0)
+      const second = await fetchCallRequestBody(fetch, 1)
+      expect(first).toMatchObject({ thinking: { type: 'adaptive' } })
+      expect(second).toMatchObject({
+        max_tokens: 8192,
+        thinking: { type: 'enabled', budget_tokens: 6144 }
+      })
 
-    await collect(await provider.stream(streamInput('Again', { thinkingEffort: 'high' })))
-    expect(await fetchCallRequestBody(fetch, 2)).toMatchObject({
-      thinking: { type: 'enabled', budget_tokens: 6144 }
-    })
-  })
+      await collect(await provider.stream(streamInput('Again', { thinkingEffort: 'high' })))
+      expect(await fetchCallRequestBody(fetch, 2)).toMatchObject({
+        max_tokens: 8192,
+        thinking: { type: 'enabled', budget_tokens: 6144 }
+      })
+      expect(fetch).toHaveBeenCalledTimes(3)
+    }
+  )
 })

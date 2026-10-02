@@ -1,9 +1,9 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import Database from 'better-sqlite3'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { SqliteDatabase } from './sqlite-database'
 
@@ -12,18 +12,31 @@ const probeMigrations = [
   { id: '0002_probe', sql: "INSERT INTO log (id) VALUES ('0002');" }
 ]
 
-function openStore(path: string, migrations = probeMigrations): Promise<SqliteDatabase> {
-  return SqliteDatabase.open({
+const stores: SqliteDatabase[] = []
+const directories: string[] = []
+
+afterEach(async () => {
+  for (const store of stores.splice(0)) {
+    if (store.connection.open) store.close()
+  }
+  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+})
+
+async function openStore(path: string, migrations = probeMigrations): Promise<SqliteDatabase> {
+  const store = await SqliteDatabase.open({
     path,
     migrations,
     migrationTable: 'store_schema_migrations',
     label: 'Store'
   })
+  stores.push(store)
+  return store
 }
 
 describe('SqliteDatabase', () => {
   it('user opens a store database when migrations are pending, then each is applied exactly once in order', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sqlite-'))
+    directories.push(root)
     const path = join(root, 'store.db')
 
     const first = await openStore(path)
@@ -42,6 +55,7 @@ describe('SqliteDatabase', () => {
 
   it('user opens a store database when it contains an unknown applied migration, then startup fails naming it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sqlite-'))
+    directories.push(root)
     const path = join(root, 'store.db')
     const current = await openStore(path)
     current.close()

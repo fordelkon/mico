@@ -229,12 +229,9 @@ function AgentActivityTimeline({
   )
 }
 
-const ThinkingBlock = ThinkingTrace
 export {
   AgentLoadingIndicator,
   AgentActivityTimeline,
-  ThinkingBlock,
-  ToolTrace,
   type ToolOutputDelta,
   type AgentActivityPart
 }

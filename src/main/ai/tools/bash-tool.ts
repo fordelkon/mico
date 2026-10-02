@@ -216,4 +216,4 @@ function createBashTool(): AgentTool<BashInput> {
   })
 }
 
-export { createBashTool, isReadOnlyBashCommand }
+export { createBashTool }

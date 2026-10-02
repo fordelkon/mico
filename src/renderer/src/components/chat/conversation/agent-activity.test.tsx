@@ -3,25 +3,22 @@ import '@testing-library/jest-dom/vitest'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  AgentActivityTimeline,
-  AgentLoadingIndicator,
-  ThinkingBlock,
-  ToolTrace
-} from './agent-activity'
+import { AgentActivityTimeline, AgentLoadingIndicator } from './agent-activity'
+import { ThinkingTrace } from './tools/thinking-trace'
+import { ToolTrace } from './tools/tool-trace'
 
 afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('ThinkingBlock', () => {
+describe('ThinkingTrace', () => {
   it('user follows a thought when it settles, then its excerpt appears and the full text remains expandable', () => {
     const text = 'Checking the file layout.\nThen inspect the output rendering.'
-    const { rerender } = render(<ThinkingBlock id="excerpt" isStreaming text={text} />)
+    const { rerender } = render(<ThinkingTrace id="excerpt" isStreaming text={text} />)
     expect(screen.getByRole('button', { name: 'Thinking' })).not.toHaveTextContent(
       'Checking the file layout.'
     )
-    rerender(<ThinkingBlock id="excerpt" isStreaming={false} text={text} />)
+    rerender(<ThinkingTrace id="excerpt" isStreaming={false} text={text} />)
     const trigger = screen.getByRole('button', { name: 'Thought' })
     expect(trigger).toHaveTextContent('Checking the file layout.')
     fireEvent.click(trigger)
@@ -31,7 +28,7 @@ describe('ThinkingBlock', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
   })
   it('user sees compact reasoning when text streams, then details remain optional', () => {
-    render(<ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />)
+    render(<ThinkingTrace id="reasoning-1" isStreaming text="Inspecting the request." />)
 
     expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
       'aria-expanded',
@@ -46,7 +43,7 @@ describe('ThinkingBlock', () => {
   })
 
   it('user reveals the thought summary when clicking Thought, then the panel shows', () => {
-    render(<ThinkingBlock id="reasoning-1" isStreaming={false} text="Inspecting the request." />)
+    render(<ThinkingTrace id="reasoning-1" isStreaming={false} text="Inspecting the request." />)
 
     const button = screen.getByRole('button', { name: 'Thought' })
     const summary = screen.getByTestId('thinking-panel').firstElementChild
@@ -62,13 +59,13 @@ describe('ThinkingBlock', () => {
 
   it('user closes reasoning when it streams, then later content preserves that choice', () => {
     const { rerender } = render(
-      <ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request." />
+      <ThinkingTrace id="reasoning-1" isStreaming text="Inspecting the request." />
     )
     fireEvent.click(screen.getByRole('button', { name: 'Thinking' }))
     fireEvent.click(screen.getByRole('button', { name: 'Thinking' }))
 
     rerender(
-      <ThinkingBlock id="reasoning-1" isStreaming text="Inspecting the request. Reading files." />
+      <ThinkingTrace id="reasoning-1" isStreaming text="Inspecting the request. Reading files." />
     )
 
     expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
@@ -76,7 +73,7 @@ describe('ThinkingBlock', () => {
       'false'
     )
     rerender(
-      <ThinkingBlock
+      <ThinkingTrace
         id="reasoning-1"
         isStreaming={false}
         text="Inspecting the request. Reading files."

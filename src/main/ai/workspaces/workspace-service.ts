@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, join } from 'node:path'
 import { app } from 'electron'
 import * as z from 'zod'
 
@@ -117,13 +117,6 @@ class WorkspaceService {
     const project = this.getProject(projectId)
     if (!project) throw new Error('Project does not exist.')
     return { kind: 'project', projectId: project.id, rootPath: project.rootPath }
-  }
-  resolvePath(context: WorkspaceContext, workspacePath: string): string {
-    const resolvedPath = resolve(context.rootPath, workspacePath)
-    const relativePath = relative(context.rootPath, resolvedPath)
-    if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath))
-      throw new Error('Workspace path must remain within its root.')
-    return resolvedPath
   }
   private async resolveDirectory(directoryPath: string): Promise<string> {
     const resolved = await realpath(directoryPath)

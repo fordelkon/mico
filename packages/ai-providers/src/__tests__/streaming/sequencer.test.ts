@@ -17,7 +17,7 @@ describe('stream sequencer', () => {
     ])
   })
 
-  it('user sees one reasoning close when text deltas arrive repeatedly, then text continues uninterrupted', () => {
+  it('user receives another text delta when text is already open, then no duplicate start is emitted', () => {
     const sequencer = createStreamSequencer(() => 'part-1')
 
     sequencer.emitText('First.')

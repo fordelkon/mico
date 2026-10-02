@@ -44,7 +44,7 @@ function renderMessageList(
 }
 
 describe('ChatMessageList', () => {
-  it('user reads earlier messages undisturbed when new content streams, then the transcript stays stable', () => {
+  it('user receives another streamed chunk when earlier messages are unchanged, then their parts are not read again', () => {
     let stablePartsReads = 0
     const stableParts: MicoUIMessage['parts'] = [
       { type: 'text', text: 'Earlier message', state: 'done' }
@@ -88,7 +88,7 @@ describe('ChatMessageList', () => {
     expect(stablePartsReads).toBe(readsBeforeNextChunk)
   })
 
-  it('user sees the transcript hold still when the retry countdown advances, then nothing flickers', async () => {
+  it('user waits through a retry countdown when its timer advances, then the transcript is not read again', async () => {
     vi.useFakeTimers()
     class ObservableMessages extends Array<MicoUIMessage> {
       latestMessageReads = 0

@@ -74,7 +74,7 @@ describe('AppSidebar', () => {
     expect(onSelectConversation).toHaveBeenCalledWith('conversation-2')
   })
 
-  it('user does not see rows re-render when a status changes, then they are skipped', () => {
+  it('user receives a status change for another conversation when rows are stable, then unchanged titles are not read again', () => {
     let stableTitleReads = 0
     const stableConversation = {
       id: 'conversation-1',

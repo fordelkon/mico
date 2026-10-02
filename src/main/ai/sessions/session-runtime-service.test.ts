@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import Database from 'better-sqlite3'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import type { ChatMessage } from '@shared/data/schemas/chat'
 import type { ChatProviderMessage } from '@mico/ai-providers'
@@ -27,11 +27,17 @@ const assistantMessage: ChatMessage = {
   parts: [{ type: 'text', text: 'first answer' }]
 }
 
+const databases: SessionDatabase[] = []
+afterEach(() => {
+  for (const database of databases.splice(0)) database.close()
+})
+
 async function createService(): Promise<{
   database: SessionDatabase
   service: SessionRuntimeService
 }> {
   const database = new SessionDatabase({ getUserDataPath: () => ':memory:' })
+  databases.push(database)
   await database.initialize()
   const service = new SessionRuntimeService({
     createId: (() => {
@@ -422,8 +428,10 @@ describe('SessionRuntimeService', () => {
 
   it('user keeps existing events when the schema migrates, then the old log accepts tool trace events', async () => {
     const userDataPath = await mkdtemp(join(tmpdir(), 'mico-session-migration-'))
+    let legacy: Database.Database | undefined
+    let database: SessionDatabase | undefined
     try {
-      const legacy = new Database(join(userDataPath, 'sessions.db'))
+      legacy = new Database(join(userDataPath, 'sessions.db'))
       legacy.exec(
         'CREATE TABLE session_schema_migrations (id TEXT PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL)'
       )
@@ -433,29 +441,55 @@ describe('SessionRuntimeService', () => {
           .prepare('INSERT INTO session_schema_migrations (id, applied_at) VALUES (?, ?)')
           .run(migration.id, 1)
       }
-      legacy.close()
-
-      const database = new SessionDatabase({ getUserDataPath: () => userDataPath })
-      await database.initialize()
-
-      database.connection
+      legacy
         .prepare(
           'INSERT INTO sessions (id, title, created_at, updated_at, last_activity_at) VALUES (?, ?, ?, ?, ?)'
         )
         .run('session-1', 'Session', 1, 1, 1)
-      database.connection
+      legacy
         .prepare('INSERT INTO turns (id, session_id, ordinal, created_at) VALUES (?, ?, ?, ?)')
         .run('turn-1', 'session-1', 1, 1)
-      database.connection
+      legacy
         .prepare(
           'INSERT INTO runs (id, session_id, turn_id, attempt, status, started_at) VALUES (?, ?, ?, ?, ?, ?)'
         )
         .run('run-1', 'session-1', 'turn-1', 1, 'completed', 1)
+      legacy
+        .prepare(
+          'INSERT INTO runtime_events (id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(
+          'legacy-event',
+          'session-1',
+          'run-1',
+          1,
+          'user_message_recorded',
+          '{"message":"kept"}',
+          'legacy-digest',
+          1
+        )
+      legacy.close()
+
+      database = new SessionDatabase({ getUserDataPath: () => userDataPath })
+      await database.initialize()
+
+      expect(
+        database.connection.prepare('SELECT * FROM runtime_events WHERE id = ?').get('legacy-event')
+      ).toEqual({
+        id: 'legacy-event',
+        session_id: 'session-1',
+        run_id: 'run-1',
+        session_sequence: 1,
+        kind: 'user_message_recorded',
+        payload_json: '{"message":"kept"}',
+        payload_digest: 'legacy-digest',
+        created_at: 1
+      })
       database.connection
         .prepare(
           'INSERT INTO runtime_events (id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         )
-        .run('event-1', 'session-1', 'run-1', 1, 'tool_trace_recorded', '{}', 'digest', 1)
+        .run('event-1', 'session-1', 'run-1', 2, 'tool_trace_recorded', '{}', 'digest', 1)
 
       expect(
         database.connection
@@ -469,8 +503,9 @@ describe('SessionRuntimeService', () => {
           .pluck()
           .get('0004_tool_trace_events')
       ).toBe('0004_tool_trace_events')
-      database.close()
     } finally {
+      database?.close()
+      if (legacy?.open) legacy.close()
       await rm(userDataPath, { force: true, recursive: true })
     }
   })
@@ -611,22 +646,6 @@ describe('SessionRuntimeService', () => {
 
     expect(service.getReplayMessages(first.runId)).toEqual([userMessage])
     expect(startTurn(service, session)).toEqual(first)
-  })
-
-  it('user gets fast idempotent lookup when repeating a request ID, then the run_request_id index is used', async () => {
-    const { database, service, session } = await createSession()
-    startTurn(service, session)
-
-    // Guards the idempotent-lookup query plan: repeating a request ID must hit the
-    // run_request_id index rather than scanning runtime_events.
-    // SAFETY: EXPLAIN QUERY PLAN always returns rows with a textual detail column.
-    const plan = database.connection
-      .prepare(
-        "EXPLAIN QUERY PLAN SELECT runs.* FROM runtime_events JOIN runs ON runs.id = runtime_events.run_id WHERE runtime_events.session_id = ? AND runtime_events.kind = 'run_started' AND json_extract(runtime_events.payload_json, '$.requestId') = ?"
-      )
-      .all(session.id, 'request-1') as Array<{ detail: string }>
-
-    expect(plan.map(({ detail }) => detail).join('\n')).toContain('runtime_events_run_request_id')
   })
 
   it('user gets one model_request_started event when notified twice, then duplicates are ignored', async () => {

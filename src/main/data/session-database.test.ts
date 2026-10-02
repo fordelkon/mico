@@ -1,13 +1,15 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { SessionDatabase } from './session-database'
 
 describe('SessionDatabase', () => {
+  let database: SessionDatabase | undefined
+  afterEach(() => database?.close())
   it('user opens the session database when the path is the in-memory sentinel, then no files are created on disk', async () => {
-    const database = new SessionDatabase({ getUserDataPath: () => ':memory:' })
+    database = new SessionDatabase({ getUserDataPath: () => ':memory:' })
 
     await database.initialize()
 

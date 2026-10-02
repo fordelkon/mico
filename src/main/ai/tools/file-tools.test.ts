@@ -28,7 +28,7 @@ describe('workspace file tools', () => {
   }
 
   it('user reads a window when offset and limit are set, then it offers a continuation', async () => {
-    const context = await createContext()
+    const context = await createStreamingContext()
     await writeFile(join(context.cwd, 'a.txt'), 'one\ntwo\nthree\n')
 
     const result = await createReadTool().execute(
@@ -37,16 +37,8 @@ describe('workspace file tools', () => {
     )
 
     expect(result.output).toBe('two\n\n[More content available. Use offset=3.]')
-  })
-
-  it('user sees a preview when a read is bounded, then only the selection is emitted', async () => {
-    const context = await createStreamingContext()
-    await writeFile(join(context.cwd, 'a.txt'), 'one\ntwo\nthree\n')
-
-    await createReadTool().execute({ file_path: 'a.txt', limit: 2 }, context)
-
     expect(context.deltas).toEqual([
-      { stream: 'preview', delta: 'one\ntwo\n\n[More content available. Use offset=3.]' }
+      { stream: 'preview', delta: 'two\n\n[More content available. Use offset=3.]' }
     ])
   })
 
@@ -60,6 +52,7 @@ describe('workspace file tools', () => {
         context
       )
     ).rejects.toThrow('must match exactly once')
+    await expect(readFile(join(context.cwd, 'a.txt'), 'utf8')).resolves.toBe('same\nsame\n')
   })
 
   it('user gets a recovery hint when an edit changes nothing, then the tool refuses before writing', async () => {
@@ -98,7 +91,7 @@ describe('workspace file tools', () => {
   })
 
   it('user creates a nested file when writing a new path, then a rewrite replaces it', async () => {
-    const context = await createContext()
+    const context = await createStreamingContext()
 
     await expect(
       createWriteTool().execute({ file_path: 'nested/a.txt', content: 'ok' }, context)
@@ -112,17 +105,11 @@ describe('workspace file tools', () => {
     ).resolves.toEqual({
       output: 'Replaced nested/a.txt.'
     })
-  })
-
-  it('user sees the content preview when a write starts, then the write succeeds', async () => {
-    const context = await createStreamingContext()
-
-    await createWriteTool().execute(
-      { file_path: 'nested/a.txt', content: 'const value = 1\n' },
-      context
-    )
-
-    expect(context.deltas).toEqual([{ stream: 'preview', delta: 'const value = 1\n' }])
+    await expect(readFile(join(context.cwd, 'nested/a.txt'), 'utf8')).resolves.toBe('updated')
+    expect(context.deltas).toEqual([
+      { stream: 'preview', delta: 'ok' },
+      { stream: 'preview', delta: 'updated' }
+    ])
   })
 
   it('user sees what changed when an edit runs, then a diff-style preview is emitted', async () => {
@@ -135,5 +122,6 @@ describe('workspace file tools', () => {
     )
 
     expect(context.deltas).toEqual([{ stream: 'preview', delta: '- before\n+ after\n+ next' }])
+    await expect(readFile(join(context.cwd, 'a.txt'), 'utf8')).resolves.toBe('after\nnext\n')
   })
 })

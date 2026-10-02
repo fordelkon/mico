@@ -186,7 +186,7 @@ describe('SettingsMain', () => {
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
   })
 
-  it('user sees unrelated consumers stay still when selecting a provider, then no extra work runs', async () => {
+  it('user selects a provider when an action-only consumer is mounted, then that consumer does not render again', async () => {
     const user = userEvent.setup()
     const onRender = vi.fn<() => void>()
     render(

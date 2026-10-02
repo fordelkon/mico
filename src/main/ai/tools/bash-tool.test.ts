@@ -2,7 +2,7 @@ import { realpath } from 'node:fs/promises'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createBashTool, isReadOnlyBashCommand } from './bash-tool'
+import { createBashTool } from './bash-tool'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('bash tool', () => {
@@ -100,7 +100,7 @@ describe('bash tool', () => {
     )
   })
 
-  it('user gets no dangling process when a running command is aborted, then nothing is left running', async () => {
+  it('user stops a running command when cancelling, then execution rejects with an abort error', async () => {
     const { cwd } = await createContext()
     const controller = new AbortController()
     const command = 'node -e "process.stdout.write(\'ready\'); setTimeout(() => {}, 30000)"'
@@ -119,21 +119,20 @@ describe('bash tool', () => {
     await expect(pending).rejects.toThrow('Command aborted')
   })
 
-  it('user requests a read-only command when every segment only reads, then it is classified safe', () => {
-    expect(isReadOnlyBashCommand('ls -la')).toBe(true)
-    expect(isReadOnlyBashCommand('cat a.md && grep pattern b.md')).toBe(true)
-    expect(isReadOnlyBashCommand('git status')).toBe(true)
-  })
-
-  it('user requests a mutating command when it writes, redirects, or pushes, then it is classified unsafe', () => {
-    expect(isReadOnlyBashCommand('rm -rf build/')).toBe(false)
-    expect(isReadOnlyBashCommand('ls; rm x')).toBe(false)
-    expect(isReadOnlyBashCommand('echo hi > f.txt')).toBe(false)
-    expect(isReadOnlyBashCommand('git push')).toBe(false)
-  })
-
-  it('user requests an unclassifiable command when it cannot be parsed into segments, then it fails closed to unsafe', () => {
-    expect(isReadOnlyBashCommand('ls |')).toBe(false)
-    expect(isReadOnlyBashCommand('node script.js')).toBe(false)
-  })
+  it.each([
+    ['ls -la', true],
+    ['cat a.md && grep pattern b.md', true],
+    ['git status', true],
+    ['rm -rf build/', false],
+    ['ls; rm x', false],
+    ['echo hi > f.txt', false],
+    ['git push', false],
+    ['ls |', false],
+    ['node script.js', false]
+  ])(
+    'user submits %s when scheduling tools, then parallel execution eligibility is %s',
+    (command, safe) => {
+      expect(createBashTool().isConcurrencySafe({ command })).toBe(safe)
+    }
+  )
 })

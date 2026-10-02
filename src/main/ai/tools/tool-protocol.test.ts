@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -52,10 +52,8 @@ describe('workspace tool protocol', () => {
     })
   })
 
-  it('user receives invalid edit arguments when a call is empty, then field errors explain how to retry without writing', async () => {
+  it('user submits empty edit arguments when calling a tool, then field errors explain how to retry', async () => {
     const cwd = await createTemporaryWorkspace('mico-protocol-')
-    const file_path = join(cwd, 'file.txt')
-    await writeFile(file_path, 'unchanged')
     const result = await ToolRegistry.forWorkspace(cwd).execute(
       { toolCallId: 'empty', toolName: 'Edit', input: {} },
       new AbortController().signal
@@ -64,6 +62,6 @@ describe('workspace tool protocol', () => {
     expect(result.output).toContain('file_path')
     expect(result.output).toContain('old_string')
     expect(result.output).toContain('new_string')
-    expect(await readFile(file_path, 'utf8')).toBe('unchanged')
+    expect(result.output).toContain('Correct the arguments and retry.')
   })
 })

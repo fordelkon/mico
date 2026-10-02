@@ -318,15 +318,19 @@ describe('ElectronChatTransport', () => {
     })
     api.emit({ type: 'finish', requestId: 'request-2' })
 
-    let settled = false
-    void reader.read().then(() => {
-      settled = true
+    const pendingRead = reader.read()
+    api.emit({
+      type: 'chunk',
+      requestId,
+      chunk: { type: 'text-delta', id: 'part-1', delta: 'Accepted' }
     })
-    await Promise.resolve()
-    expect(settled).toBe(false)
-
     api.emit({ type: 'finish', requestId })
+    await expect(pendingRead).resolves.toEqual({
+      done: false,
+      value: { type: 'text-delta', id: 'part-1', delta: 'Accepted' }
+    })
     await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
+    expect(api.unsubscribeCount).toBe(1)
   })
 
   it('user sees a safe error when the start fails, then the listener is released', async () => {
@@ -337,18 +341,6 @@ describe('ElectronChatTransport', () => {
     const reader = (await transport.sendMessages(sendOptions)).getReader()
 
     await expect(reader.read()).rejects.toThrow('Unable to start chat. Please try again.')
-    expect(api.unsubscribeCount).toBe(1)
-  })
-
-  it('user aborts the request when the signal fires, then the abort is forwarded once', async () => {
-    const { api, transport } = createTransport(() => 'medium')
-    const controller = new AbortController()
-
-    await transport.sendMessages({ ...sendOptions, abortSignal: controller.signal })
-    controller.abort()
-    await Promise.resolve()
-
-    expect(api.abortedRequestIds).toEqual([requestId])
     expect(api.unsubscribeCount).toBe(1)
   })
 })

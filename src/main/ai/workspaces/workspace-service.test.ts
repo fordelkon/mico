@@ -28,22 +28,11 @@ describe('WorkspaceService', () => {
 
     expect(service.getDefaultWorkspacePath()).toBe(join(userDataPath, 'workspaces', 'default'))
     expect((await stat(service.getDefaultWorkspacePath())).isDirectory()).toBe(true)
-  })
-
-  it('user gets workspace paths resolved when they are relative, then escaping the root is rejected', async () => {
-    const { service, userDataPath } = await createService()
-
     expect(service.getDefaultWorkspaceContext()).toEqual({
       kind: 'project',
       projectId: 'default',
       rootPath: join(userDataPath, 'workspaces', 'default')
     })
-    expect(service.resolvePath(service.getDefaultWorkspaceContext(), 'notes/today.md')).toBe(
-      join(userDataPath, 'workspaces', 'default', 'notes', 'today.md')
-    )
-    expect(() =>
-      service.resolvePath(service.getDefaultWorkspaceContext(), '../outside.txt')
-    ).toThrow('Workspace path must remain within its root.')
   })
 
   it('user can re-add an archived project when adding its path again, then its rootPath is preserved', async () => {

@@ -60,7 +60,7 @@ describe('ToolRegistry', () => {
     expect(result.output).toContain('ENOENT')
   })
 
-  it('user gets ordered runs when exclusive and write tools mix, then none overlap', async () => {
+  it('user writes after a command when tools are submitted in order, then the command sees no new file', async () => {
     const registry = await createRegistry()
     const results = await registry.executeBatch(
       [
@@ -84,10 +84,8 @@ describe('ToolRegistry', () => {
     expect(results.map((result) => result.isError)).toEqual([false, false])
   })
 
-  it('user gets results in submission order when a slow read runs with a fast read, then order is preserved', async () => {
+  it('user reads files of different sizes when submitting a batch, then results retain submission order', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
-    // The first read moves the most bytes, so completion order alone would
-    // put it last; batching must keep results aligned with the requests.
     await writeFile(join(cwd, 'big.txt'), 'x'.repeat(200 * 1024))
     await writeFile(join(cwd, 'small.txt'), 'small')
     const registry = ToolRegistry.forWorkspace(cwd)
@@ -104,7 +102,7 @@ describe('ToolRegistry', () => {
     expect(results.map((result) => result.isError)).toEqual([false, false])
   })
 
-  it('user batches a read-only command with a read when both are concurrency-safe, then both results arrive', async () => {
+  it('user submits a command with a file read when batching tools, then both succeed', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'a.txt'), 'content')
     const registry = ToolRegistry.forWorkspace(cwd)
