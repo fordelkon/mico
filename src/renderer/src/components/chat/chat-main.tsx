@@ -2,7 +2,6 @@ import { Spinner } from '@mico/ui'
 import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
 import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
 import { isActiveChatResponse } from '@renderer/types/chat'
-import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import * as React from 'react'
 
 import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
@@ -20,17 +19,6 @@ type ChatMainProps = {
 }
 
 function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
-  const [refreshedCapabilities, setRefreshedCapabilities] = React.useState<
-    ModelReasoningCapabilities | null | undefined
-  >(undefined)
-  const { setThinkingEffort } = session
-
-  const refreshCapabilities = React.useCallback(async (): Promise<void> => {
-    const capabilities = await window.api.chat.getCapabilities()
-    setRefreshedCapabilities(capabilities ?? null)
-    if (!capabilities) setThinkingEffort('none')
-  }, [setThinkingEffort])
-
   const { response } = responses
   const isForActiveConversation =
     response.status !== 'idle' && session.activeConversation?.id === response.conversationId
@@ -54,7 +42,7 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
       onProjectSelected={session.selectProjectForNewChat}
       onProjectsRefresh={session.refreshProjects}
       projectId={session.activeProject?.id ?? null}
-      onModelSelected={refreshCapabilities}
+      onModelSelected={session.refreshCapabilities}
       selectedModelEntryId={session.activeConversation ? session.selectedModelEntryId : undefined}
       selectSessionModel={session.activeConversation ? session.setSessionModelEntry : undefined}
       onSend={responses.sendMessage}
@@ -62,9 +50,7 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
       projectLabel={session.activeProject?.name ?? null}
       projectPath={session.activeProject?.rootPath ?? null}
       projects={session.projects}
-      reasoningCapabilities={
-        refreshedCapabilities === undefined ? session.reasoningCapabilities : refreshedCapabilities
-      }
+      reasoningCapabilities={session.reasoningCapabilities}
       thinkingEffort={session.thinkingEffort}
       onThinkingEffortChange={session.setThinkingEffort}
     />
@@ -72,6 +58,7 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
 
   return (
     <div className="chat-paper paper-canvas flex min-h-0 flex-1 flex-col overflow-hidden">
+      {session.activationError && <p role="alert">{session.activationError}</p>}
       {session.activeConversation ? (
         <>
           <div

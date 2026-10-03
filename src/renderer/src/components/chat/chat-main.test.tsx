@@ -27,6 +27,8 @@ function createSessionSlice(): ChatActiveSessionSlice {
     thinkingEffort: 'medium',
     setThinkingEffort: vi.fn<(thinkingEffort: ThinkingSelection) => void>(),
     reasoningCapabilities: null,
+    refreshCapabilities: vi.fn<ChatActiveSessionSlice['refreshCapabilities']>(),
+    activationError: null,
     selectedModelEntryId: null,
     setSessionModelEntry: vi.fn<(modelEntryId: string) => Promise<void>>(),
     projects: [],
@@ -121,6 +123,19 @@ describe('ChatMain', () => {
     expect(screen.getByRole('button', { name: 'Stop response' })).toBeVisible()
   })
 
+  it('user cannot open a saved conversation when loading fails, then a retry instruction is visible', () => {
+    const session = createSessionSlice()
+    session.activationError = 'Could not open this conversation. Select it again to retry.'
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain session={session} responses={createResponseSlice()} />
+      </ProviderLibraryProvider>
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not open this conversation. Select it again to retry.'
+    )
+  })
+
   it('user stores the chosen model when picking it from the composer, then it persists', async () => {
     const user = userEvent.setup()
     const session = createSessionSlice()
@@ -136,22 +151,5 @@ describe('ChatMain', () => {
     await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
 
     await waitFor(() => expect(session.setSessionModelEntry).toHaveBeenCalledWith('ollama:qwen3'))
-  })
-
-  it('user turns thinking off when the model has no reasoning, then effort resets', async () => {
-    const user = userEvent.setup()
-    const session = createSessionSlice()
-
-    render(
-      <ProviderLibraryProvider>
-        <ChatMain session={session} responses={createResponseSlice()} />
-      </ProviderLibraryProvider>
-    )
-
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Select model' })).toBeEnabled())
-    await user.click(screen.getByRole('button', { name: 'Select model' }))
-    await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
-
-    await waitFor(() => expect(session.setThinkingEffort).toHaveBeenCalledWith('none'))
   })
 })

@@ -26,4 +26,11 @@ Use these rules when designing, changing, or reviewing module boundaries. Tests 
 
 ## Verify the Changed Contract
 
+### Owned contracts in src
+
+- Invoke task requests and results are defined in `src/shared/ipc/contracts.ts`. Main registration and the preload adapter use these schemas, and renderer method types are derived from them. Adding a task updates its contract and its task-specific handlers, not independent request and result declarations.
+- A JSON document serializes mutations against its latest committed snapshot. The owner computes domain changes inside that operation; failed writes leave the committed state unchanged. Atomic file replacement is an internal persistence detail and does not promise power-loss durability.
+- Active session activation applies only to the latest navigation intent. Request configuration comes from the sending session. Capability refresh and selection normalization belong to active session ownership, including when the composer changes models.
+- Tool execution captures settled facts and per-call timestamps. The model loop delivers those facts in submission order after the replayable step, preserving runtime event log ordering regardless of concurrent completion.
+
 Apply the [repository verification requirements](../CLAUDE.md#verification). For design changes, check the trend, not a score: external adaptations after internal changes are shrinking, boundary conventions are moving from documentation into enforced checks, and shared interfaces are not accumulating business-specific cases. Report the evidence and any gaps; no metric replaces business judgment.

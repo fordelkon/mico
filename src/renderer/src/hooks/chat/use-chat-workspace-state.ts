@@ -7,11 +7,7 @@ import {
 } from '@renderer/types/chat'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 
-import {
-  ThinkingEffortStore,
-  useActiveSession,
-  type ChatActiveSessionSlice
-} from './use-active-session'
+import { useActiveSession, type ChatActiveSessionSlice } from './use-active-session'
 import { useChatSessions } from './chat-session-instances'
 import { useConversationList } from './use-conversation-list'
 
@@ -41,10 +37,7 @@ type ChatWorkspace = {
  * conversations, and relaying generated titles.
  */
 function useChatWorkspaceState(): ChatWorkspace {
-  const thinkingEffortStore = React.useState(() => new ThinkingEffortStore())[0]
-  const sessions = useChatSessions({
-    getThinkingEffort: React.useCallback(() => thinkingEffortStore.get(), [thinkingEffortStore])
-  })
+  const sessions = useChatSessions()
   const {
     responses,
     respondingConversationIds,
@@ -63,7 +56,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     touchConversationActivity
   } = conversationList
   const { getSession, removeSession, updateSession } = sessions
-  const activeSessionSlice = useActiveSession({ sessions, thinkingEffortStore })
+  const activeSessionSlice = useActiveSession({ sessions })
   const { activeSession, activateNewSession, closeSessionIfActive, pendingProject } =
     activeSessionSlice
   const activeConversation = React.useMemo(

@@ -120,6 +120,164 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('user leaves a conversation when its model refresh callback resumes, then the current capabilities stay selected', async () => {
+    const capabilities = Promise.withResolvers<ModelReasoningCapabilities | null>()
+    const { result } = renderWorkspaceState((api) => {
+      const load = api.sessions.load
+      api.sessions.load = async (id) => ({ ...(await load(id)), id })
+      api.getCapabilities = async (sessionId?: string) =>
+        sessionId === 'second'
+          ? capabilities.promise
+          : { selectableEfforts: ['low'], defaultEffort: 'low' }
+    })
+    act(() => result.current.session.selectConversation('first'))
+    await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('first'))
+    const previousRefresh = result.current.session.refreshCapabilities
+    act(() => result.current.session.selectConversation('second'))
+    await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('second'))
+    act(() => result.current.session.setThinkingEffort('high'))
+    await act(async () => {
+      await previousRefresh()
+      capabilities.resolve({ selectableEfforts: ['high'], defaultEffort: 'high' })
+      await capabilities.promise
+    })
+    expect(result.current.session.reasoningCapabilities).toEqual({
+      selectableEfforts: ['high'],
+      defaultEffort: 'high'
+    })
+    expect(result.current.session.thinkingEffort).toBe('high')
+  })
+
+  it('user changes to a model without reasoning when refreshing capabilities, then effort resets', async () => {
+    const { result } = renderWorkspaceState()
+    act(() => result.current.session.setThinkingEffort('high'))
+    await act(async () => {
+      await result.current.session.refreshCapabilities()
+    })
+    expect(result.current.session.thinkingEffort).toBe('none')
+  })
+
+  it('user selects two conversations when loads finish in reverse, then the latest selection stays active', async () => {
+    const first = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['load']>>>()
+    const second = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['load']>>>()
+    const { api, result } = renderWorkspaceState((api) => {
+      api.sessions.load = (id) => (id === 'first' ? first.promise : second.promise)
+    })
+    const saved = {
+      id: 'second',
+      title: 'Second',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 1,
+      lastActivityAt: 1,
+      messages: []
+    }
+    act(() => {
+      result.current.session.selectConversation('first')
+      result.current.session.selectConversation('second')
+    })
+    await act(async () => {
+      second.resolve(saved)
+      await second.promise
+    })
+    await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('second'))
+    await act(async () => {
+      first.resolve({ ...saved, id: 'first', title: 'First' })
+      await first.promise
+    })
+    expect(result.current.session.activeSession?.conversationId).toBe('second')
+    expect(api.startedRequests).toEqual([])
+  })
+
+  it('user starts a new chat when a saved conversation is loading, then its late load cannot reopen it', async () => {
+    const pending = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['load']>>>()
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.load = () => pending.promise
+    })
+    act(() => {
+      result.current.session.selectConversation('saved')
+      result.current.session.startNewChat()
+    })
+    await act(async () => {
+      pending.resolve({
+        id: 'saved',
+        title: 'Saved',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 1,
+        lastActivityAt: 1,
+        messages: []
+      })
+      await pending.promise
+    })
+    expect(result.current.session.activeSession).toBeNull()
+  })
+
+  it('user changes a model then navigates when saving is delayed, then the new conversation keeps its model', async () => {
+    const pending = Promise.withResolvers<void>()
+    const { result } = renderWorkspaceState((api) => {
+      const load = api.sessions.load
+      api.sessions.load = async (id) => ({
+        ...(await load(id)),
+        id,
+        defaultProfile: {
+          modelEntryId: `${id}-model`,
+          modelId: 'model',
+          providerId: 'provider',
+          thinkingEffort: 'high',
+          configurationDigest: 'digest'
+        }
+      })
+      api.sessions.setModelEntry = () => pending.promise
+    })
+    act(() => result.current.session.selectConversation('first'))
+    await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('first'))
+    const change = result.current.session.setSessionModelEntry('changed')
+    act(() => result.current.session.selectConversation('second'))
+    await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('second'))
+    await act(async () => {
+      pending.resolve()
+      await change
+    })
+    expect(result.current.session.selectedModelEntryId).toBe('second-model')
+    act(() => result.current.session.selectConversation('first'))
+    expect(result.current.session.selectedModelEntryId).toBe('changed')
+  })
+
+  it('user retries a background conversation when another is selected, then it uses its own thinking effort', async () => {
+    const { api, result } = renderWorkspaceState((api) => {
+      const load = api.sessions.load
+      api.sessions.load = async (id) => ({ ...(await load(id)), id })
+    })
+    act(() => result.current.session.selectConversation('first'))
+    await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('first'))
+    act(() => result.current.session.setThinkingEffort('high'))
+    const background = result.current.session.activeChat
+    act(() => result.current.session.selectConversation('second'))
+    await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('second'))
+    act(() => result.current.session.setThinkingEffort('low'))
+    act(() => {
+      void background?.regenerate()
+    })
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    expect(api.startedRequests[0]).toMatchObject({ sessionId: 'first', thinkingEffort: 'high' })
+  })
+
+  it('user cannot load a conversation when storage fails, then a retry message appears', async () => {
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.load = async () => {
+        throw new Error('Storage unavailable')
+      }
+    })
+    act(() => result.current.session.selectConversation('saved'))
+    await waitFor(() =>
+      expect(result.current.session.activationError).toBe(
+        'Could not open this conversation. Select it again to retry.'
+      )
+    )
+    expect(result.current.session.activeSession).toBeNull()
+  })
+
   it('user reloads project history when sessions are listed, then workspace metadata is retained', async () => {
     const savedSession = {
       id: 'session-1',

@@ -138,10 +138,7 @@ type ChatSessionsStore = {
   updateSession: (conversationId: string, patch: (session: ChatSession) => void) => void
 }
 
-function useChatSessions(options: {
-  getThinkingEffort: () => ThinkingSelection
-}): ChatSessionsStore {
-  const { getThinkingEffort } = options
+function useChatSessions(): ChatSessionsStore {
   const {
     responses,
     respondingConversationIds,
@@ -192,7 +189,8 @@ function useChatSessions(options: {
         messages: toUiMessages(messages),
         transport: new ElectronChatTransport(window.api.chat, {
           sessionId: conversation.id,
-          getThinkingEffort,
+          getThinkingEffort: () =>
+            sessionsRef.current.get(conversation.id)?.thinkingEffort ?? 'default',
           getPermissionMode: () =>
             sessionsRef.current.get(conversation.id)?.permissionMode ?? 'default',
           onStatusChange: (status) => {
@@ -235,7 +233,7 @@ function useChatSessions(options: {
       sessionsRef.current.set(conversation.id, session)
       return session
     },
-    [getThinkingEffort, getResponse, onResponseState, onResponseSettled]
+    [getResponse, onResponseState, onResponseSettled]
   )
 
   React.useEffect(
