@@ -3,6 +3,9 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path
 
 type ResolveWorkspacePathOptions = { allowMissing?: boolean }
 
+/** Matches one `..` path segment with its preceding separator. */
+const DOT_DOT_SEGMENT = /(^|[\\/])\.\.(?=[\\/]|$)/
+
 async function resolveMissingPath(path: string, followedLinks = 0): Promise<string> {
   try {
     return await realpath(path)
@@ -21,12 +24,30 @@ async function resolveMissingPath(path: string, followedLinks = 0): Promise<stri
       // Do not normalize '..' before realpath follows preceding symlinks:
       // "pivot/../file" may refer to the parent of an outside link target.
       const target = isAbsolute(link) ? link : `${dirname(path)}${sep}${link}`
-      return resolveMissingPath(target, followedLinks + 1)
+      return resolveDotDotTarget(target, followedLinks + 1)
     }
     const parent = dirname(path)
     if (parent === path) throw error
     return resolve(await resolveMissingPath(parent, followedLinks), basename(path))
   }
+}
+
+/**
+ * Resolves a link target that contains `..` segments. Windows realpath
+ * normalizes '..' lexically before following preceding symlinks, which would
+ * silently retarget "link/../file" to the link's lexical parent; POSIX follows
+ * the link first. Each '..' is therefore applied against the fully resolved
+ * prefix (symlinks followed), one segment at a time.
+ */
+async function resolveDotDotTarget(target: string, followedLinks: number): Promise<string> {
+  const dotDot = DOT_DOT_SEGMENT.exec(target)
+  if (!dotDot) return resolveMissingPath(target, followedLinks)
+
+  const base = target.slice(0, dotDot.index) + dotDot[1]
+  const suffix = target.slice(dotDot.index + dotDot[0].length)
+  const resolvedBase = await resolveMissingPath(base, followedLinks)
+  const applied = resolve(resolvedBase, '..')
+  return resolveMissingPath(suffix ? `${applied}${sep}${suffix}` : applied, followedLinks + 1)
 }
 
 /** Resolves the actual target, retaining missing suffixes and following dangling links. */
