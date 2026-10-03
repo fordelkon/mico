@@ -298,7 +298,8 @@ describe('SessionRuntimeService', () => {
       parts: [
         { type: 'text', text: 'Review this file.' },
         { type: 'reasoning', text: 'Private reasoning' },
-        { type: 'document', name: 'index.ts', text: '  export {}\n' }
+        { type: 'document', name: 'index.ts', text: '  export {}\n' },
+        { type: 'document', name: 'a&"b.ts', text: 'export {}' }
       ]
     }
     const expectedMessage = {
@@ -306,7 +307,8 @@ describe('SessionRuntimeService', () => {
       parts: [
         { type: 'text', text: 'Review this file.' },
         { type: 'reasoning', text: 'Private reasoning' },
-        { type: 'document', name: 'index.ts', text: '  export {}\n' }
+        { type: 'document', name: 'index.ts', text: '  export {}\n' },
+        { type: 'document', name: 'a&"b.ts', text: 'export {}' }
       ]
     }
     const firstRun = startTurn(service, session, 'request-1', attachedMessage)
@@ -334,7 +336,8 @@ describe('SessionRuntimeService', () => {
         role: 'user',
         parts: [
           { type: 'text', text: 'Review this file.' },
-          { type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' }
+          { type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' },
+          { type: 'text', text: '<document name="a&amp;&quot;b.ts">\nexport {}\n</document>' }
         ]
       }
     ])
@@ -345,7 +348,8 @@ describe('SessionRuntimeService', () => {
         role: 'user',
         parts: [
           { type: 'text', text: 'Review this file.' },
-          { type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' }
+          { type: 'text', text: '<document name="index.ts">\n  export {}\n\n</document>' },
+          { type: 'text', text: '<document name="a&amp;&quot;b.ts">\nexport {}\n</document>' }
         ]
       },
       assistantMessage,

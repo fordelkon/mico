@@ -3,13 +3,13 @@ import { createHash } from 'node:crypto'
 import {
   resolveThinkingSelection,
   type ChatProvider,
-  type ChatProviderMessage,
   type ChatProviderConfiguration
 } from '@mico/ai-providers'
-import type { ChatDocumentPart, ChatMessage } from '@shared/data/schemas/chat'
+import type { ChatMessage } from '@shared/data/schemas/chat'
 import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
 
 import { NoModelSelectedError, toTurnFailure } from './turn-failure'
+import { getMessageText, toProviderContext } from './conversation-context'
 import type { ChatProviderResolver } from './chat-provider-resolver'
 import { ToolAgentRunner } from '../tools/tool-agent-runner'
 import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
@@ -303,9 +303,9 @@ class TurnExecutor {
           const cwd = this.runtime?.loadSession(request.sessionId).cwd
           const messages = turn.runId
             ? (this.runtime?.getReplayMessages(turn.runId) ?? [
-                toProviderMessage(request.userMessage)
+                toProviderContext(request.userMessage)
               ])
-            : [toProviderMessage(request.userMessage)]
+            : [toProviderContext(request.userMessage)]
           if (cwd)
             messages.unshift({
               role: 'system',
@@ -620,35 +620,6 @@ class CappedTextBuilder {
       }
     }
   }
-}
-
-function formatDocument(part: ChatDocumentPart): string {
-  const name = part.name
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-  return `<document name="${name}">\n${part.text}\n</document>`
-}
-
-function toProviderMessage(message: ChatMessage): ChatProviderMessage {
-  return {
-    ...message,
-    // Tool traces are renderer-only persistence projections, never provider conversation context.
-    parts: message.parts
-      .filter((part) => part.type !== 'tool-trace')
-      .map((part) =>
-        part.type === 'document' ? { type: 'text', text: formatDocument(part) } : part
-      )
-  }
-}
-
-function getMessageText(message: TurnStartRequest['userMessage']): string {
-  return message.parts
-    .filter((part) => part.type === 'text' || part.type === 'document')
-    .map((part) => (part.type === 'document' ? formatDocument(part) : part.text))
-    .join('\n')
-    .trim()
 }
 
 function normalizeGeneratedTitle(value: string): string | null {

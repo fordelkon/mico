@@ -10,6 +10,7 @@ import type {
   SessionSummary
 } from '@shared/data/schemas/session'
 import { SessionDatabase } from '../../data/session-database'
+import { toProviderReplayContext } from '../chat/conversation-context'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
 import {
   assembleReplayEvents,
@@ -213,7 +214,7 @@ class SessionRuntimeService {
       .all(runId, runId) as Array<{ id: string; turn_id: string }>
     const messages: ChatProviderMessage[] = []
     for (const prior of priorRuns) {
-      messages.push(toProviderContextMessage(this.getTurnUserMessage(prior.turn_id)))
+      messages.push(toProviderReplayContext(this.getTurnUserMessage(prior.turn_id)))
       const events = this.getRunReplayEvents(prior.id)
       if (events.length) messages.push(...events)
       else {
@@ -226,12 +227,12 @@ class SessionRuntimeService {
         if (finalized) {
           assertPayloadDigest(finalized)
           messages.push(
-            toProviderContextMessage(parseMessagePayload(finalized.payload_json).message)
+            toProviderReplayContext(parseMessagePayload(finalized.payload_json).message)
           )
         }
       }
     }
-    messages.push(toProviderContextMessage(this.getTurnUserMessage(run.turn_id)))
+    messages.push(toProviderReplayContext(this.getTurnUserMessage(run.turn_id)))
     // SAFETY: the fixed query selects only the declared run identity column.
     const retryRuns = this.dependencies.database.connection
       .prepare('SELECT id FROM runs WHERE turn_id = ? AND attempt < ? ORDER BY attempt')
@@ -740,22 +741,6 @@ function toSessionSummary(row: SessionRow): SessionSummary {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastActivityAt: row.last_activity_at
-  }
-}
-function toProviderContextMessage(message: ChatMessage): ChatProviderMessage {
-  return {
-    role: message.role,
-    parts: message.parts.flatMap((part) => {
-      if (part.type === 'text') return [{ type: 'text' as const, text: part.text }]
-      if (part.type === 'document')
-        return [
-          {
-            type: 'text' as const,
-            text: `<document name="${part.name}">\n${part.text}\n</document>`
-          }
-        ]
-      return []
-    })
   }
 }
 function toJsonValue(value: RuntimeEventPayloads[RuntimeEventKind]): JsonValue {
