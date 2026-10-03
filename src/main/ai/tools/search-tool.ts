@@ -122,7 +122,7 @@ function createGlobTool() {
       'Find workspace files by glob pattern. Returns filenames sorted by modification time, newest first. Respects ignore files; does not follow symlinks. Results are bounded to 200 paths. Use Grep to search file contents.',
     inputSchema: GlobInputSchema,
     isConcurrencySafe: () => true,
-    isReadOnly: () => true,
+    operation: () => ({ kind: 'read-only' }),
     async execute({ pattern, path }, context) {
       const target = await searchPath(path, context)
       const resolved = await resolveWorkspacePath(context.cwd, target)
@@ -154,7 +154,7 @@ function createGrepTool() {
       'Search workspace contents with ripgrep regular expressions. pattern is required. Defaults to case-sensitive filenames-only results; use output_mode="content" for matching lines or "count" for counts. Respects ignore files, skips binary files and does not follow symlinks. Invalid regex, glob or file types return errors. Output is bounded to 1 MiB.',
     inputSchema: GrepInputSchema,
     isConcurrencySafe: () => true,
-    isReadOnly: () => true,
+    operation: () => ({ kind: 'read-only' }),
     async execute(input, context) {
       const mode = input.output_mode ?? 'files_with_matches'
       const args = ['--sort', 'path', '--with-filename', '--no-heading']

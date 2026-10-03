@@ -34,6 +34,13 @@ type ToolExecutionTrace = {
   finishedAt: number
 }
 type ToolInput = JsonObject
+/** Effects derived from schema-validated input, independent of provider tool names. */
+type ToolOperation =
+  | { kind: 'read-only' }
+  | { kind: 'file-read'; path: string }
+  | { kind: 'file-write'; path: string; allowMissing: boolean }
+  | { kind: 'command' }
+  | { kind: 'unknown' }
 /** A semantic rejection with a model-facing hint for recovering on retry. */
 type ToolValidationFailure = { message: string }
 /**
@@ -49,8 +56,8 @@ type AgentTool<Input> = {
   inputSchema: z.ZodType<Input>
   /** Per-call parallel-safety. Receive the parsed input: the same tool can be safe for some inputs and not others. */
   isConcurrencySafe: (input: Input) => boolean
-  /** Per-call read-only classification; defaults fail closed to "write". */
-  isReadOnly: (input: Input) => boolean
+  /** Per-call effects for authorization; unclassified operations require approval. */
+  operation: (input: Input) => ToolOperation
   /** Semantic validation beyond schema conformance; runs after safeParse, before execute. */
   validateInput?: (
     input: Input,
@@ -59,14 +66,14 @@ type AgentTool<Input> = {
   execute: (input: Input, context: ToolExecutionContext) => Promise<ToolExecutionResult>
 }
 /** An AgentTool with the safety annotations left to the fail-closed defaults. */
-type AgentToolDefinition<Input> = Omit<AgentTool<Input>, 'isConcurrencySafe' | 'isReadOnly'> &
-  Partial<Pick<AgentTool<Input>, 'isConcurrencySafe' | 'isReadOnly'>>
+type AgentToolDefinition<Input> = Omit<AgentTool<Input>, 'isConcurrencySafe' | 'operation'> &
+  Partial<Pick<AgentTool<Input>, 'isConcurrencySafe' | 'operation'>>
 
-// Fail closed: an unannotated tool runs serially and is treated as a write.
+// Fail closed: an unannotated tool runs serially and requires approval.
 // A missing annotation costs performance, never safety.
 const SAFE_DEFAULTS = {
   isConcurrencySafe: () => false,
-  isReadOnly: () => false
+  operation: (): ToolOperation => ({ kind: 'unknown' })
 }
 
 function defineAgentTool<Input>(tool: AgentToolDefinition<Input>): AgentTool<Input> {
@@ -104,7 +111,7 @@ type RegisteredAgentTool = {
     input: ToolInput,
     context: ToolExecutionContext
   ) => Promise<{
-    isReadOnly: boolean
+    operation: ToolOperation
     execute: () => Promise<ToolExecutionResult>
   }>
 }
@@ -139,13 +146,13 @@ function registerTool<Input>(tool: AgentTool<Input>): RegisteredAgentTool {
       }
       const failure = await tool.validateInput?.(parsed.data, context)
       if (failure) throw new Error(failure.message)
-      let isReadOnly = false
+      let operation: ToolOperation = { kind: 'unknown' }
       try {
-        isReadOnly = tool.isReadOnly(parsed.data)
+        operation = tool.operation(parsed.data)
       } catch {
         // Unknown classifications require approval.
       }
-      return { isReadOnly, execute: () => tool.execute(parsed.data, context) }
+      return { operation, execute: () => tool.execute(parsed.data, context) }
     }
   }
 }
@@ -166,6 +173,7 @@ export {
   type ToolExecutionResult,
   type ToolExecutionTrace,
   type ToolInput,
+  type ToolOperation,
   type ToolOutputDelta,
   type ToolValidationFailure
 }

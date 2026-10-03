@@ -30,7 +30,7 @@ function createReadTool(): AgentTool<ReadInput> {
       'Read a UTF-8 text file in the project workspace. Use offset and limit for large files.',
     // Pure read with no side effects: always safe to run alongside other reads.
     isConcurrencySafe: () => true,
-    isReadOnly: () => true,
+    operation: ({ file_path }) => ({ kind: 'file-read', path: file_path }),
     inputSchema: ReadInputSchema,
     async execute({ file_path, offset = 1, limit = MAX_READ_LINES }, context) {
       context.signal.throwIfAborted()

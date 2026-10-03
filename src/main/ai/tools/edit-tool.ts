@@ -34,6 +34,7 @@ function createEditTool() {
     description:
       'Edit an existing workspace file by exact string replacement. Read the file first. Supply file_path, old_string and new_string. Use replace_all only when every occurrence should change. This is not a regex or patch tool; use Write to create a file.',
     inputSchema: EditInputSchema,
+    operation: ({ file_path }) => ({ kind: 'file-write', path: file_path, allowMissing: false }),
     async validateInput({ old_string, new_string }) {
       return old_string === new_string
         ? {

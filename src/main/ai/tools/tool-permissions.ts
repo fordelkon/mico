@@ -1,9 +1,8 @@
 import { realpath } from 'node:fs/promises'
 import { basename, relative, sep } from 'node:path'
 
-import * as z from 'zod'
-
 import type { PermissionMode } from '@shared/ai/permissions'
+import type { ToolOperation } from './tool-contract'
 import type { ToolCall } from './tool-registry'
 import { resolveCanonicalPath, resolveWorkspacePath } from './workspace-path-policy'
 
@@ -43,29 +42,27 @@ async function authorizeTool(
   call: ToolCall,
   cwd: string,
   signal: AbortSignal,
-  isReadOnly: boolean,
+  operation: ToolOperation,
   options: ToolPermissionOptions,
   hookAskReason?: string
 ): Promise<void> {
   signal.throwIfAborted()
-  const filePath = ['Read', 'Write', 'Edit'].includes(call.toolName)
-    ? z.object({ file_path: z.string() }).parse(call.input).file_path
-    : undefined
+  const fileOperation =
+    operation.kind === 'file-read' || operation.kind === 'file-write' ? operation : undefined
+  const allowMissing = operation.kind === 'file-write' && operation.allowMissing
   let protectedPath = false
   let approvedTarget: string | undefined
-  if (filePath !== undefined) {
-    const target = await resolveWorkspacePath(cwd, filePath, {
-      allowMissing: call.toolName === 'Write'
-    })
-    approvedTarget = await resolveCanonicalPath(target, { allowMissing: call.toolName === 'Write' })
+  if (fileOperation) {
+    const target = await resolveWorkspacePath(cwd, fileOperation.path, { allowMissing })
+    approvedTarget = await resolveCanonicalPath(target, { allowMissing })
     protectedPath =
       isProtectedPath(cwd, target) || isProtectedPath(await realpath(cwd), approvedTarget)
   }
-  if (hookAskReason === undefined && call.toolName !== 'Bash') {
-    if (isReadOnly) return
+  if (hookAskReason === undefined) {
+    if (operation.kind === 'read-only' || operation.kind === 'file-read') return
     if (
       options.permissionMode === 'acceptEdits' &&
-      ['Write', 'Edit'].includes(call.toolName) &&
+      operation.kind === 'file-write' &&
       !protectedPath
     )
       return
@@ -74,7 +71,7 @@ async function authorizeTool(
     (hookAskReason !== undefined
       ? hookAskReason.trim() || 'A preToolUse hook requires your approval.'
       : undefined) ??
-    (call.toolName === 'Bash'
+    (operation.kind === 'command'
       ? 'This command runs on your computer without a sandbox and may access files outside this workspace.'
       : protectedPath
         ? 'This operation changes a protected configuration path and requires your approval.'
@@ -89,14 +86,9 @@ async function authorizeTool(
     throw new Error(
       `Permission denied by the user for ${call.toolName}. The operation was not executed. Ask the user before attempting the same operation again.`
     )
-  if (approvedTarget && filePath !== undefined) {
-    const target = await resolveWorkspacePath(cwd, filePath, {
-      allowMissing: call.toolName === 'Write'
-    })
-    if (
-      (await resolveCanonicalPath(target, { allowMissing: call.toolName === 'Write' })) !==
-      approvedTarget
-    )
+  if (approvedTarget && fileOperation) {
+    const target = await resolveWorkspacePath(cwd, fileOperation.path, { allowMissing })
+    if ((await resolveCanonicalPath(target, { allowMissing })) !== approvedTarget)
       throw new Error(
         'The file target changed while waiting for approval. The operation was not executed. Review the new target and request approval again.'
       )

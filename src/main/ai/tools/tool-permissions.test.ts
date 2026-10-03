@@ -3,6 +3,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ToolRegistry } from './tool-registry'
+import { defineAgentTool, registerTool, type ToolOperation } from './tool-contract'
+import { authorizeTool } from './tool-permissions'
+import { createWriteTool } from './write-tool'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 const writeCall = {
@@ -55,6 +58,50 @@ describe('tool permissions', () => {
     expect(result.isError).toBe(false)
     expect(await readFile(join(cwd, 'created.txt'), 'utf8')).toBe('approved content')
   })
+
+  it('user accepts edits when a file tool is renamed, then its write still succeeds', async () => {
+    const cwd = await createTemporaryWorkspace('mico-permissions-')
+    const signal = new AbortController().signal
+    const call = { ...writeCall, toolName: 'Save' }
+    const tool = registerTool({ ...createWriteTool(), name: call.toolName })
+    const prepared = await tool.prepare(call.input, { cwd, signal })
+
+    await authorizeTool(call, cwd, signal, prepared.operation, { permissionMode: 'acceptEdits' })
+    await prepared.execute()
+
+    expect(await readFile(join(cwd, 'created.txt'), 'utf8')).toBe('approved content')
+  })
+
+  it.each([
+    undefined,
+    (): ToolOperation => {
+      throw new Error('Unknown operation')
+    }
+  ])(
+    'user accepts edits when tool effects are unclassified, then approval is required',
+    async (operation) => {
+      const cwd = await createTemporaryWorkspace('mico-permissions-')
+      const signal = new AbortController().signal
+      const write = createWriteTool()
+      const definition = {
+        name: write.name,
+        description: write.description,
+        inputSchema: write.inputSchema,
+        execute: write.execute
+      }
+      const tool = registerTool(
+        defineAgentTool(operation ? { ...definition, operation } : definition)
+      )
+      const prepared = await tool.prepare(writeCall.input, { cwd, signal })
+
+      await expect(
+        authorizeTool(writeCall, cwd, signal, prepared.operation, {
+          permissionMode: 'acceptEdits'
+        })
+      ).rejects.toThrow('No approval interface is available')
+      await expect(access(join(cwd, 'created.txt'))).rejects.toThrow('ENOENT')
+    }
+  )
 
   it('user edits through a protected symlink when accepting edits, then approval is still required', async () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')

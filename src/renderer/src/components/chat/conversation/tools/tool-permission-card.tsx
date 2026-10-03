@@ -3,7 +3,7 @@ import * as React from 'react'
 
 import type { ToolPermissionData } from '@shared/ai/permissions'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
-import { ToolTraceInputSchema } from './tool-trace-renderers'
+import { ToolTraceInputSchema } from '@shared/ai/tool-trace'
 
 function ToolPermissionCard({
   permission,

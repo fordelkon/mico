@@ -191,6 +191,22 @@ describe('useChatWorkspaceState', () => {
     expect(api.startedRequests).toHaveLength(1)
   })
 
+  it('user submits twice before the next render when a session is open, then only one request starts', async () => {
+    const { api, result } = renderWorkspaceState()
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
+
+    await act(async () => {
+      const first = result.current.responses.sendMessage({ text: 'First', documents: [] })
+      const second = result.current.responses.sendMessage({ text: 'Second', documents: [] })
+      expect(await first).toBe(true)
+      expect(await second).toBe(false)
+    })
+
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    expect(api.startedRequests[0].userMessage.parts).toEqual([{ type: 'text', text: 'First' }])
+  })
+
   it('user can resend when session creation fails, then the retry succeeds', async () => {
     let failCreation: ((reason: Error) => void) | undefined
     const { api, result } = renderWorkspaceState((api) => {

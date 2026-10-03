@@ -26,9 +26,9 @@ import { stripTerminalControlSequences } from './terminal-output'
 import {
   getToolTracePresentation,
   ToolTraceInputSchema,
-  ToolTracePresentationView,
   type ToolTraceInput
-} from './tool-trace-renderers'
+} from '@shared/ai/tool-trace'
+import { ToolTracePresentationView } from './tool-trace-renderers'
 
 type ToolDescription = {
   accessibleDetail?: string

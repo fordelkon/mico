@@ -204,6 +204,7 @@ function createBashTool(): AgentTool<BashInput> {
       'Execute a foreground shell command starting in the project workspace. timeout is in milliseconds. Background tasks are not supported. This tool is not sandboxed.',
     isConcurrencySafe: ({ command }) => isReadOnlyBashCommand(command),
     inputSchema: BashInputSchema,
+    operation: () => ({ kind: 'command' }),
     async execute({ command, timeout }, context) {
       return {
         output: await executeShell(

@@ -28,13 +28,13 @@ const WriteInputSchema = z.strictObject({
 })
 type WriteInput = z.infer<typeof WriteInputSchema>
 
-// No safety annotations: the fail-closed defaults apply (serial, treated as a write).
 function createWriteTool(): AgentTool<WriteInput> {
   return defineAgentTool({
     name: 'Write',
     description:
       'Create or overwrite a workspace file with complete UTF-8 content. Requires file_path and content. Creates parent directories. Read existing files before overwriting; prefer Edit for targeted replacements.',
     inputSchema: WriteInputSchema,
+    operation: ({ file_path }) => ({ kind: 'file-write', path: file_path, allowMissing: true }),
     async execute({ file_path, content }, context) {
       context.signal.throwIfAborted()
       const target = await resolveWorkspacePath(context.cwd, file_path, { allowMissing: true })

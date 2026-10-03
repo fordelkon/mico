@@ -81,14 +81,7 @@ class ToolRegistry {
         }
       })
       const askReason = await runPreToolUse(hooks, hookContext)
-      await authorizeTool(
-        snapshot,
-        this.#cwd,
-        signal,
-        prepared.isReadOnly,
-        this.#options,
-        askReason
-      )
+      await authorizeTool(snapshot, this.#cwd, signal, prepared.operation, this.#options, askReason)
       signal.throwIfAborted()
       const result = await prepared.execute()
       await runPostToolUse(hooks, { ...hookContext, output: result.output, isError: false })
