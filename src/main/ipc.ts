@@ -7,30 +7,13 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { open, stat as statFile } from 'node:fs/promises'
-import * as z from 'zod'
+import type { InvokeChannel } from '@shared/ipc/contracts'
 
-import { TurnRequestIdSchema, TurnStartRequestSchema } from '@shared/ipc/schemas/chat'
-import { PermissionResponseSchema } from '@shared/ai/permissions'
-import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
-import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
-import { ProjectIdSchema, SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
-import { ThinkingSelectionSchema } from '@shared/data/schemas/chat'
-import {
-  ModelEntryIdSchema,
-  ProviderConfigurationSchema,
-  ProviderLibrarySchema
-} from '@shared/data/schemas/provider'
 import { IpcChannel } from '@shared/IpcChannel'
-import {
-  AddModelRequestSchema,
-  SyncModelsRequestSchema,
-  TestModelRequestSchema
-} from '@shared/ipc/schemas/providers'
 import {
   pickCodeDocuments,
   type CodeDocumentPickerDependencies
 } from './attachments/code-document-picker'
-import { CreateSessionRequestSchema } from '@shared/ipc/schemas/sessions'
 import { TurnSenderGate } from './ai/chat/turn-sender-gate'
 import type { TurnExecutor } from './ai/chat/turn-executor'
 import type { SessionModelProfile } from './ai/chat/session-model-profile'
@@ -121,7 +104,7 @@ function registerIpc(
     return window
   }
   const senderGate = new TurnSenderGate()
-  const register = <I, O>(definition: ChannelDefinition<I, O>): void =>
+  const register = <C extends InvokeChannel>(definition: ChannelDefinition<C>): void =>
     registerChannel(dependencies.ipcMain, getCallingWindow, definition)
 
   register({
@@ -167,7 +150,7 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Appearance_SetPreference,
-    input: { schema: AppearancePreferenceSchema, invalidMessage: 'Invalid appearance preference' },
+    invalidMessage: 'Invalid appearance preference',
     handle: (input) => preference.setAppearancePreference(input)
   })
   register({
@@ -176,7 +159,7 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Appearance_SetThemePreferences,
-    input: { schema: ThemePreferencesSchema, invalidMessage: 'Invalid theme preferences' },
+    invalidMessage: 'Invalid theme preferences',
     handle: (input) => preference.setThemePreferences(input)
   })
 
@@ -187,7 +170,7 @@ function registerIpc(
 
   register({
     channel: IpcChannel.Chat_StartTurn,
-    input: { schema: TurnStartRequestSchema, invalidMessage: 'Invalid turn request' },
+    invalidMessage: 'Invalid turn request',
     handle: (request, { event }) => {
       const ownerId = String(event.sender.id)
       const { emitTurnEvent, emitTitleUpdate } = senderGate.connect(event, (owner) =>
@@ -198,17 +181,17 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Chat_GetCapabilities,
-    handle: () => modelProfile.getCapabilities()
+    handle: (sessionId) => modelProfile.getCapabilities(sessionId)
   })
   register({
     channel: IpcChannel.Chat_RespondToPermission,
-    input: { schema: PermissionResponseSchema, invalidMessage: 'Invalid tool approval response' },
+    invalidMessage: 'Invalid tool approval response',
     handle: (response, { event }) =>
       turnExecutor.respondToPermission(String(event.sender.id), response)
   })
   register({
     channel: IpcChannel.Chat_AbortTurn,
-    input: { schema: TurnRequestIdSchema, invalidMessage: 'Invalid turn request' },
+    invalidMessage: 'Invalid turn request',
     handle: (requestId, { event }) =>
       turnExecutor.abortTurn({ ownerId: String(event.sender.id), requestId })
   })
@@ -219,7 +202,7 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Sessions_Create,
-    input: { schema: CreateSessionRequestSchema, invalidMessage: 'Invalid session request' },
+    invalidMessage: 'Invalid session request',
     handle: ({ title, projectId }) => {
       const context = projectId
         ? workspace.getActiveProjectContext(projectId)
@@ -235,37 +218,28 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Sessions_Delete,
-    input: { schema: SessionIdSchema, invalidMessage: 'Invalid session ID' },
+    invalidMessage: 'Invalid session ID',
     handle: (sessionId) => session.deleteSession(sessionId)
   })
   register({
     channel: IpcChannel.Sessions_Load,
-    input: { schema: SessionIdSchema, invalidMessage: 'Invalid session ID' },
+    invalidMessage: 'Invalid session ID',
     handle: (sessionId) => session.loadSession(sessionId)
   })
   register({
     channel: IpcChannel.Sessions_Rename,
-    input: {
-      schema: z.object({ sessionId: SessionIdSchema, title: SessionTitleSchema }),
-      invalidMessage: 'Invalid session rename'
-    },
+    invalidMessage: 'Invalid session rename',
     handle: ({ sessionId, title }) => session.renameSession(sessionId, title)
   })
   register({
     channel: IpcChannel.Sessions_SetThinkingEffort,
-    input: {
-      schema: z.object({ sessionId: SessionIdSchema, thinkingEffort: ThinkingSelectionSchema }),
-      invalidMessage: 'Invalid session thinking effort'
-    },
+    invalidMessage: 'Invalid session thinking effort',
     handle: ({ sessionId, thinkingEffort }) =>
       modelProfile.updateSessionThinkingEffort(sessionId, thinkingEffort)
   })
   register({
     channel: IpcChannel.Sessions_SetModelEntry,
-    input: {
-      schema: z.object({ sessionId: SessionIdSchema, modelEntryId: ModelEntryIdSchema }),
-      invalidMessage: 'Invalid session model'
-    },
+    invalidMessage: 'Invalid session model',
     handle: ({ sessionId, modelEntryId }) =>
       modelProfile.updateSessionModelEntry(sessionId, modelEntryId)
   })
@@ -283,20 +257,17 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Workspaces_SetDefault,
-    input: { schema: ProjectIdSchema, invalidMessage: 'Invalid workspace project ID' },
+    invalidMessage: 'Invalid workspace project ID',
     handle: (projectId) => workspace.setDefaultProject(projectId)
   })
   register({
     channel: IpcChannel.Workspaces_Rename,
-    input: {
-      schema: z.object({ projectId: ProjectIdSchema, name: SessionTitleSchema }),
-      invalidMessage: 'Invalid workspace project rename'
-    },
+    invalidMessage: 'Invalid workspace project rename',
     handle: ({ projectId, name }) => workspace.renameProject(projectId, name)
   })
   register({
     channel: IpcChannel.Workspaces_Reveal,
-    input: { schema: ProjectIdSchema, invalidMessage: 'Invalid workspace project ID' },
+    invalidMessage: 'Invalid workspace project ID',
     handle: async (projectId) => {
       const error = await dependencies.openPath(
         workspace.getActiveProjectContext(projectId).rootPath
@@ -306,7 +277,7 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Workspaces_Archive,
-    input: { schema: ProjectIdSchema, invalidMessage: 'Invalid workspace project ID' },
+    invalidMessage: 'Invalid workspace project ID',
     handle: (projectId) => workspace.archiveProject(projectId)
   })
 
@@ -316,30 +287,27 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Providers_SaveLibrary,
-    input: { schema: ProviderLibrarySchema, invalidMessage: 'Invalid provider library' },
+    invalidMessage: 'Invalid provider library',
     handle: (library) => provider.saveLibrary(library)
   })
   register({
     channel: IpcChannel.Providers_DiscoverModels,
-    input: {
-      schema: ProviderConfigurationSchema,
-      invalidMessage: 'Invalid provider configuration'
-    },
+    invalidMessage: 'Invalid provider configuration',
     handle: (configuration) => provider.discoverModels(configuration)
   })
   register({
     channel: IpcChannel.Providers_SyncModels,
-    input: { schema: SyncModelsRequestSchema, invalidMessage: 'Invalid provider models' },
+    invalidMessage: 'Invalid provider models',
     handle: (request) => provider.syncModels(request)
   })
   register({
     channel: IpcChannel.Providers_AddModel,
-    input: { schema: AddModelRequestSchema, invalidMessage: 'Invalid provider model' },
+    invalidMessage: 'Invalid provider model',
     handle: (request) => provider.addModel(request)
   })
   register({
     channel: IpcChannel.Providers_TestModel,
-    input: { schema: TestModelRequestSchema, invalidMessage: 'Invalid provider model test' },
+    invalidMessage: 'Invalid provider model test',
     handle: (request) => provider.testModel(request)
   })
 }

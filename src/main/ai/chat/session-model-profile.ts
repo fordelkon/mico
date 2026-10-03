@@ -69,8 +69,10 @@ class SessionModelProfile {
     return { provider, configuration, modelEntryId }
   }
 
-  getCapabilities(): Promise<ModelReasoningCapabilities | null> {
-    const modelEntryId = this.#getSelectedModelEntryId?.()
+  getCapabilities(sessionId?: string): Promise<ModelReasoningCapabilities | null> {
+    const modelEntryId =
+      (sessionId ? this.#runtime?.getDefaultProfile(sessionId)?.modelEntryId : undefined) ??
+      this.#getSelectedModelEntryId?.()
     return (
       this.#resolveProvider(modelEntryId ?? undefined)?.getModelCapabilities() ??
       Promise.resolve(null)

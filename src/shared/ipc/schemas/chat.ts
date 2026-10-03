@@ -1,12 +1,13 @@
+import { IpcChannel } from '../../IpcChannel'
+import type { IpcMethod } from '../contracts'
 import * as z from 'zod'
 
 import type { UIMessageChunk } from 'ai'
 
 import { ChatUserMessageSchema, ThinkingSelectionSchema } from '../../data/schemas/chat'
-import type { ModelReasoningCapabilities } from '../../data/schemas/chat'
 import { defineSchema } from '../../data/define'
 import { SessionIdSchema } from '../../data/schemas/session'
-import { PermissionModeSchema, type PermissionResponse } from '../../ai/permissions'
+import { PermissionModeSchema } from '../../ai/permissions'
 
 type TurnTerminalEvent =
   | { type: 'cancelled'; requestId: string }
@@ -80,10 +81,10 @@ const TurnStreamEventSchema: z.ZodType<TurnStreamEvent> = defineSchema(
 type TurnStartRequest = z.infer<typeof TurnStartRequestSchema>
 
 interface ChatAPI {
-  getCapabilities: () => Promise<ModelReasoningCapabilities | null>
-  startTurn: (request: TurnStartRequest) => Promise<void>
-  abortTurn: (requestId: string) => Promise<void>
-  respondToPermission: (response: PermissionResponse) => Promise<void>
+  getCapabilities: IpcMethod<IpcChannel.Chat_GetCapabilities>
+  startTurn: IpcMethod<IpcChannel.Chat_StartTurn>
+  abortTurn: IpcMethod<IpcChannel.Chat_AbortTurn>
+  respondToPermission: IpcMethod<IpcChannel.Chat_RespondToPermission>
   onTurnEvent: (listener: (event: TurnStreamEvent) => void) => () => void
 }
 

@@ -1,7 +1,8 @@
+import { IpcChannel } from '../../IpcChannel'
+import type { IpcMethod } from '../contracts'
 import * as z from 'zod'
 
 import { ChatDocumentPartSchema, CodeDocumentsMaxTextBytes } from '../../data/schemas/chat'
-import type { ChatDocumentPart } from '../../data/schemas/chat'
 import { defineSchema } from '../../data/define'
 
 const CodeDocumentPartsSchema = defineSchema(
@@ -18,7 +19,7 @@ const CodeDocumentPartsSchema = defineSchema(
 )
 
 interface AttachmentsAPI {
-  pickCodeDocuments: () => Promise<ChatDocumentPart[]>
+  pickCodeDocuments: IpcMethod<IpcChannel.Attachments_PickCodeDocuments>
 }
 
 export { CodeDocumentPartsSchema, type AttachmentsAPI }

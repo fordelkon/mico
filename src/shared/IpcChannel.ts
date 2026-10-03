@@ -21,7 +21,7 @@ export enum IpcChannel {
   Chat_AbortTurn = 'chat:abort-turn',
   /** Streams a turn lifecycle event to its owning renderer. */
   Chat_TurnEvent = 'chat:turn-event',
-  /** Returns the reasoning capabilities of the selected chat model. */
+  /** Returns the session model's reasoning capabilities, or the global selection when no session is specified. */
   Chat_GetCapabilities = 'chat:get-capabilities',
   /** Starts a turn owned by the invoking renderer. */
   Chat_StartTurn = 'chat:start-turn',

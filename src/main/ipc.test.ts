@@ -341,6 +341,15 @@ describe('registerIpc chat handlers', () => {
     expect(modelProfile.getCapabilities).toHaveBeenCalledOnce()
   })
 
+  it('user requests capabilities when a handler returns no result, then IPC rejects the response', async () => {
+    const { handlers, event } = createHarness()
+    await expect(async () =>
+      handlers.get(IpcChannel.Chat_GetCapabilities)?.(event)
+    ).rejects.toThrow(
+      'Invalid response for chat:get-capabilities. Restart the application and try again.'
+    )
+  })
+
   it('user cannot get model capabilities when the sender is untrusted, then nothing is delegated', () => {
     const { modelProfile, handlers, mainWindow } = createHarness()
     mainWindow.isTrustedRendererUrl.mockReturnValue(false)
@@ -514,6 +523,16 @@ describe('registerIpc session profile handlers', () => {
 describe('registerIpc session handlers', () => {
   it('user starts in the chosen project when creating a session, then it seeds the cwd', () => {
     const { handlers, session, workspace, event } = createHarness()
+    session.createSession.mockReturnValue({
+      id: 'session-1',
+      title: 'Project chat',
+      projectId: 'project-1',
+      cwd: '/projects/one',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 1,
+      lastActivityAt: 1
+    })
     workspace.getActiveProjectContext.mockReturnValue({
       kind: 'project',
       projectId: 'project-1',

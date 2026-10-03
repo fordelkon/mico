@@ -1,3 +1,4 @@
+import './validation-runtime'
 import { ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
@@ -8,14 +9,29 @@ import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
 import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { IpcChannel } from '@shared/IpcChannel'
+import * as z from 'zod'
+import {
+  outputSchema,
+  type InvokeChannel,
+  type IpcArgs,
+  type IpcOutput
+} from '@shared/ipc/contracts'
+
+async function invoke<C extends InvokeChannel>(
+  channel: C,
+  ...args: IpcArgs<C>
+): Promise<IpcOutput<C>> {
+  const result: unknown = await ipcRenderer.invoke(channel, ...args)
+  return z.parse(outputSchema(channel), result)
+}
 
 const windowControls: WindowControlsAPI = {
-  close: () => ipcRenderer.invoke(IpcChannel.WindowControls_Close),
-  isFocused: () => ipcRenderer.invoke(IpcChannel.WindowControls_IsFocused),
-  isFullScreen: () => ipcRenderer.invoke(IpcChannel.WindowControls_IsFullscreen),
-  isMaximized: () => ipcRenderer.invoke(IpcChannel.WindowControls_IsMaximized),
-  maximize: () => ipcRenderer.invoke(IpcChannel.WindowControls_Maximize),
-  minimize: () => ipcRenderer.invoke(IpcChannel.WindowControls_Minimize),
+  close: () => invoke(IpcChannel.WindowControls_Close),
+  isFocused: () => invoke(IpcChannel.WindowControls_IsFocused),
+  isFullScreen: () => invoke(IpcChannel.WindowControls_IsFullscreen),
+  isMaximized: () => invoke(IpcChannel.WindowControls_IsMaximized),
+  maximize: () => invoke(IpcChannel.WindowControls_Maximize),
+  minimize: () => invoke(IpcChannel.WindowControls_Minimize),
   onFocusChange: (listener) => {
     const wrappedListener = (_event: IpcRendererEvent, isFocused: boolean): void => {
       listener(isFocused)
@@ -53,13 +69,13 @@ const windowControls: WindowControlsAPI = {
     ipcRenderer.on(IpcChannel.Providers_FlushDraft, wrappedListener)
     return () => ipcRenderer.removeListener(IpcChannel.Providers_FlushDraft, wrappedListener)
   },
-  toggleFullScreen: () => ipcRenderer.invoke(IpcChannel.WindowControls_ToggleFullscreen),
-  unmaximize: () => ipcRenderer.invoke(IpcChannel.WindowControls_Unmaximize)
+  toggleFullScreen: () => invoke(IpcChannel.WindowControls_ToggleFullscreen),
+  unmaximize: () => invoke(IpcChannel.WindowControls_Unmaximize)
 }
 
 const appearance: AppearanceAPI = {
-  getPreference: () => ipcRenderer.invoke(IpcChannel.Appearance_GetPreference),
-  getResolvedAppearance: () => ipcRenderer.invoke(IpcChannel.Appearance_GetResolved),
+  getPreference: () => invoke(IpcChannel.Appearance_GetPreference),
+  getResolvedAppearance: () => invoke(IpcChannel.Appearance_GetResolved),
   onAppearanceChange: (listener) => {
     const wrappedListener = (_event: IpcRendererEvent, nextAppearance: 'light' | 'dark'): void => {
       listener(nextAppearance)
@@ -68,9 +84,8 @@ const appearance: AppearanceAPI = {
     ipcRenderer.on(IpcChannel.Appearance_Changed, wrappedListener)
     return () => ipcRenderer.removeListener(IpcChannel.Appearance_Changed, wrappedListener)
   },
-  setPreference: (preference) =>
-    ipcRenderer.invoke(IpcChannel.Appearance_SetPreference, preference),
-  getThemeState: () => ipcRenderer.invoke(IpcChannel.Appearance_GetThemeState),
+  setPreference: (preference) => invoke(IpcChannel.Appearance_SetPreference, preference),
+  getThemeState: () => invoke(IpcChannel.Appearance_GetThemeState),
   onThemeChange: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,
@@ -83,18 +98,17 @@ const appearance: AppearanceAPI = {
     return () => ipcRenderer.removeListener(IpcChannel.Appearance_ThemeChanged, wrappedListener)
   },
   setThemePreferences: (preferences) =>
-    ipcRenderer.invoke(IpcChannel.Appearance_SetThemePreferences, preferences)
+    invoke(IpcChannel.Appearance_SetThemePreferences, preferences)
 }
 
 const attachments: AttachmentsAPI = {
-  pickCodeDocuments: () => ipcRenderer.invoke(IpcChannel.Attachments_PickCodeDocuments)
+  pickCodeDocuments: () => invoke(IpcChannel.Attachments_PickCodeDocuments)
 }
 
 const chat: ChatAPI = {
-  respondToPermission: (response) =>
-    ipcRenderer.invoke(IpcChannel.Chat_RespondToPermission, response),
-  abortTurn: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_AbortTurn, requestId),
-  getCapabilities: () => ipcRenderer.invoke(IpcChannel.Chat_GetCapabilities),
+  respondToPermission: (response) => invoke(IpcChannel.Chat_RespondToPermission, response),
+  abortTurn: (requestId) => invoke(IpcChannel.Chat_AbortTurn, requestId),
+  getCapabilities: (sessionId) => invoke(IpcChannel.Chat_GetCapabilities, sessionId),
   onTurnEvent: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,
@@ -106,27 +120,26 @@ const chat: ChatAPI = {
     ipcRenderer.on(IpcChannel.Chat_TurnEvent, wrappedListener)
     return () => ipcRenderer.removeListener(IpcChannel.Chat_TurnEvent, wrappedListener)
   },
-  startTurn: (request) => ipcRenderer.invoke(IpcChannel.Chat_StartTurn, request)
+  startTurn: (request) => invoke(IpcChannel.Chat_StartTurn, request)
 }
 
 const providers: ProvidersAPI = {
-  addModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_AddModel, model),
-  discoverModels: (configuration) =>
-    ipcRenderer.invoke(IpcChannel.Providers_DiscoverModels, configuration),
-  getLibrary: () => ipcRenderer.invoke(IpcChannel.Providers_GetLibrary),
-  saveLibrary: (library) => ipcRenderer.invoke(IpcChannel.Providers_SaveLibrary, library),
-  syncModels: (models) => ipcRenderer.invoke(IpcChannel.Providers_SyncModels, models),
-  testModel: (model) => ipcRenderer.invoke(IpcChannel.Providers_TestModel, model)
+  addModel: (model) => invoke(IpcChannel.Providers_AddModel, model),
+  discoverModels: (configuration) => invoke(IpcChannel.Providers_DiscoverModels, configuration),
+  getLibrary: () => invoke(IpcChannel.Providers_GetLibrary),
+  saveLibrary: (library) => invoke(IpcChannel.Providers_SaveLibrary, library),
+  syncModels: (models) => invoke(IpcChannel.Providers_SyncModels, models),
+  testModel: (model) => invoke(IpcChannel.Providers_TestModel, model)
 }
 
 const sessions: SessionsAPI = {
-  create: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Create, input),
-  delete: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Delete, sessionId),
-  list: () => ipcRenderer.invoke(IpcChannel.Sessions_List),
-  load: (sessionId) => ipcRenderer.invoke(IpcChannel.Sessions_Load, sessionId),
-  rename: (input) => ipcRenderer.invoke(IpcChannel.Sessions_Rename, input),
-  setThinkingEffort: (input) => ipcRenderer.invoke(IpcChannel.Sessions_SetThinkingEffort, input),
-  setModelEntry: (input) => ipcRenderer.invoke(IpcChannel.Sessions_SetModelEntry, input),
+  create: (input) => invoke(IpcChannel.Sessions_Create, input),
+  delete: (sessionId) => invoke(IpcChannel.Sessions_Delete, sessionId),
+  list: () => invoke(IpcChannel.Sessions_List),
+  load: (sessionId) => invoke(IpcChannel.Sessions_Load, sessionId),
+  rename: (input) => invoke(IpcChannel.Sessions_Rename, input),
+  setThinkingEffort: (input) => invoke(IpcChannel.Sessions_SetThinkingEffort, input),
+  setModelEntry: (input) => invoke(IpcChannel.Sessions_SetModelEntry, input),
   onTitleUpdated: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,
@@ -139,12 +152,12 @@ const sessions: SessionsAPI = {
 }
 
 const workspaces: WorkspacesAPI = {
-  addFromDialog: () => ipcRenderer.invoke(IpcChannel.Workspaces_AddFromDialog),
-  archive: (projectId) => ipcRenderer.invoke(IpcChannel.Workspaces_Archive, projectId),
-  list: () => ipcRenderer.invoke(IpcChannel.Workspaces_List),
-  rename: (input) => ipcRenderer.invoke(IpcChannel.Workspaces_Rename, input),
-  reveal: (projectId) => ipcRenderer.invoke(IpcChannel.Workspaces_Reveal, projectId),
-  setDefault: (projectId) => ipcRenderer.invoke(IpcChannel.Workspaces_SetDefault, projectId)
+  addFromDialog: () => invoke(IpcChannel.Workspaces_AddFromDialog),
+  archive: (projectId) => invoke(IpcChannel.Workspaces_Archive, projectId),
+  list: () => invoke(IpcChannel.Workspaces_List),
+  rename: (input) => invoke(IpcChannel.Workspaces_Rename, input),
+  reveal: (projectId) => invoke(IpcChannel.Workspaces_Reveal, projectId),
+  setDefault: (projectId) => invoke(IpcChannel.Workspaces_SetDefault, projectId)
 }
 
 const api = { appearance, attachments, chat, providers, sessions, windowControls, workspaces }

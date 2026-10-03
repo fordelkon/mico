@@ -1,3 +1,5 @@
+import { IpcChannel } from '../../IpcChannel'
+import type { IpcMethod } from '../contracts'
 import * as z from 'zod'
 
 import {
@@ -32,12 +34,12 @@ const TestModelRequestSchema = z.object({
 })
 
 interface ProvidersAPI {
-  getLibrary: () => Promise<ProviderLibrary>
-  saveLibrary: (library: ProviderLibrary) => Promise<ProviderLibrary>
-  discoverModels: (configuration: ProviderConfiguration) => Promise<DiscoveredModel[]>
-  addModel: (model: AddModelRequest) => Promise<ModelEntry>
-  syncModels: (models: SyncModelsRequest) => Promise<void>
-  testModel: (model: TestModelRequest) => Promise<void>
+  getLibrary: IpcMethod<IpcChannel.Providers_GetLibrary>
+  saveLibrary: IpcMethod<IpcChannel.Providers_SaveLibrary>
+  discoverModels: IpcMethod<IpcChannel.Providers_DiscoverModels>
+  addModel: IpcMethod<IpcChannel.Providers_AddModel>
+  syncModels: IpcMethod<IpcChannel.Providers_SyncModels>
+  testModel: IpcMethod<IpcChannel.Providers_TestModel>
 }
 
 type AddModelRequest = z.infer<typeof AddModelRequestSchema>

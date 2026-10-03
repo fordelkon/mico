@@ -1,17 +1,12 @@
-import * as z from 'zod'
-
-import { WorkspaceProjectSchema } from '../../data/schemas/workspace'
-
+import { IpcChannel } from '../../IpcChannel'
+import type { IpcMethod } from '../contracts'
 interface WorkspacesAPI {
-  addFromDialog: () => Promise<z.infer<typeof WorkspaceProjectSchema> | undefined>
-  archive: (projectId: string) => Promise<void>
-  list: () => Promise<Array<z.infer<typeof WorkspaceProjectSchema>>>
-  reveal: (projectId: string) => Promise<void>
-  rename: (input: {
-    projectId: string
-    name: string
-  }) => Promise<z.infer<typeof WorkspaceProjectSchema>>
-  setDefault: (projectId: string) => Promise<z.infer<typeof WorkspaceProjectSchema>>
+  addFromDialog: IpcMethod<IpcChannel.Workspaces_AddFromDialog>
+  archive: IpcMethod<IpcChannel.Workspaces_Archive>
+  list: IpcMethod<IpcChannel.Workspaces_List>
+  reveal: IpcMethod<IpcChannel.Workspaces_Reveal>
+  rename: IpcMethod<IpcChannel.Workspaces_Rename>
+  setDefault: IpcMethod<IpcChannel.Workspaces_SetDefault>
 }
 
 export type { WorkspacesAPI }

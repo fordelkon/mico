@@ -1,37 +1,47 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
-import type { ZodType } from 'zod'
+import * as z from 'zod'
 
-import type { IpcChannel } from '@shared/IpcChannel'
+import {
+  inputSchema,
+  outputSchema,
+  type InvokeChannel,
+  type IpcInput,
+  type IpcOutput
+} from '@shared/ipc/contracts'
 
 type ChannelContext = { event: IpcMainInvokeEvent; window: BrowserWindow }
-type ChannelDefinition<I, O> = {
-  channel: IpcChannel
-  /** When absent, the handler receives the raw renderer input for bespoke parsing. */
-  input?: { schema: ZodType<I>; invalidMessage: string }
-  handle: (input: I, context: ChannelContext) => O | Promise<O>
+type ChannelDefinition<C extends InvokeChannel> = {
+  channel: C
+  invalidMessage?: string
+  handle: (
+    input: NoInfer<IpcInput<C>>,
+    context: ChannelContext
+  ) => NoInfer<IpcOutput<C>> | Promise<NoInfer<IpcOutput<C>>>
 }
 
 /**
  * Register one IPC invoke channel behind the shared trust and validation
  * template: the calling window is resolved and trusted first, then the raw
- * renderer input is parsed when the channel declares a schema. Handler and
- * validation errors propagate to the invoking renderer unchanged.
+ * renderer input and handler result are parsed through the channel's shared
+ * contract. Domain execution remains in the owning module.
  */
-function registerChannel<I, O>(
+function registerChannel<C extends InvokeChannel>(
   registrar: Pick<IpcMain, 'handle'>,
   windowOf: (event: IpcMainInvokeEvent) => BrowserWindow,
-  { channel, input, handle }: ChannelDefinition<I, O>
+  { channel, invalidMessage, handle }: ChannelDefinition<C>
 ): void {
   registrar.handle(channel, (event, rawInput) => {
     const window = windowOf(event)
-    if (!input) {
-      // SAFETY: channels without a declared schema intentionally receive the raw
-      // renderer input for bespoke parsing at the handler.
-      return handle(rawInput as I, { event, window })
+    const parsed = z.safeParse(inputSchema(channel), rawInput)
+    if (!parsed.success) throw new Error(invalidMessage ?? `Invalid request for ${channel}`)
+    const parseResult = (result: IpcOutput<C>): IpcOutput<C> => {
+      const output = z.safeParse(outputSchema(channel), result)
+      if (!output.success)
+        throw new Error(`Invalid response for ${channel}. Restart the application and try again.`)
+      return output.data
     }
-    const result = input.schema.safeParse(rawInput)
-    if (!result.success) throw new Error(input.invalidMessage)
-    return handle(result.data, { event, window })
+    const result = handle(parsed.data, { event, window })
+    return result instanceof Promise ? result.then(parseResult) : parseResult(result)
   })
 }
 
