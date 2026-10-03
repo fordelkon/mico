@@ -22,7 +22,8 @@ function AppContent(): React.JSX.Element {
     'providers'
   )
 
-  const { startNewChat, selectConversation, activeConversation, refreshProjects } = workspace
+  const { startNewChat, selectConversation, activeConversation, refreshProjects } =
+    workspace.session
   const handleOpenSettings = React.useCallback((): void => {
     if (activePage === 'settings') return
 
@@ -91,10 +92,10 @@ function AppContent(): React.JSX.Element {
     >
       <div aria-hidden="true" className="home-workspace__titlebar" />
       <AppSidebar
-        activeConversationId={workspace.activeConversation?.id ?? null}
+        activeConversationId={workspace.session.activeConversation?.id ?? null}
         conversations={workspace.conversations}
-        projects={workspace.projects}
-        respondingConversationIds={workspace.respondingConversationIds}
+        projects={workspace.session.projects}
+        respondingConversationIds={workspace.responses.respondingConversationIds}
         onDeleteConversation={workspace.deleteConversation}
         onBackFromSettings={handleBackFromSettings}
         onNewChat={handleNewChat}
@@ -125,7 +126,7 @@ function AppContent(): React.JSX.Element {
             <SettingsMain page={settingsPage} />
           </React.Suspense>
         ) : (
-          <ChatMain workspace={workspace} />
+          <ChatMain session={workspace.session} responses={workspace.responses} />
         )}
       </SidebarInset>
     </SidebarProvider>

@@ -159,14 +159,16 @@ describe('useChatWorkspaceState', () => {
     })
 
     await waitFor(() =>
-      expect(result.current.activeProject).toMatchObject({
+      expect(result.current.session.activeProject).toMatchObject({
         id: 'project-2',
         name: 'Default workspace'
       })
     )
 
     await act(async () => {
-      expect(await result.current.sendMessage({ text: 'Hello', documents: [] })).toBe(true)
+      expect(await result.current.responses.sendMessage({ text: 'Hello', documents: [] })).toBe(
+        true
+      )
     })
 
     expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat', projectId: 'project-2' })
@@ -180,11 +182,11 @@ describe('useChatWorkspaceState', () => {
     }
 
     await act(async () => {
-      expect(await result.current.sendMessage(content)).toBe(true)
+      expect(await result.current.responses.sendMessage(content)).toBe(true)
     })
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     await act(async () => {
-      expect(await result.current.sendMessage(content)).toBe(false)
+      expect(await result.current.responses.sendMessage(content)).toBe(false)
     })
     expect(api.startedRequests).toHaveLength(1)
   })
@@ -204,18 +206,18 @@ describe('useChatWorkspaceState', () => {
       documents: [{ type: 'document' as const, name: 'index.ts', text: 'export {}' }]
     }
 
-    const pending = result.current.sendMessage(content)
+    const pending = result.current.responses.sendMessage(content)
     expect(pending).toBeInstanceOf(Promise)
     await act(async () => {
-      expect(await result.current.sendMessage(content)).toBe(false)
+      expect(await result.current.responses.sendMessage(content)).toBe(false)
       failCreation?.(new Error('Session storage unavailable'))
       await expect(pending).rejects.toThrow('Session storage unavailable')
     })
-    expect(result.current.activeConversation).toBeNull()
+    expect(result.current.session.activeConversation).toBeNull()
     expect(api.startedRequests).toEqual([])
 
     await act(async () => {
-      expect(await result.current.sendMessage(content)).toBe(true)
+      expect(await result.current.responses.sendMessage(content)).toBe(true)
     })
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
   })
@@ -229,12 +231,12 @@ describe('useChatWorkspaceState', () => {
     'user sends documents with text "$text" when in an existing=$existing session, then the request carries them',
     async ({ existing, text }) => {
       const { api, result } = renderWorkspaceState()
-      if (existing) act(() => result.current.selectConversation('session-1'))
-      await waitFor(() => expect(Boolean(result.current.activeChat)).toBe(existing))
+      if (existing) act(() => result.current.session.selectConversation('session-1'))
+      await waitFor(() => expect(Boolean(result.current.session.activeChat)).toBe(existing))
 
       await act(async () => {
         expect(
-          await result.current.sendMessage({
+          await result.current.responses.sendMessage({
             text,
             documents: [{ type: 'document', name: 'index.ts', text: 'export {}' }]
           })
@@ -261,7 +263,7 @@ describe('useChatWorkspaceState', () => {
   it('user sends nothing when text and documents are empty, then no session is created', async () => {
     const { api, result } = renderWorkspaceState()
 
-    await act(async () => result.current.sendMessage({ text: '  ', documents: [] }))
+    await act(async () => result.current.responses.sendMessage({ text: '  ', documents: [] }))
 
     expect(api.createSession).not.toHaveBeenCalled()
     expect(api.startedRequests).toEqual([])
@@ -281,11 +283,11 @@ describe('useChatWorkspaceState', () => {
         ]
       })
     })
-    act(() => result.current.selectConversation('session-1'))
-    await waitFor(() => expect(result.current.activeChat).not.toBeNull())
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
 
     act(() => {
-      void result.current.activeChat?.regenerate()
+      void result.current.session.activeChat?.regenerate()
     })
 
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
@@ -328,10 +330,10 @@ describe('useChatWorkspaceState', () => {
       })
     })
 
-    act(() => result.current.selectConversation('session-1'))
+    act(() => result.current.session.selectConversation('session-1'))
 
     await waitFor(() =>
-      expect(result.current.activeChat?.messages.at(-1)?.parts).toMatchObject([
+      expect(result.current.session.activeChat?.messages.at(-1)?.parts).toMatchObject([
         {
           type: 'dynamic-tool',
           toolCallId: 'call-1',
@@ -354,17 +356,17 @@ describe('useChatWorkspaceState', () => {
       api.getCapabilities = () => capabilities
     })
 
-    act(() => result.current.setThinkingEffort('high'))
+    act(() => result.current.session.setThinkingEffort('high'))
     await act(async () => {
       resolveCapabilities({ selectableEfforts: ['low', 'medium'], defaultEffort: 'low' })
       await capabilities
     })
 
-    expect(result.current.reasoningCapabilities).toEqual({
+    expect(result.current.session.reasoningCapabilities).toEqual({
       selectableEfforts: ['low', 'medium'],
       defaultEffort: 'low'
     })
-    expect(result.current.thinkingEffort).toBe('low')
+    expect(result.current.session.thinkingEffort).toBe('low')
   })
 
   it('user can still send when capabilities fail to load, then the default is used', async () => {
@@ -374,16 +376,16 @@ describe('useChatWorkspaceState', () => {
       }
     })
 
-    await waitFor(() => expect(result.current.reasoningCapabilities).toBeNull())
+    await waitFor(() => expect(result.current.session.reasoningCapabilities).toBeNull())
 
-    act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'Hello', documents: [] }))
     await waitFor(() => expect(api.startedRequests[0]?.thinkingEffort).toBe('default'))
   })
 
   it('user starts a new session when no chat is selected, then the message uses it', async () => {
     const { api, result } = renderWorkspaceState()
 
-    act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'Hello', documents: [] }))
 
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     expect(api.createSession).toHaveBeenCalledOnce()
@@ -403,20 +405,23 @@ describe('useChatWorkspaceState', () => {
       ]
     })
 
-    await waitFor(() => expect(result.current.activeProject?.id).toBe('project-default'))
+    await waitFor(() => expect(result.current.session.activeProject?.id).toBe('project-default'))
 
-    await act(async () => result.current.addProjectToNewChat())
-    expect(result.current.pendingProject).toMatchObject({ id: 'project-1', name: 'Project one' })
-    expect(result.current.projects).toEqual(
+    await act(async () => result.current.session.addProjectToNewChat())
+    expect(result.current.session.pendingProject).toMatchObject({
+      id: 'project-1',
+      name: 'Project one'
+    })
+    expect(result.current.session.projects).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'project-1' })])
     )
 
-    act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'Hello', documents: [] }))
 
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat', projectId: 'project-1' })
-    expect(result.current.pendingProject).toMatchObject({ id: 'project-default' })
-    expect(result.current.activeProject).toMatchObject({
+    expect(result.current.session.pendingProject).toMatchObject({ id: 'project-default' })
+    expect(result.current.session.activeProject).toMatchObject({
       id: 'project-1',
       name: 'Project one',
       rootPath: '/projects/one'
@@ -438,10 +443,10 @@ describe('useChatWorkspaceState', () => {
       })
     })
 
-    act(() => result.current.selectConversation('session-1'))
+    act(() => result.current.session.selectConversation('session-1'))
 
     await waitFor(() =>
-      expect(result.current.activeProject).toMatchObject({
+      expect(result.current.session.activeProject).toMatchObject({
         id: 'project-1',
         name: 'one',
         rootPath: '/projects/one'
@@ -462,16 +467,16 @@ describe('useChatWorkspaceState', () => {
       }))
     })
 
-    act(() => void result.current.sendMessage({ text: 'First message', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'First message', documents: [] }))
     await waitFor(() =>
-      expect(result.current.respondingConversationIds).toEqual(new Set(['session-one']))
+      expect(result.current.responses.respondingConversationIds).toEqual(new Set(['session-one']))
     )
 
-    act(() => result.current.startNewChat())
-    act(() => void result.current.sendMessage({ text: 'Second message', documents: [] }))
+    act(() => result.current.session.startNewChat())
+    act(() => void result.current.responses.sendMessage({ text: 'Second message', documents: [] }))
 
     await waitFor(() =>
-      expect(result.current.respondingConversationIds).toEqual(
+      expect(result.current.responses.respondingConversationIds).toEqual(
         new Set(['session-one', 'session-two'])
       )
     )
@@ -479,16 +484,16 @@ describe('useChatWorkspaceState', () => {
     api.emit({ type: 'finish', requestId: api.startedRequests[0].requestId })
 
     await waitFor(() =>
-      expect(result.current.respondingConversationIds).toEqual(new Set(['session-two']))
+      expect(result.current.responses.respondingConversationIds).toEqual(new Set(['session-two']))
     )
   })
 
   it('user sees a stable sidebar when streaming starts, then no extra work runs per stream tick', async () => {
     const { api, result } = renderWorkspaceState()
 
-    act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'Hello', documents: [] }))
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
-    const respondingConversationIds = result.current.respondingConversationIds
+    const respondingConversationIds = result.current.responses.respondingConversationIds
 
     act(() => {
       api.emit({
@@ -498,22 +503,22 @@ describe('useChatWorkspaceState', () => {
       })
     })
 
-    await waitFor(() => expect(result.current.response.status).toBe('streaming'))
-    expect(result.current.respondingConversationIds).toBe(respondingConversationIds)
+    await waitFor(() => expect(result.current.responses.response.status).toBe('streaming'))
+    expect(result.current.responses.respondingConversationIds).toBe(respondingConversationIds)
   })
 
   it('user sees rapid text batched when updates outpace the throttle, then it commits', async () => {
     vi.useFakeTimers()
     const { api, result } = renderWorkspaceState()
 
-    act(() => void result.current.sendMessage({ text: 'Hello', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'Hello', documents: [] }))
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
     const initialRequestId = api.startedRequests[0]?.requestId
     if (!initialRequestId) throw new Error('Sending a message must start a request.')
-    const activeChat = result.current.activeChat
+    const activeChat = result.current.session.activeChat
     if (!activeChat) throw new Error('Sending a message must create an active chat.')
     act(() => api.emit({ type: 'finish', requestId: initialRequestId }))
     await act(async () => {
@@ -521,7 +526,7 @@ describe('useChatWorkspaceState', () => {
     })
 
     const { result: transcript } = renderHook(() => useChat({ chat: activeChat, throttle: 50 }))
-    act(() => void result.current.sendMessage({ text: 'Hello again', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'Hello again', documents: [] }))
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -566,10 +571,10 @@ describe('useChatWorkspaceState', () => {
   it('user sees a provider error scoped to its chat, then it clears when resending', async () => {
     const { api, result } = renderWorkspaceState()
 
-    act(() => void result.current.sendMessage({ text: 'First message', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'First message', documents: [] }))
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
 
-    const conversationId = result.current.activeConversation?.id
+    const conversationId = result.current.session.activeConversation?.id
     if (!conversationId) throw new Error('Sending a message must create an active conversation.')
     api.emit({
       type: 'error',
@@ -578,17 +583,17 @@ describe('useChatWorkspaceState', () => {
     })
 
     await waitFor(() =>
-      expect(result.current.response).toEqual({
+      expect(result.current.responses.response).toEqual({
         status: 'error',
         conversationId,
         message: 'The chat provider could not complete the response.'
       })
     )
 
-    act(() => void result.current.sendMessage({ text: 'Second message', documents: [] }))
+    act(() => void result.current.responses.sendMessage({ text: 'Second message', documents: [] }))
     await waitFor(() => expect(api.startedRequests).toHaveLength(2))
-    expect(result.current.response).toMatchObject({ conversationId })
-    expect(result.current.response.status).not.toBe('error')
+    expect(result.current.responses.response).toMatchObject({ conversationId })
+    expect(result.current.responses.response.status).not.toBe('error')
   })
 
   it('user sees the model selection return when reopening a chat, then effort returns', async () => {
@@ -622,14 +627,14 @@ describe('useChatWorkspaceState', () => {
     })
 
     await waitFor(() => expect(result.current.conversations).toHaveLength(1))
-    act(() => result.current.selectConversation('session-1'))
-    await waitFor(() => expect(result.current.selectedModelEntryId).toBe('ollama:qwen3'))
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.session.selectedModelEntryId).toBe('ollama:qwen3'))
 
-    act(() => result.current.startNewChat())
-    act(() => result.current.selectConversation('session-1'))
+    act(() => result.current.session.startNewChat())
+    act(() => result.current.session.selectConversation('session-1'))
 
-    expect(result.current.selectedModelEntryId).toBe('ollama:qwen3')
-    expect(result.current.thinkingEffort).toBe('high')
+    expect(result.current.session.selectedModelEntryId).toBe('ollama:qwen3')
+    expect(result.current.session.thinkingEffort).toBe('high')
   })
 
   it('user sees the title update when a title is generated, then it appears', async () => {

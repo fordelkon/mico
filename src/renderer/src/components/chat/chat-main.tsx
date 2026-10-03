@@ -1,5 +1,6 @@
 import { Spinner } from '@mico/ui'
-import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
+import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
+import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
 import { isActiveChatResponse } from '@renderer/types/chat'
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import * as React from 'react'
@@ -14,14 +15,15 @@ const SubscribedChatMessageList = React.lazy(async () => {
 })
 
 type ChatMainProps = {
-  workspace: ChatWorkspace
+  session: ChatActiveSessionSlice
+  responses: ChatResponseSlice
 }
 
-function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
+function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
   const [refreshedCapabilities, setRefreshedCapabilities] = React.useState<
     ModelReasoningCapabilities | null | undefined
   >(undefined)
-  const { setThinkingEffort } = workspace
+  const { setThinkingEffort } = session
 
   const refreshCapabilities = React.useCallback(async (): Promise<void> => {
     const capabilities = await window.api.chat.getCapabilities()
@@ -29,9 +31,9 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
     if (!capabilities) setThinkingEffort('none')
   }, [setThinkingEffort])
 
-  const { response } = workspace
+  const { response } = responses
   const isForActiveConversation =
-    response.status !== 'idle' && workspace.activeConversation?.id === response.conversationId
+    response.status !== 'idle' && session.activeConversation?.id === response.conversationId
   const isActiveResponse = isActiveChatResponse(response) && isForActiveConversation
   const composerMode: ChatComposerMode = !isActiveChatResponse(response)
     ? 'send'
@@ -43,44 +45,40 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
   const retry = response.status === 'retrying' && isForActiveConversation ? response : undefined
   const composer = (
     <ChatComposer
-      permissionMode={workspace.permissionMode}
-      onPermissionModeChange={workspace.setPermissionMode}
-      canAddProject={!workspace.activeConversation}
-      focusKey={workspace.composerFocusKey}
+      permissionMode={session.permissionMode}
+      onPermissionModeChange={session.setPermissionMode}
+      canAddProject={!session.activeConversation}
+      focusKey={session.composerFocusKey}
       mode={composerMode}
-      onAddProject={workspace.addProjectToNewChat}
-      onProjectSelected={workspace.selectProjectForNewChat}
-      onProjectsRefresh={workspace.refreshProjects}
-      projectId={workspace.activeProject?.id ?? null}
+      onAddProject={session.addProjectToNewChat}
+      onProjectSelected={session.selectProjectForNewChat}
+      onProjectsRefresh={session.refreshProjects}
+      projectId={session.activeProject?.id ?? null}
       onModelSelected={refreshCapabilities}
-      selectedModelEntryId={
-        workspace.activeConversation ? workspace.selectedModelEntryId : undefined
-      }
-      selectSessionModel={workspace.activeConversation ? workspace.setSessionModelEntry : undefined}
-      onSend={workspace.sendMessage}
-      onStop={workspace.stopResponse}
-      projectLabel={workspace.activeProject?.name ?? null}
-      projectPath={workspace.activeProject?.rootPath ?? null}
-      projects={workspace.projects}
+      selectedModelEntryId={session.activeConversation ? session.selectedModelEntryId : undefined}
+      selectSessionModel={session.activeConversation ? session.setSessionModelEntry : undefined}
+      onSend={responses.sendMessage}
+      onStop={responses.stopResponse}
+      projectLabel={session.activeProject?.name ?? null}
+      projectPath={session.activeProject?.rootPath ?? null}
+      projects={session.projects}
       reasoningCapabilities={
-        refreshedCapabilities === undefined
-          ? workspace.reasoningCapabilities
-          : refreshedCapabilities
+        refreshedCapabilities === undefined ? session.reasoningCapabilities : refreshedCapabilities
       }
-      thinkingEffort={workspace.thinkingEffort}
-      onThinkingEffortChange={workspace.setThinkingEffort}
+      thinkingEffort={session.thinkingEffort}
+      onThinkingEffortChange={session.setThinkingEffort}
     />
   )
 
   return (
     <div className="chat-paper paper-canvas flex min-h-0 flex-1 flex-col overflow-hidden">
-      {workspace.activeConversation ? (
+      {session.activeConversation ? (
         <>
           <div
             className="chat-paper__conversation flex min-h-0 flex-1"
-            key={workspace.activeConversation.id}
+            key={session.activeConversation.id}
           >
-            {workspace.activeChat && (
+            {session.activeChat && (
               <React.Suspense
                 fallback={
                   <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -89,12 +87,12 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
                 }
               >
                 <SubscribedChatMessageList
-                  chat={workspace.activeChat}
-                  conversationId={workspace.activeConversation.id}
+                  chat={session.activeChat}
+                  conversationId={session.activeConversation.id}
                   errorMessage={errorMessage}
                   isResponding={isActiveResponse}
-                  isThinkingEnabled={workspace.thinkingEffort !== 'none'}
-                  onRetry={errorMessage ? workspace.retryResponse : undefined}
+                  isThinkingEnabled={session.thinkingEffort !== 'none'}
+                  onRetry={errorMessage ? responses.retryResponse : undefined}
                   retry={retry}
                 />
               </React.Suspense>

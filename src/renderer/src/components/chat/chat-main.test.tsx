@@ -4,7 +4,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ChatWorkspace } from '@renderer/hooks/chat/use-chat-workspace-state'
+import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
+import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 
@@ -16,13 +17,35 @@ Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
   value: () => undefined
 })
 
-function createWorkspace(): ChatWorkspace {
+function createSessionSlice(): ChatActiveSessionSlice {
   return {
-    permissionMode: 'default',
-    setPermissionMode: vi.fn<ChatWorkspace['setPermissionMode']>(),
-    conversations: [{ id: 'conversation-1', title: 'New chat' }],
     activeConversation: { id: 'conversation-1', title: 'New chat' },
+    activeSession: null,
     activeChat: null,
+    permissionMode: 'default',
+    setPermissionMode: vi.fn<ChatActiveSessionSlice['setPermissionMode']>(),
+    thinkingEffort: 'medium',
+    setThinkingEffort: vi.fn<(thinkingEffort: ThinkingSelection) => void>(),
+    reasoningCapabilities: null,
+    selectedModelEntryId: null,
+    setSessionModelEntry: vi.fn<(modelEntryId: string) => Promise<void>>(),
+    projects: [],
+    pendingProject: null,
+    activeProject: null,
+    composerFocusKey: 1,
+    refreshProjects: vi.fn<() => Promise<void>>(),
+    addProjectToNewChat: vi.fn<() => Promise<void>>(),
+    selectProjectForNewChat: vi.fn<(project: WorkspaceProject) => void>(),
+    startNewChat: vi.fn<() => void>(),
+    selectConversation:
+      vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
+    activateNewSession: vi.fn<ChatActiveSessionSlice['activateNewSession']>(),
+    closeSessionIfActive: vi.fn<(conversationId: string) => void>()
+  }
+}
+
+function createResponseSlice(): ChatResponseSlice {
+  return {
     response: {
       status: 'retrying',
       conversationId: 'conversation-1',
@@ -32,25 +55,8 @@ function createWorkspace(): ChatWorkspace {
       startedAt: Date.now()
     },
     respondingConversationIds: new Set(['conversation-1']),
-    reasoningCapabilities: null,
-    thinkingEffort: 'medium',
-    selectedModelEntryId: null,
-    pendingProject: null,
-    activeProject: null,
-    projects: [],
-    refreshProjects: vi.fn<() => Promise<void>>(),
-    addProjectToNewChat: vi.fn<() => Promise<void>>(),
-    selectProjectForNewChat: vi.fn<(project: WorkspaceProject) => void>(),
-    setThinkingEffort: vi.fn<(thinkingEffort: ThinkingSelection) => void>(),
-    setSessionModelEntry: vi.fn<(modelEntryId: string) => Promise<void>>(),
-    composerFocusKey: 1,
-    startNewChat: vi.fn<() => void>(),
-    selectConversation:
-      vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
-    renameConversation: vi.fn<(conversationId: string, title: string) => void>(),
-    deleteConversation: vi.fn<(conversationId: string) => void>(),
     sendMessage:
-      vi.fn<(content: Parameters<ChatWorkspace['sendMessage']>[0]) => Promise<boolean>>(),
+      vi.fn<(content: Parameters<ChatResponseSlice['sendMessage']>[0]) => Promise<boolean>>(),
     retryResponse: vi.fn<() => void>(),
     stopResponse: vi.fn<() => void>()
   }
@@ -108,7 +114,7 @@ describe('ChatMain', () => {
   it('user keeps the stop control when a response reconnects, then it stays visible', () => {
     render(
       <ProviderLibraryProvider>
-        <ChatMain workspace={createWorkspace()} />
+        <ChatMain session={createSessionSlice()} responses={createResponseSlice()} />
       </ProviderLibraryProvider>
     )
 
@@ -117,11 +123,11 @@ describe('ChatMain', () => {
 
   it('user stores the chosen model when picking it from the composer, then it persists', async () => {
     const user = userEvent.setup()
-    const workspace = createWorkspace()
+    const session = createSessionSlice()
 
     render(
       <ProviderLibraryProvider>
-        <ChatMain workspace={workspace} />
+        <ChatMain session={session} responses={createResponseSlice()} />
       </ProviderLibraryProvider>
     )
 
@@ -129,16 +135,16 @@ describe('ChatMain', () => {
     await user.click(screen.getByRole('button', { name: 'Select model' }))
     await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
 
-    await waitFor(() => expect(workspace.setSessionModelEntry).toHaveBeenCalledWith('ollama:qwen3'))
+    await waitFor(() => expect(session.setSessionModelEntry).toHaveBeenCalledWith('ollama:qwen3'))
   })
 
   it('user turns thinking off when the model has no reasoning, then effort resets', async () => {
     const user = userEvent.setup()
-    const workspace = createWorkspace()
+    const session = createSessionSlice()
 
     render(
       <ProviderLibraryProvider>
-        <ChatMain workspace={workspace} />
+        <ChatMain session={session} responses={createResponseSlice()} />
       </ProviderLibraryProvider>
     )
 
@@ -146,6 +152,6 @@ describe('ChatMain', () => {
     await user.click(screen.getByRole('button', { name: 'Select model' }))
     await user.click(screen.getByRole('option', { name: 'Qwen 3 8B' }))
 
-    await waitFor(() => expect(workspace.setThinkingEffort).toHaveBeenCalledWith('none'))
+    await waitFor(() => expect(session.setThinkingEffort).toHaveBeenCalledWith('none'))
   })
 })
