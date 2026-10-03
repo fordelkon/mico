@@ -40,6 +40,7 @@ Paid endpoint checks run only on manual dispatch with `real_provider` enabled.
 | Persistence | Completed answer and conversation title survive restart |
 | Sessions | Rename and delete remain effective after restart |
 | Workspaces | Add a real temporary directory through the settings flow |
+| Navigation | Search from workspace settings returns to the conversation with renamed workspace labels in sidebar and composer |
 | Tools | Real file creation, tool result replay, transcript and file after restart, failed file read |
 | Real providers | Optional OpenAI-compatible and Anthropic-compatible completed replies |
 
