@@ -1,13 +1,59 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ToolRegistry } from './tool-registry'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('ToolRegistry', () => {
-  afterEach(() => removeTemporaryPaths())
+  afterEach(async () => {
+    vi.useRealTimers()
+    await removeTemporaryPaths()
+  })
+
+  it('user writes then reads when tools run in sequence, then each trace records its own interval', async () => {
+    const cwd = await createTemporaryWorkspace('mico-tool-registry-')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1000)
+    let clock = 1000
+    const advanceClock = async (): Promise<void> => {
+      clock += 100
+      vi.setSystemTime(clock)
+    }
+    const registry = ToolRegistry.forWorkspace(cwd, {
+      permissionMode: 'acceptEdits',
+      hooks: { preToolUse: [advanceClock], postToolUse: [advanceClock] }
+    })
+    const executions = await registry.executeBatch(
+      [
+        {
+          toolCallId: 'write',
+          toolName: 'Write',
+          input: { file_path: 'timed.txt', content: 'Recorded' }
+        },
+        { toolCallId: 'read', toolName: 'Read', input: { file_path: 'timed.txt' } }
+      ],
+      new AbortController().signal
+    )
+    expect(
+      executions.map(({ trace }) => ({
+        id: trace.toolCallId,
+        start: trace.startedAt,
+        end: trace.finishedAt
+      }))
+    ).toEqual([
+      { id: 'write', start: 1000, end: 1200 },
+      { id: 'read', start: 1200, end: 1400 }
+    ])
+    expect(executions[1].trace).toMatchObject({
+      toolName: 'Read',
+      input: { file_path: 'timed.txt' },
+      output: 'Recorded',
+      isError: false
+    })
+    expect(executions[1].result.output).toBe('Recorded')
+  })
 
   async function createRegistry(): Promise<ToolRegistry> {
     return ToolRegistry.forWorkspace(await createTemporaryWorkspace('mico-tool-registry-'), {
@@ -16,7 +62,7 @@ describe('ToolRegistry', () => {
   }
 
   it('user sees an error result when calling an unknown tool, then nothing executes', async () => {
-    const result = await (await createRegistry()).execute(
+    const { result } = await (await createRegistry()).execute(
       { toolCallId: 'call-1', toolName: 'unknown', input: {} },
       new AbortController().signal
     )
@@ -31,7 +77,7 @@ describe('ToolRegistry', () => {
   })
 
   it('user sees an error when tool input fails validation, then the tool never runs', async () => {
-    const result = await (await createRegistry()).execute(
+    const { result } = await (await createRegistry()).execute(
       { toolCallId: 'call-2', toolName: 'Read', input: { file_path: 1 } },
       new AbortController().signal
     )
@@ -48,7 +94,7 @@ describe('ToolRegistry', () => {
   it('user sees a tool error when execution fails, then the failure is captured', async () => {
     const registry = await createRegistry()
 
-    const result = await registry.execute(
+    const { result } = await registry.execute(
       { toolCallId: 'call-3', toolName: 'Read', input: { file_path: 'missing.txt' } },
       new AbortController().signal
     )
@@ -64,24 +110,26 @@ describe('ToolRegistry', () => {
 
   it('user writes after a command when tools are submitted in order, then the command sees no new file', async () => {
     const registry = await createRegistry()
-    const results = await registry.executeBatch(
-      [
-        {
-          toolCallId: 'call-command',
-          toolName: 'Bash',
-          input: {
-            command:
-              "node -e \"const fs=require('node:fs'); if (fs.existsSync('created.txt')) process.exit(1)\""
+    const results = (
+      await registry.executeBatch(
+        [
+          {
+            toolCallId: 'call-command',
+            toolName: 'Bash',
+            input: {
+              command:
+                "node -e \"const fs=require('node:fs'); if (fs.existsSync('created.txt')) process.exit(1)\""
+            }
+          },
+          {
+            toolCallId: 'call-write',
+            toolName: 'Write',
+            input: { file_path: 'created.txt', content: 'created after command' }
           }
-        },
-        {
-          toolCallId: 'call-write',
-          toolName: 'Write',
-          input: { file_path: 'created.txt', content: 'created after command' }
-        }
-      ],
-      new AbortController().signal
-    )
+        ],
+        new AbortController().signal
+      )
+    ).map(({ result }) => result)
 
     expect(results.map((result) => result.isError)).toEqual([false, false])
   })
@@ -92,13 +140,15 @@ describe('ToolRegistry', () => {
     await writeFile(join(cwd, 'small.txt'), 'small')
     const registry = ToolRegistry.forWorkspace(cwd)
 
-    const results = await registry.executeBatch(
-      [
-        { toolCallId: 'call-slow', toolName: 'Read', input: { file_path: 'big.txt' } },
-        { toolCallId: 'call-fast', toolName: 'Read', input: { file_path: 'small.txt' } }
-      ],
-      new AbortController().signal
-    )
+    const results = (
+      await registry.executeBatch(
+        [
+          { toolCallId: 'call-slow', toolName: 'Read', input: { file_path: 'big.txt' } },
+          { toolCallId: 'call-fast', toolName: 'Read', input: { file_path: 'small.txt' } }
+        ],
+        new AbortController().signal
+      )
+    ).map(({ result }) => result)
 
     expect(results.map((result) => result.toolCallId)).toEqual(['call-slow', 'call-fast'])
     expect(results.map((result) => result.isError)).toEqual([false, false])
@@ -109,13 +159,15 @@ describe('ToolRegistry', () => {
     await writeFile(join(cwd, 'a.txt'), 'content')
     const registry = ToolRegistry.forWorkspace(cwd, { requestApproval: async () => true })
 
-    const results = await registry.executeBatch(
-      [
-        { toolCallId: 'call-list', toolName: 'Bash', input: { command: 'ls -la' } },
-        { toolCallId: 'call-read', toolName: 'Read', input: { file_path: 'a.txt' } }
-      ],
-      new AbortController().signal
-    )
+    const results = (
+      await registry.executeBatch(
+        [
+          { toolCallId: 'call-list', toolName: 'Bash', input: { command: 'ls -la' } },
+          { toolCallId: 'call-read', toolName: 'Read', input: { file_path: 'a.txt' } }
+        ],
+        new AbortController().signal
+      )
+    ).map(({ result }) => result)
 
     expect(results.map((result) => result.isError)).toEqual([false, false])
   })
@@ -124,7 +176,7 @@ describe('ToolRegistry', () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'preview.txt'), 'preview text')
     const deltas: unknown[] = []
-    const result = await ToolRegistry.forWorkspace(cwd).execute(
+    const { result } = await ToolRegistry.forWorkspace(cwd).execute(
       { toolCallId: 'call-preview', toolName: 'Read', input: { file_path: 'preview.txt' } },
       new AbortController().signal,
       (delta) => deltas.push(delta)

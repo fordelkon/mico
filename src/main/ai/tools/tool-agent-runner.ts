@@ -4,6 +4,7 @@ import type {
   ChatProviderReasoningPart,
   ChatProviderTextPart,
   ChatProviderToolCallPart,
+  ChatProviderToolResultPart,
   ThinkingSelection
 } from '@mico/ai-providers'
 import { isProviderFinish } from '@mico/ai-providers'
@@ -40,7 +41,7 @@ type ToolAgentRunnerInput = {
 type AgentStep = {
   index: number
   assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
-  toolResults: Awaited<ReturnType<ToolRegistry['execute']>>[]
+  toolResults: ChatProviderToolResultPart[]
 }
 /**
  * The turn's parts in exact stream order across every model step. This is the
@@ -233,8 +234,7 @@ class ToolAgentRunner {
       }
       if (!registry) throw new Error('The model requested a tool outside a project session.')
       toolRoundCount += 1
-      const executionStartedAt = Date.now()
-      const rawResults = await registry.executeBatch(calls, signal, (delta) => {
+      const executions = await registry.executeBatch(calls, signal, (delta) => {
         // The renderer reads message parts, so each delta must append there.
         // A shared id would replace earlier deltas; transient parts only reach
         // onData. Durable history still stores the completed tool trace.
@@ -245,21 +245,10 @@ class ToolAgentRunner {
           data: parsed.data
         })
       })
-      const executionFinishedAt = Date.now()
-      const results = rawResults.map(boundToolResultForHistory)
+      const results = executions.map(({ result }) => boundToolResultForHistory(result))
       onStep?.({ index: toolRoundCount, assistant: replayAssistant, toolResults: results })
-      for (const [index, result] of rawResults.entries()) {
-        const call = calls[index]
-        if (!call) continue
-        onToolResult?.({
-          toolCallId: call.toolCallId,
-          toolName: call.toolName,
-          input: call.input,
-          isError: result.isError,
-          output: result.output,
-          startedAt: executionStartedAt,
-          finishedAt: executionFinishedAt
-        })
+      for (const { result, trace } of executions) {
+        onToolResult?.(trace)
         emitToolResult(result, emit)
       }
       history = [
@@ -274,9 +263,7 @@ class ToolAgentRunner {
   }
 }
 
-function boundToolResultForHistory(
-  result: Awaited<ReturnType<ToolRegistry['execute']>>
-): Awaited<ReturnType<ToolRegistry['execute']>> {
+function boundToolResultForHistory(result: ChatProviderToolResultPart): ChatProviderToolResultPart {
   if (Buffer.byteLength(result.output) <= MAX_TOOL_RESULT_HISTORY_BYTES) return result
   const bytes = Buffer.from(result.output)
   const markerBytes = Buffer.byteLength(TOOL_RESULT_TRUNCATION_MARKER)
@@ -304,7 +291,7 @@ function appendTextPart(
 }
 
 function emitToolResult(
-  result: Awaited<ReturnType<ToolRegistry['execute']>>,
+  result: ChatProviderToolResultPart,
   emit: ToolAgentRunnerInput['emit']
 ): void {
   if (result.isError) {

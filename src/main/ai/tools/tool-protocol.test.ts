@@ -13,22 +13,24 @@ describe('workspace tool protocol', () => {
     const registry = ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' })
     const signal = new AbortController().signal
     const file_path = join(cwd, 'file.txt')
-    const results = await registry.executeBatch(
-      [
-        {
-          toolCallId: 'write',
-          toolName: 'Write',
-          input: { file_path, content: 'before before suffix' }
-        },
-        {
-          toolCallId: 'edit',
-          toolName: 'Edit',
-          input: { file_path, old_string: 'before', new_string: 'after', replace_all: true }
-        },
-        { toolCallId: 'read', toolName: 'Read', input: { file_path } }
-      ],
-      signal
-    )
+    const results = (
+      await registry.executeBatch(
+        [
+          {
+            toolCallId: 'write',
+            toolName: 'Write',
+            input: { file_path, content: 'before before suffix' }
+          },
+          {
+            toolCallId: 'edit',
+            toolName: 'Edit',
+            input: { file_path, old_string: 'before', new_string: 'after', replace_all: true }
+          },
+          { toolCallId: 'read', toolName: 'Read', input: { file_path } }
+        ],
+        signal
+      )
+    ).map(({ result }) => result)
     expect(results.map(({ isError }) => isError)).toEqual([false, false, false])
     expect(results[2].output).toContain('after after suffix')
     expect(await readFile(file_path, 'utf8')).toBe('after after suffix')
@@ -54,7 +56,7 @@ describe('workspace tool protocol', () => {
 
   it('user submits empty edit arguments when calling a tool, then field errors explain how to retry', async () => {
     const cwd = await createTemporaryWorkspace('mico-protocol-')
-    const result = await ToolRegistry.forWorkspace(cwd).execute(
+    const { result } = await ToolRegistry.forWorkspace(cwd).execute(
       { toolCallId: 'empty', toolName: 'Edit', input: {} },
       new AbortController().signal
     )

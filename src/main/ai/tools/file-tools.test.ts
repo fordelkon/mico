@@ -60,7 +60,7 @@ describe('workspace file tools', () => {
     await writeFile(join(cwd, 'a.txt'), 'unchanged\n')
     const registry = ToolRegistry.forWorkspace(cwd)
 
-    const result = await registry.execute(
+    const { result } = await registry.execute(
       {
         toolCallId: 'call-noop',
         toolName: 'Edit',

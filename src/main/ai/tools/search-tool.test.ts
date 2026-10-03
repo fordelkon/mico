@@ -13,7 +13,7 @@ describe('workspace search tools', () => {
     await writeFile(join(cwd, 'example.ts'), 'other\nconst key = "A.B"\nconst similar = "axb"')
     const registry = ToolRegistry.forWorkspace(cwd)
     const signal = new AbortController().signal
-    const result = await registry.execute(
+    const { result } = await registry.execute(
       {
         toolCallId: 'regex',
         toolName: 'Grep',
@@ -24,7 +24,7 @@ describe('workspace search tools', () => {
     expect(result.isError).toBe(false)
     expect(result.output).toContain('example.ts:2:const key = "A.B"')
     expect(result.output).not.toContain('axb')
-    const sensitive = await registry.execute(
+    const { result: sensitive } = await registry.execute(
       {
         toolCallId: 'case',
         toolName: 'Grep',
@@ -33,7 +33,7 @@ describe('workspace search tools', () => {
       signal
     )
     expect(sensitive.output).toBe('No matches found.')
-    const regex = await registry.execute(
+    const { result: regex } = await registry.execute(
       {
         toolCallId: 'wildcard',
         toolName: 'Grep',
@@ -54,7 +54,7 @@ describe('workspace search tools', () => {
     await writeFile(join(cwd, 'node_modules', 'dependency.ts'), 'dependency')
     await writeFile(join(outside, 'secret.ts'), 'external')
     await symlink(outside, join(cwd, 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
-    const result = await ToolRegistry.forWorkspace(cwd).execute(
+    const { result } = await ToolRegistry.forWorkspace(cwd).execute(
       { toolCallId: 'files', toolName: 'Glob', input: { pattern: '**/*.ts' } },
       new AbortController().signal
     )
@@ -70,7 +70,7 @@ describe('workspace search tools', () => {
     await writeFile(join(cwd, 'b.txt'), 'match')
     const registry = ToolRegistry.forWorkspace(cwd)
     const signal = new AbortController().signal
-    const content = await registry.execute(
+    const { result: content } = await registry.execute(
       {
         toolCallId: 'page',
         toolName: 'Grep',
@@ -81,7 +81,7 @@ describe('workspace search tools', () => {
     expect(content.output).toContain('a.txt:2:match')
     expect(content.output).not.toContain('a.txt:1:')
     expect(content.output).toContain('More results available.')
-    const counts = await registry.execute(
+    const { result: counts } = await registry.execute(
       {
         toolCallId: 'count',
         toolName: 'Grep',
@@ -91,7 +91,7 @@ describe('workspace search tools', () => {
     )
     expect(counts.output).toContain('a.txt:3')
     expect(counts.output).toContain('Total matching lines: 4.')
-    const files = await registry.execute(
+    const { result: files } = await registry.execute(
       {
         toolCallId: 'names',
         toolName: 'Grep',
@@ -108,7 +108,7 @@ describe('workspace search tools', () => {
     const cwd = await createTemporaryWorkspace('mico-search-')
     const registry = ToolRegistry.forWorkspace(cwd)
     const signal = new AbortController().signal
-    const invalid = await registry.execute(
+    const { result: invalid } = await registry.execute(
       {
         toolCallId: 'invalid',
         toolName: 'Grep',
@@ -118,7 +118,7 @@ describe('workspace search tools', () => {
     )
     expect(invalid.isError).toBe(true)
     expect(invalid.output).toContain('regex parse error')
-    const outside = await registry.execute(
+    const { result: outside } = await registry.execute(
       {
         toolCallId: 'escape',
         toolName: 'Glob',
@@ -135,7 +135,7 @@ describe('workspace search tools', () => {
     await writeFile(join(cwd, 'a.ts'), 'before\nstart\nend\nafter')
     const registry = ToolRegistry.forWorkspace(cwd)
     const signal = new AbortController().signal
-    const context = await registry.execute(
+    const { result: context } = await registry.execute(
       {
         toolCallId: 'context',
         toolName: 'Grep',
@@ -146,7 +146,7 @@ describe('workspace search tools', () => {
     expect(context.output).toContain('a.ts-before')
     expect(context.output).toContain('a.ts:start')
     expect(context.output).toContain('a.ts-end')
-    const multiline = await registry.execute(
+    const { result: multiline } = await registry.execute(
       {
         toolCallId: 'multiline',
         toolName: 'Grep',

@@ -23,7 +23,7 @@ describe('tool permissions', () => {
 
   it('user has no approval host when writing, then the workspace stays unchanged', async () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
-    const result = await ToolRegistry.forWorkspace(cwd).execute(
+    const { result } = await ToolRegistry.forWorkspace(cwd).execute(
       writeCall,
       new AbortController().signal
     )
@@ -45,16 +45,15 @@ describe('tool permissions', () => {
     await requested.promise
     await expect(access(join(cwd, 'created.txt'))).rejects.toThrow('ENOENT')
     pending.resolve(true)
-    expect((await execution).isError).toBe(false)
+    expect((await execution).result.isError).toBe(false)
     expect(await readFile(join(cwd, 'created.txt'), 'utf8')).toBe('approved content')
   })
 
   it('user accepts edits when writing ordinary files, then the file is created without prompting', async () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
-    const result = await ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' }).execute(
-      writeCall,
-      new AbortController().signal
-    )
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
+      permissionMode: 'acceptEdits'
+    }).execute(writeCall, new AbortController().signal)
     expect(result.isError).toBe(false)
     expect(await readFile(join(cwd, 'created.txt'), 'utf8')).toBe('approved content')
   })
@@ -108,7 +107,9 @@ describe('tool permissions', () => {
     await mkdir(join(cwd, '.git'))
     await writeFile(join(cwd, '.git', 'config'), 'original')
     await symlink(join(cwd, '.git', 'config'), join(cwd, 'alias.txt'))
-    const result = await ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' }).execute(
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
+      permissionMode: 'acceptEdits'
+    }).execute(
       { ...writeCall, input: { file_path: 'alias.txt', content: 'changed' } },
       new AbortController().signal
     )
@@ -120,7 +121,9 @@ describe('tool permissions', () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
     await mkdir(join(cwd, '.git'))
     await symlink(join(cwd, '.git', 'new-config'), join(cwd, 'alias.txt'))
-    const result = await ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' }).execute(
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
+      permissionMode: 'acceptEdits'
+    }).execute(
       { ...writeCall, input: { file_path: 'alias.txt', content: 'changed' } },
       new AbortController().signal
     )
@@ -130,7 +133,7 @@ describe('tool permissions', () => {
 
   it('user receives an empty hook confirmation reason when accepting edits, then approval is still required', async () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
-    const result = await ToolRegistry.forWorkspace(cwd, {
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
       permissionMode: 'acceptEdits',
       hooks: { preToolUse: [async () => ({ behavior: 'ask', reason: '' })] }
     }).execute(writeCall, new AbortController().signal)
@@ -142,7 +145,7 @@ describe('tool permissions', () => {
     'user writes %s when accepting edits, then shell startup changes require approval',
     async (file_path) => {
       const cwd = await createTemporaryWorkspace('mico-permissions-')
-      const result = await ToolRegistry.forWorkspace(cwd, {
+      const { result } = await ToolRegistry.forWorkspace(cwd, {
         permissionMode: 'acceptEdits'
       }).execute(
         { ...writeCall, input: { file_path, content: 'changed' } },
@@ -155,7 +158,7 @@ describe('tool permissions', () => {
 
   it('user rejects a Bash call when accepting edits, then the command creates no file', async () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
-    const result = await ToolRegistry.forWorkspace(cwd, {
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
       permissionMode: 'acceptEdits',
       requestApproval: async () => false
     }).execute(
@@ -168,7 +171,7 @@ describe('tool permissions', () => {
 
   it('user has a blocking hook when accepting edits, then the denied file is not created', async () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
-    const result = await ToolRegistry.forWorkspace(cwd, {
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
       permissionMode: 'acceptEdits',
       hooks: {
         preToolUse: [
@@ -182,7 +185,7 @@ describe('tool permissions', () => {
 
   it('user has a hook requiring confirmation when accepting edits, then rejection preserves the workspace', async () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
-    const result = await ToolRegistry.forWorkspace(cwd, {
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
       permissionMode: 'acceptEdits',
       hooks: { preToolUse: [async () => ({ behavior: 'ask', reason: 'Review this change.' })] },
       requestApproval: async () => false
@@ -204,7 +207,7 @@ describe('tool permissions', () => {
         return true
       }
     })
-    const result = await registry.execute(
+    const { result } = await registry.execute(
       { ...writeCall, input: { file_path: 'alias.txt', content: 'changed' } },
       new AbortController().signal
     )
@@ -229,7 +232,7 @@ describe('tool permissions', () => {
     }).execute(writeCall, new AbortController().signal)
     await started.promise
     await vi.advanceTimersByTimeAsync(10_000)
-    expect((await result).output).toContain('hook timed out')
+    expect((await result).result.output).toContain('hook timed out')
     await expect(access(join(cwd, 'created.txt'))).rejects.toThrow('ENOENT')
   })
 
@@ -237,7 +240,7 @@ describe('tool permissions', () => {
     const cwd = await createTemporaryWorkspace('mico-permissions-')
     // Main-process logging is an observer seam; keep expected failures out of test output.
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const result = await ToolRegistry.forWorkspace(cwd, {
+    const { result } = await ToolRegistry.forWorkspace(cwd, {
       permissionMode: 'acceptEdits',
       hooks: {
         postToolUse: [

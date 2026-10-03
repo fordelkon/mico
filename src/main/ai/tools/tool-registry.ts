@@ -8,6 +8,7 @@ import {
   registerTool,
   type RegisteredAgentTool,
   type ToolInput,
+  type ToolExecutionTrace,
   type ToolOutputDelta
 } from './tool-contract'
 import { createWriteTool } from './write-tool'
@@ -17,6 +18,7 @@ import { runPreToolUse, runPostToolUse, type ToolHooks } from './tool-hooks'
 
 type ToolCall = { toolCallId: string; toolName: string; input: ToolInput }
 type ToolRegistryOptions = ToolPermissionOptions & { hooks?: ToolHooks }
+type ToolExecution = { result: ChatProviderToolResultPart; trace: ToolExecutionTrace }
 
 // A UTF-16 slice may encode to up to four bytes per code unit. Keep each IPC
 // fragment safely below the shared 64 KiB payload ceiling while preserving all
@@ -57,11 +59,34 @@ class ToolRegistry {
     call: ToolCall,
     signal: AbortSignal,
     onOutputDelta?: (delta: ToolOutputDeltaData) => void
+  ): Promise<ToolExecution> {
+    const startedAt = Date.now()
+    const snapshot = { ...call, input: freezeInput(call.input) }
+    const result = await this.executeCall(snapshot, signal, onOutputDelta)
+    return {
+      result,
+      trace: {
+        toolCallId: snapshot.toolCallId,
+        toolName: snapshot.toolName,
+        input: snapshot.input,
+        output: result.output,
+        isError: result.isError,
+        startedAt,
+        finishedAt: Date.now()
+      }
+    }
+  }
+
+  private async executeCall(
+    call: ToolCall,
+    signal: AbortSignal,
+    onOutputDelta?: (delta: ToolOutputDeltaData) => void
   ): Promise<ChatProviderToolResultPart> {
+    signal.throwIfAborted()
     const tool = this.#tools.get(call.toolName)
     if (!tool) return this.errorResult(call, `Tool "${call.toolName}" is unavailable.`)
     // Neither hooks nor an approval host may change the operation after validation.
-    const snapshot = { ...call, input: freezeInput(call.input) }
+    const snapshot = call
     const hookContext = { ...snapshot, cwd: this.#cwd, signal }
     const hooks = this.#options.hooks ?? {}
     try {
@@ -110,8 +135,8 @@ class ToolRegistry {
     calls: readonly ToolCall[],
     signal: AbortSignal,
     onOutputDelta?: (delta: ToolOutputDeltaData) => void
-  ): Promise<ChatProviderToolResultPart[]> {
-    const results: ChatProviderToolResultPart[] = []
+  ): Promise<ToolExecution[]> {
+    const results: ToolExecution[] = []
     for (const batch of partitionCalls(calls, (call) => this.isConcurrencySafe(call))) {
       if (batch.isConcurrencySafe) {
         signal.throwIfAborted()
@@ -169,4 +194,4 @@ function partitionCalls(
   }, [])
 }
 
-export { ToolRegistry, type ToolCall }
+export { ToolRegistry, type ToolCall, type ToolExecution }
