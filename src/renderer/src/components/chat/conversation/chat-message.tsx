@@ -73,6 +73,15 @@ function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): Assista
       // Accumulated output belongs to this render, never to the provider's message object.
       if (previous?.type === 'activity') previous.parts.push({ ...part })
       else blocks.push({ parts: [{ ...part }], type: 'activity' })
+    } else if (part.type === 'data-tool-permission') {
+      for (const block of blocks) {
+        if (block.type !== 'activity') continue
+        const target = block.parts.find(
+          (candidate) =>
+            candidate.type === 'dynamic-tool' && candidate.toolCallId === part.data.toolCallId
+        )
+        if (target?.type === 'dynamic-tool') target.permission = part.data
+      }
     } else if (isToolOutputDeltaPart(part)) {
       const activity = blocks.findLast((block) => block.type === 'activity')
       const target = activity?.parts.findLast(

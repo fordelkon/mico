@@ -35,11 +35,13 @@ import * as React from 'react'
 
 import { useAppearance } from '../appearance-provider'
 import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
-import { ConversationRow } from './conversation-row'
+import { ConversationNavigation } from './conversation-navigation'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import './app-sidebar.css'
 
 type AppSidebarProps = {
   conversations: Conversation[]
+  projects?: WorkspaceProject[]
   activeConversationId: string | null
   respondingConversationIds: ReadonlySet<string>
   onDeleteConversation: (conversationId: string) => void
@@ -67,6 +69,7 @@ function nextAppearancePreference(preference: keyof typeof appearancePreferenceL
 
 function AppSidebar({
   conversations,
+  projects = [],
   activeConversationId,
   respondingConversationIds,
   onDeleteConversation,
@@ -84,8 +87,19 @@ function AppSidebar({
   const collapsed = state === 'collapsed'
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [commandKeyPressed, setCommandKeyPressed] = React.useState(false)
+  const [selectionRequest, setSelectionRequest] = React.useState<{
+    id: string
+    key: number
+  } | null>(null)
+  const handleConversationSelection = React.useCallback(
+    (id: string, options?: { focusComposer?: boolean }): void => {
+      setSelectionRequest((previous) => ({ id, key: (previous?.key ?? 0) + 1 }))
+      if (options) onSelectConversation(id, options)
+      else onSelectConversation(id)
+    },
+    [onSelectConversation]
+  )
   const settingsHighlight = useGlidingHighlight<HTMLLIElement>()
-  const conversationHighlight = useGlidingHighlight<HTMLLIElement>()
 
   // Keep the new-chat shortcut available while focus is inside any sidebar control.
   React.useEffect(() => {
@@ -112,7 +126,7 @@ function AppSidebar({
       if (!conversation) return
 
       event.preventDefault()
-      onSelectConversation(conversation.id)
+      handleConversationSelection(conversation.id)
     }
     const handleKeyUp = (event: KeyboardEvent): void => {
       if (event.key === 'Meta' || !event.metaKey) setCommandKeyPressed(false)
@@ -127,7 +141,7 @@ function AppSidebar({
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
     }
-  }, [conversations, onSelectConversation])
+  }, [conversations, handleConversationSelection])
 
   return (
     <>
@@ -195,34 +209,18 @@ function AppSidebar({
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
-            ) : conversations.length > 0 ? (
-              <SidebarMenu className="relative" onMouseLeave={conversationHighlight.clearHighlight}>
-                <span
-                  {...conversationHighlight.highlightProps}
-                  className={`${conversationHighlight.highlightProps.className} inset-x-1.5 rounded-lg bg-sidebar-row-hover`}
-                />
-                {conversations.map((conversation, index) => (
-                  <ConversationRow
-                    key={conversation.id}
-                    conversation={conversation}
-                    isResponding={respondingConversationIds.has(conversation.id)}
-                    shortcutNumber={commandKeyPressed && index < 9 ? index + 1 : undefined}
-                    selected={conversation.id === activeConversationId}
-                    onDeleteConversation={onDeleteConversation}
-                    onRenameConversation={onRenameConversation}
-                    onSelectConversation={onSelectConversation}
-                    glidingHighlightItemProps={conversationHighlight.getItemProps(index)}
-                  />
-                ))}
-              </SidebarMenu>
             ) : (
-              <div
-                aria-label="Empty conversations"
-                className="flex flex-col items-center gap-0.5 px-2 py-3 text-center"
-              >
-                <span className="text-base leading-[1.35] text-text-secondary">Clear History</span>
-                <span className="text-[11px] leading-[1.4] text-text-tertiary">New Chat</span>
-              </div>
+              <ConversationNavigation
+                conversations={conversations}
+                projects={projects}
+                activeConversationId={activeConversationId}
+                respondingConversationIds={respondingConversationIds}
+                commandKeyPressed={commandKeyPressed}
+                selectionRequest={selectionRequest}
+                onDeleteConversation={onDeleteConversation}
+                onRenameConversation={onRenameConversation}
+                onSelectConversation={handleConversationSelection}
+              />
             )}
           </SidebarGroup>
         </SidebarContent>
@@ -255,7 +253,7 @@ function AppSidebar({
           icon={<Search aria-hidden="true" />}
           label="Search threads"
           onClick={() => setSearchOpen(true)}
-          tooltip="Search commands"
+          tooltip="Search threads and actions"
         />
         <IconTooltipButton
           className="titlebar-button"
@@ -291,6 +289,35 @@ function AppSidebar({
         <CommandInput placeholder="Search threads and actions..." />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
+          {searchOpen && conversations.length > 0 && (
+            <CommandGroup heading="Conversations">
+              {conversations.map((conversation) => {
+                const project = projects.find(({ id }) => id === conversation.projectId)
+                const projectLabel =
+                  project?.name ?? (conversation.projectId ? 'Unavailable workspace' : 'Chats')
+                return (
+                  <CommandItem
+                    key={conversation.id}
+                    value={conversation.id}
+                    keywords={[
+                      conversation.title,
+                      projectLabel,
+                      project?.rootPath ?? conversation.cwd ?? ''
+                    ]}
+                    onSelect={() => {
+                      setSearchOpen(false)
+                      handleConversationSelection(conversation.id)
+                    }}
+                  >
+                    <span className="min-w-0 truncate">{conversation.title}</span>
+                    <span className="ml-auto max-w-32 truncate text-xs text-muted-foreground">
+                      {projectLabel}
+                    </span>
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          )}
           <CommandGroup heading="Quick Actions">
             <CommandItem
               onSelect={() => {

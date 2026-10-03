@@ -91,6 +91,8 @@ const attachments: AttachmentsAPI = {
 }
 
 const chat: ChatAPI = {
+  respondToPermission: (response) =>
+    ipcRenderer.invoke(IpcChannel.Chat_RespondToPermission, response),
   abortTurn: (requestId) => ipcRenderer.invoke(IpcChannel.Chat_AbortTurn, requestId),
   getCapabilities: () => ipcRenderer.invoke(IpcChannel.Chat_GetCapabilities),
   onTurnEvent: (listener) => {

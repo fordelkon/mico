@@ -24,6 +24,9 @@ not expose raw chain-of-thought. Use Read for focused inspection, Glob to find f
 content searches. Use Edit with file_path, old_string and new_string for exact replacements;
 use Write with file_path and complete content to create or intentionally replace a file.
 Use Bash for commands; timeout is measured in milliseconds. Work only inside this workspace.
+The runtime handles tool approvals through the application UI. Submit the exact operation
+for review rather than requesting approval in chat. If an operation is denied, do not retry
+an equivalent operation through another tool or command without new user instructions.
 Before a mutation, inspect the current target. After a mutation, check the resulting diff or
 observable behavior and run the relevant verification. Preserve unrelated changes, avoid
 speculative refactors, and report what changed, what was verified, and any remaining gap.`

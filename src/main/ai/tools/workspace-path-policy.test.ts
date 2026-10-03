@@ -45,6 +45,27 @@ describe('resolveWorkspacePath', () => {
     ).rejects.toThrow('Path must be inside the session workspace.')
   })
 
+  it('user creates through a dangling symlink when its target is outside, then the path is rejected', async () => {
+    const workspace = await createWorkspace()
+    const outsideDirectory = join(workspace, '..', 'outside')
+    await mkdir(outsideDirectory)
+    await symlink(join(outsideDirectory, 'new.txt'), join(workspace, 'alias.txt'))
+    await expect(
+      resolveWorkspacePath(workspace, 'alias.txt', { allowMissing: true })
+    ).rejects.toThrow('Path must be inside the session workspace.')
+  })
+
+  it('user follows a relative symlink with parent traversal when writing, then outside targets are rejected', async () => {
+    const workspace = await createWorkspace()
+    const outsideDirectory = join(workspace, '..', 'outside')
+    await mkdir(join(outsideDirectory, 'child'), { recursive: true })
+    await symlink(join(outsideDirectory, 'child'), join(workspace, 'pivot'))
+    await symlink('pivot/../new.txt', join(workspace, 'alias.txt'))
+    await expect(
+      resolveWorkspacePath(workspace, 'alias.txt', { allowMissing: true })
+    ).rejects.toThrow('Path must be inside the session workspace.')
+  })
+
   it('user opens an absolute path when workspace uses an alias, then the equivalent path is accepted', async () => {
     const root = await createTemporaryWorkspace('mico-tool-path-')
     const workspace = join(root, 'workspace')

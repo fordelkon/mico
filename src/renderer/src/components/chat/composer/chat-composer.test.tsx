@@ -9,6 +9,7 @@ import { ChatComposer } from './chat-composer'
 import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
+import type { PermissionMode } from '@shared/ai/permissions'
 
 const props = {
   focusKey: 0,
@@ -167,6 +168,47 @@ function renderWorkspaceComposer(
 }
 
 describe('ChatComposer', () => {
+  it('user changes tool permissions when selecting an option, then the choice is shown', async () => {
+    const user = userEvent.setup()
+    function PermissionComposer(): React.JSX.Element {
+      const [permissionMode, setPermissionMode] = React.useState<PermissionMode>('default')
+      return (
+        <ChatComposer
+          {...props}
+          permissionMode={permissionMode}
+          onPermissionModeChange={setPermissionMode}
+          projectLabel="Mico"
+          projectPath="/projects/mico"
+        />
+      )
+    }
+    renderWithLibrary(<PermissionComposer />)
+    await waitForModelButton('Qwen 3 8B')
+
+    await user.click(screen.getByRole('button', { name: 'Tool permissions' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Accept edits' }))
+
+    expect(screen.getByRole('button', { name: 'Tool permissions' })).toHaveTextContent(
+      'Accept edits'
+    )
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it.each(['stop', 'disabled'] as const)(
+    'user cannot change permissions when mode is %s, then the control is disabled',
+    (mode) => {
+      renderWithLibrary(
+        <ChatComposer
+          {...props}
+          mode={mode}
+          onPermissionModeChange={vi.fn<(mode: PermissionMode) => void>()}
+          projectPath="/projects/mico"
+        />
+      )
+      expect(screen.getByRole('button', { name: 'Tool permissions' })).toBeDisabled()
+    }
+  )
+
   it.each(['', 'Explain this file'])(
     'user sends documents with draft %j when pressing Send message, then attachments clear',
     async (text) => {

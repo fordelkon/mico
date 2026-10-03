@@ -689,6 +689,36 @@
   box-shadow: var(--chat-composer-focus-shadow);
 }
 
+.chat-composer__actions {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chat-composer__generation {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+.chat-composer__context {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.25rem 0;
+}
+
+.chat-composer__context:empty {
+  display: none;
+}
+
 .chat-composer__suggestion {
   animation: chat-composer-suggestion-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

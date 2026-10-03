@@ -1,12 +1,13 @@
 import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SidebarProvider } from '@mico/ui'
 import type { Conversation } from '@renderer/types/chat'
 
-import { AppSidebar } from './app-sidebar'
+import { AppSidebar, type AppSidebarProps } from './app-sidebar'
 
 const sidebarProps = {
   activeConversationId: 'conversation-1',
@@ -41,13 +42,109 @@ describe('AppSidebar', () => {
     else Reflect.deleteProperty(window, 'electron')
   })
 
-  function renderSidebar(overrides: Partial<typeof sidebarProps> = {}) {
-    render(
+  function renderSidebar(overrides: Partial<AppSidebarProps> = {}) {
+    return render(
       <SidebarProvider>
         <AppSidebar {...sidebarProps} {...overrides} />
       </SidebarProvider>
     )
   }
+
+  it('user collapses a project when another chat responds, then its status stays visible', async () => {
+    const user = userEvent.setup()
+    renderSidebar({
+      projects: [{ id: 'mico', name: 'mico', rootPath: '/projects/mico', isDefault: true }],
+      conversations: [{ id: 'conversation-1', title: 'First conversation', projectId: 'mico' }],
+      respondingConversationIds: new Set(['conversation-1'])
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Toggle mico conversations' }))
+
+    expect(screen.queryByRole('button', { name: 'First conversation' })).not.toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'Generating response in mico' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Toggle mico conversations' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+  })
+
+  it('user searches a collapsed project when selecting a result, then that conversation opens', async () => {
+    const user = userEvent.setup()
+    const onSelectConversation =
+      vi.fn<(id: string, options?: { focusComposer?: boolean }) => void>()
+    renderSidebar({
+      activeConversationId: null,
+      projects: [
+        { id: 'university', name: 'University', rootPath: '/projects/university', isDefault: false }
+      ],
+      conversations: [{ id: 'research', title: 'Research outline', projectId: 'university' }],
+      onSelectConversation
+    })
+    expect(screen.queryByRole('button', { name: 'Research outline' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Search threads' }))
+    await user.type(screen.getByRole('combobox'), 'University')
+    await user.keyboard('{Enter}')
+
+    expect(onSelectConversation).toHaveBeenCalledWith('research')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('user selects a chat when its project is collapsed, then the active group is revealed', async () => {
+    const user = userEvent.setup()
+    const props: AppSidebarProps = {
+      ...sidebarProps,
+      projects: [{ id: 'mico', name: 'mico', rootPath: '/projects/mico', isDefault: true }],
+      conversations: [
+        { id: 'conversation-1', title: 'First conversation' },
+        { id: 'conversation-2', title: 'Project conversation', projectId: 'mico' }
+      ]
+    }
+    const { rerender } = renderSidebar(props)
+    await user.click(screen.getByRole('button', { name: 'Toggle mico conversations' }))
+
+    rerender(
+      <SidebarProvider>
+        <AppSidebar {...props} activeConversationId="conversation-2" />
+      </SidebarProvider>
+    )
+
+    expect(screen.getByRole('button', { name: 'Project conversation' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Toggle mico conversations' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+  })
+
+  it('user keeps history when a workspace is unavailable, then the chat remains accessible', async () => {
+    const user = userEvent.setup()
+    renderSidebar({
+      activeConversationId: null,
+      conversations: [
+        { id: 'orphan', title: 'Saved project chat', projectId: 'deleted', cwd: '/projects/old' }
+      ]
+    })
+
+    await user.click(
+      screen.getByRole('button', { name: 'Toggle Unavailable workspace: old conversations' })
+    )
+
+    expect(screen.getByRole('button', { name: 'Saved project chat' })).toBeVisible()
+  })
+
+  it('user reselects the current chat when its project is collapsed, then the project reopens', async () => {
+    const user = userEvent.setup()
+    renderSidebar({
+      projects: [{ id: 'mico', name: 'mico', rootPath: '/projects/mico', isDefault: true }],
+      conversations: [{ id: 'conversation-1', title: 'First conversation', projectId: 'mico' }]
+    })
+    await user.click(screen.getByRole('button', { name: 'Toggle mico conversations' }))
+    await user.click(screen.getByRole('button', { name: 'Search threads' }))
+    await user.type(screen.getByRole('combobox'), 'First conversation')
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('button', { name: 'First conversation' })).toBeVisible()
+  })
 
   it('user sees command shortcuts when holding the meta key, then they hide on release', () => {
     renderSidebar()

@@ -18,6 +18,12 @@ type RadioSelectOption<Value extends string> = {
 }
 
 type RadioSelectProps<Value extends string> = {
+  /** Alignment relative to the trigger. Defaults to the menu's start alignment. */
+  align?: React.ComponentProps<typeof DropdownMenuContent>['align']
+  /** Preferred opening side; collision handling may choose another side. */
+  side?: React.ComponentProps<typeof DropdownMenuContent>['side']
+  /** Distance from the trigger, in pixels. Defaults to the menu's offset. */
+  sideOffset?: React.ComponentProps<typeof DropdownMenuContent>['sideOffset']
   /** Accessible name for the menu trigger. */
   'aria-label': string
   /** Called with the selected option value. */
@@ -36,6 +42,9 @@ type RadioSelectProps<Value extends string> = {
 
 /** A controlled button that selects one option from a dropdown menu. */
 function RadioSelect<Value extends string>({
+  align,
+  side,
+  sideOffset,
   'aria-label': ariaLabel,
   className,
   contentClassName,
@@ -60,7 +69,12 @@ function RadioSelect<Value extends string>({
           <ChevronDownIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className={cn('w-max max-w-[calc(100vw-4rem)]', contentClassName)}>
+      <DropdownMenuContent
+        align={align}
+        side={side}
+        sideOffset={sideOffset}
+        className={cn('w-max max-w-[calc(100vw-4rem)]', contentClassName)}
+      >
         <DropdownMenuRadioGroup
           onValueChange={(nextValue) => {
             const nextOption = options.find((option) => option.value === nextValue)

@@ -14,6 +14,7 @@ import type {
   ThinkingSelection
 } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
+import type { PermissionMode } from '@shared/ai/permissions'
 
 import { useChatResponses } from './chat-response-store'
 import { useChatSessions, type ChatSession } from './chat-session-instances'
@@ -31,6 +32,8 @@ class ThinkingEffortStore {
 }
 
 type ChatWorkspace = {
+  permissionMode: PermissionMode
+  setPermissionMode: (mode: PermissionMode) => void
   conversations: Conversation[]
   activeConversation: Conversation | null
   activeChat: Chat<MicoUIMessage> | null
@@ -78,6 +81,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   const { responses, respondingConversationIds, getResponse, setResponseState, settleResponse } =
     useChatResponses()
   const [conversations, setConversations] = React.useState<Conversation[]>([])
+  const [permissionMode, setPermissionModeState] = React.useState<PermissionMode>('default')
   const [activeSession, setActiveSession] = React.useState<ActiveChatSession | null>(null)
   const [pendingMessage, setPendingMessage] = React.useState<PendingMessage | null>(null)
   const [reasoningCapabilities, setReasoningCapabilities] =
@@ -104,6 +108,17 @@ function useChatWorkspaceState(): ChatWorkspace {
     const loadedProjects = await window.api.workspaces.list()
     setProjects(loadedProjects)
   }, [])
+
+  const setPermissionMode = React.useCallback(
+    (mode: PermissionMode): void => {
+      setPermissionModeState(mode)
+      if (activeSession)
+        updateSession(activeSession.conversationId, (session) => {
+          session.permissionMode = mode
+        })
+    },
+    [activeSession, updateSession]
+  )
 
   React.useEffect(() => {
     void window.api.workspaces.list().then(setProjects, () => undefined)
@@ -165,7 +180,15 @@ function useChatWorkspaceState(): ChatWorkspace {
         if (!active) return
 
         setConversations((current) =>
-          current.length ? current : sessions.map(({ id, title }) => ({ id, title }))
+          current.length
+            ? current
+            : sessions.map(({ id, title, projectId, cwd, lastActivityAt }) => ({
+                id,
+                title,
+                projectId,
+                cwd,
+                lastActivityAt
+              }))
         )
       },
       () => {
@@ -201,6 +224,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   }, [pendingMessage])
 
   const startNewChat = React.useCallback((): void => {
+    setPermissionModeState('default')
     setActiveSession(null)
     setSelectedModelEntryId(null)
     setSelectedProjectId(null)
@@ -232,6 +256,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     (conversationId: string, { focusComposer = true }: { focusComposer?: boolean } = {}): void => {
       const existing = getSession(conversationId)
       if (existing) {
+        setPermissionModeState(existing.permissionMode)
         setActiveSession({ conversationId, chat: existing.chat, project: existing.project })
         setSelectedModelEntryId(existing.modelEntryId)
         if (existing.thinkingEffort) {
@@ -243,6 +268,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       }
 
       void window.api.sessions.load(conversationId).then(async (persisted) => {
+        setPermissionModeState('default')
         const savedThinkingEffort = persisted.defaultProfile?.thinkingEffort
         setSelectedModelEntryId(persisted.defaultProfile?.modelEntryId ?? null)
         if (savedThinkingEffort) {
@@ -361,6 +387,13 @@ function useChatWorkspaceState(): ChatWorkspace {
       for (const document of documents) parts.push({ type: 'data-document', data: document })
 
       if (existingSession) {
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === existingSession.conversation.id
+              ? { ...conversation, lastActivityAt: Date.now() }
+              : conversation
+          )
+        )
         setResponseState({ status: 'submitted', conversationId: existingSession.conversation.id })
         void existingSession.chat.sendMessage({ parts })
         return true
@@ -375,8 +408,15 @@ function useChatWorkspaceState(): ChatWorkspace {
         : { title: 'New chat' }
       try {
         const summary = await window.api.sessions.create(createInput)
-        const conversation = { id: summary.id, title: summary.title }
+        const conversation = {
+          id: summary.id,
+          title: summary.title,
+          projectId: summary.projectId,
+          cwd: summary.cwd,
+          lastActivityAt: summary.lastActivityAt
+        }
         const session = createSession(conversation, [], undefined, pendingProject)
+        session.permissionMode = permissionMode
         setConversations((current) => [...current, conversation])
         setActiveSession({
           conversationId: conversation.id,
@@ -398,6 +438,7 @@ function useChatWorkspaceState(): ChatWorkspace {
       getResponse,
       projects,
       selectedProjectId,
+      permissionMode,
       setResponseState
     ]
   )
@@ -460,13 +501,24 @@ function useChatWorkspaceState(): ChatWorkspace {
   )
   const activeChat = activeSession?.chat ?? null
   const pendingProject = resolvePendingProject(projects, selectedProjectId)
-  const activeProject = activeSession?.project ?? pendingProject
+  const activeProject = React.useMemo(() => {
+    if (!activeSession) return pendingProject
+    const boundProject = activeSession.project
+    if (!boundProject) return null
+    const registeredProject = projects.find(({ id }) => id === boundProject.id)
+    // Display current catalog metadata without changing the conversation's bound folder.
+    return registeredProject
+      ? { ...boundProject, name: registeredProject.name, isDefault: registeredProject.isDefault }
+      : boundProject
+  }, [activeSession, pendingProject, projects])
   const response = activeSession
     ? (responses.get(activeSession.conversationId) ?? IDLE_CHAT_RESPONSE)
     : IDLE_CHAT_RESPONSE
   return React.useMemo(
     () => ({
       conversations,
+      permissionMode,
+      setPermissionMode,
       activeConversation,
       activeChat,
       response,
@@ -493,6 +545,8 @@ function useChatWorkspaceState(): ChatWorkspace {
     }),
     [
       activeConversation,
+      permissionMode,
+      setPermissionMode,
       addProjectToNewChat,
       activeChat,
       activeProject,

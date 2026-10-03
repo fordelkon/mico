@@ -112,6 +112,8 @@ function AgentActivityTimeline({
   }, [isLive])
   const contentId = `agent-activity-${id}`
   const tools = parts.filter((part): part is ToolActivityPart => part.type === 'dynamic-tool')
+  const awaitingApproval = isLive && tools.some((part) => part.permission?.state === 'pending')
+  const isExpanded = expanded || awaitingApproval
   const failed = tools.filter((part) => getToolActivityState(part, isLive) === 'failed').length
   const incomplete = tools.filter(
     (part) => getToolActivityState(part, isLive) === 'incomplete'
@@ -125,8 +127,9 @@ function AgentActivityTimeline({
     : tools.length
       ? null
       : 'Reasoning finished'
-  const liveLabel =
-    active.length > 1
+  const liveLabel = awaitingApproval
+    ? 'Waiting for your approval'
+    : active.length > 1
       ? `Running ${active.length} tools`
       : active.length === 1
         ? getToolActivityLabel(active[0])
@@ -147,14 +150,14 @@ function AgentActivityTimeline({
       aria-label="Agent activity"
       className="agent-activity"
       data-live={isLive}
-      data-open={expanded}
+      data-open={isExpanded}
       data-animate-disclosure={animateDisclosure}
       data-testid="agent-activity-event"
     >
       <Button
         aria-label={`Agent activity: ${label}`}
         aria-controls={contentId}
-        aria-expanded={expanded}
+        aria-expanded={isExpanded}
         className="agent-activity__header hover:bg-transparent hover:text-text-secondary aria-expanded:bg-transparent aria-expanded:text-text-secondary"
         variant="ghost"
         onClick={(event) => {
@@ -183,9 +186,9 @@ function AgentActivityTimeline({
       </span>
       <div className="agent-activity__body" id={contentId}>
         <div
-          aria-hidden={!expanded}
+          aria-hidden={!isExpanded}
           className="agent-activity__body-inner"
-          inert={!expanded}
+          inert={!isExpanded}
           role="list"
         >
           {toTimelineSegments(parts).map((segment, index) => (

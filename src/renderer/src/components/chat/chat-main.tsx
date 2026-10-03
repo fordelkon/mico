@@ -43,6 +43,8 @@ function ChatMain({ workspace }: ChatMainProps): React.JSX.Element {
   const retry = response.status === 'retrying' && isForActiveConversation ? response : undefined
   const composer = (
     <ChatComposer
+      permissionMode={workspace.permissionMode}
+      onPermissionModeChange={workspace.setPermissionMode}
       canAddProject={!workspace.activeConversation}
       focusKey={workspace.composerFocusKey}
       mode={composerMode}

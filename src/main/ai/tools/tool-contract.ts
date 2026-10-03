@@ -100,7 +100,13 @@ type RegisteredAgentTool = {
    * classification, or an unknown tool all fail closed to serial.
    */
   isConcurrencySafe: (input: ToolInput) => boolean
-  execute: (input: ToolInput, context: ToolExecutionContext) => Promise<ToolExecutionResult>
+  prepare: (
+    input: ToolInput,
+    context: ToolExecutionContext
+  ) => Promise<{
+    isReadOnly: boolean
+    execute: () => Promise<ToolExecutionResult>
+  }>
 }
 
 function registerTool<Input>(tool: AgentTool<Input>): RegisteredAgentTool {
@@ -121,7 +127,7 @@ function registerTool<Input>(tool: AgentTool<Input>): RegisteredAgentTool {
         return false
       }
     },
-    async execute(input, context) {
+    async prepare(input, context) {
       const parsed = tool.inputSchema.safeParse(input)
       if (!parsed.success) {
         const issues = parsed.error.issues
@@ -133,7 +139,13 @@ function registerTool<Input>(tool: AgentTool<Input>): RegisteredAgentTool {
       }
       const failure = await tool.validateInput?.(parsed.data, context)
       if (failure) throw new Error(failure.message)
-      return tool.execute(parsed.data, context)
+      let isReadOnly = false
+      try {
+        isReadOnly = tool.isReadOnly(parsed.data)
+      } catch {
+        // Unknown classifications require approval.
+      }
+      return { isReadOnly, execute: () => tool.execute(parsed.data, context) }
     }
   }
 }

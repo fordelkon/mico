@@ -10,7 +10,9 @@ describe('ToolRegistry', () => {
   afterEach(() => removeTemporaryPaths())
 
   async function createRegistry(): Promise<ToolRegistry> {
-    return ToolRegistry.forWorkspace(await createTemporaryWorkspace('mico-tool-registry-'))
+    return ToolRegistry.forWorkspace(await createTemporaryWorkspace('mico-tool-registry-'), {
+      requestApproval: async () => true
+    })
   }
 
   it('user sees an error result when calling an unknown tool, then nothing executes', async () => {
@@ -105,7 +107,7 @@ describe('ToolRegistry', () => {
   it('user submits a command with a file read when batching tools, then both succeed', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'a.txt'), 'content')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = ToolRegistry.forWorkspace(cwd, { requestApproval: async () => true })
 
     const results = await registry.executeBatch(
       [

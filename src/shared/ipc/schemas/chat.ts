@@ -6,6 +6,7 @@ import { ChatUserMessageSchema, ThinkingSelectionSchema } from '../../data/schem
 import type { ModelReasoningCapabilities } from '../../data/schemas/chat'
 import { defineSchema } from '../../data/define'
 import { SessionIdSchema } from '../../data/schemas/session'
+import { PermissionModeSchema, type PermissionResponse } from '../../ai/permissions'
 
 type TurnTerminalEvent =
   | { type: 'cancelled'; requestId: string }
@@ -48,6 +49,7 @@ const TurnStartRequestSchema = defineSchema(
     sessionId: SessionIdSchema,
     userMessage: ChatUserMessageSchema,
     thinkingEffort: ThinkingSelectionSchema.optional(),
+    permissionMode: PermissionModeSchema.optional(),
     retry: z.boolean().optional()
   })
 )
@@ -81,6 +83,7 @@ interface ChatAPI {
   getCapabilities: () => Promise<ModelReasoningCapabilities | null>
   startTurn: (request: TurnStartRequest) => Promise<void>
   abortTurn: (requestId: string) => Promise<void>
+  respondToPermission: (response: PermissionResponse) => Promise<void>
   onTurnEvent: (listener: (event: TurnStreamEvent) => void) => () => void
 }
 

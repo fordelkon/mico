@@ -10,7 +10,7 @@ describe('workspace tool protocol', () => {
 
   it('user creates and edits a file when using Claude Code arguments, then replacements preserve surrounding content', async () => {
     const cwd = await createTemporaryWorkspace('mico-protocol-')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' })
     const signal = new AbortController().signal
     const file_path = join(cwd, 'file.txt')
     const results = await registry.executeBatch(

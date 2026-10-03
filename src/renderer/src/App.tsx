@@ -23,23 +23,35 @@ function AppContent(): React.JSX.Element {
   )
 
   const { startNewChat, selectConversation, activeConversation, refreshProjects } = workspace
-  const handleNewChat = React.useCallback((): void => {
-    setActivePage('chat')
-    startNewChat()
-  }, [startNewChat])
-
   const handleOpenSettings = React.useCallback((): void => {
     if (activePage === 'settings') return
 
     transitionSettingsPage(() => setActivePage('settings'))
   }, [activePage])
 
-  const handleBackFromSettings = React.useCallback(async (): Promise<void> => {
-    // The outgoing settings view remains visible until its draft reaches the snapshot boundary.
-    await commitProviderDrafts()
-    await refreshProjects().catch(() => undefined)
-    transitionSettingsPage(() => setActivePage('chat'))
-  }, [commitProviderDrafts, refreshProjects])
+  const leaveSettings = React.useCallback(
+    async (changePage: () => void): Promise<void> => {
+      // Every settings exit observes the same draft and workspace snapshot boundary.
+      await commitProviderDrafts()
+      await refreshProjects().catch(() => undefined)
+      transitionSettingsPage(changePage)
+    },
+    [commitProviderDrafts, refreshProjects]
+  )
+
+  const handleBackFromSettings = React.useCallback(
+    (): Promise<void> => leaveSettings(() => setActivePage('chat')),
+    [leaveSettings]
+  )
+
+  const handleNewChat = React.useCallback((): void => {
+    const start = (): void => {
+      setActivePage('chat')
+      startNewChat()
+    }
+    if (activePage === 'settings') void leaveSettings(start)
+    else start()
+  }, [activePage, leaveSettings, startNewChat])
 
   const handleSelectSettingsPage = React.useCallback(
     (page: 'providers' | 'appearance' | 'workspaces'): void => {
@@ -54,6 +66,13 @@ function AppContent(): React.JSX.Element {
   const activeConversationId = activeConversation?.id ?? null
   const handleSelectConversation = React.useCallback(
     (conversationId: string, options?: { focusComposer?: boolean }): void => {
+      if (activePage === 'settings') {
+        void leaveSettings(() => {
+          setActivePage('chat')
+          selectConversation(conversationId, options)
+        })
+        return
+      }
       selectConversationWithPaperTransition({
         activeConversationId,
         conversationId,
@@ -61,7 +80,7 @@ function AppContent(): React.JSX.Element {
         selectConversation
       })
     },
-    [activeConversationId, selectConversation]
+    [activeConversationId, activePage, leaveSettings, selectConversation]
   )
 
   return (
@@ -74,6 +93,7 @@ function AppContent(): React.JSX.Element {
       <AppSidebar
         activeConversationId={workspace.activeConversation?.id ?? null}
         conversations={workspace.conversations}
+        projects={workspace.projects}
         respondingConversationIds={workspace.respondingConversationIds}
         onDeleteConversation={workspace.deleteConversation}
         onBackFromSettings={handleBackFromSettings}

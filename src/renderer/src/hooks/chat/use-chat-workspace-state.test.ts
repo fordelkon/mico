@@ -10,6 +10,7 @@ import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { useChatWorkspaceState } from './use-chat-workspace-state'
 
 class FakeChatAPI implements ChatAPI {
+  async respondToPermission(): Promise<void> {}
   readonly startedRequests: Parameters<ChatAPI['startTurn']>[0][] = []
   readonly listeners = new Set<Parameters<ChatAPI['onTurnEvent']>[0]>()
   readonly titleListeners = new Set<(update: { sessionId: string; title: string }) => void>()
@@ -119,6 +120,31 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('user reloads project history when sessions are listed, then workspace metadata is retained', async () => {
+    const savedSession = {
+      id: 'session-1',
+      title: 'Saved chat',
+      projectId: 'mico',
+      cwd: '/projects/mico',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 2,
+      lastActivityAt: 2
+    }
+    const { result } = renderWorkspaceState((api) => {
+      api.sessions.list = async () => [savedSession]
+    })
+
+    await waitFor(() => expect(result.current.conversations).toHaveLength(1))
+
+    expect(result.current.conversations[0]).toMatchObject({
+      id: 'session-1',
+      projectId: 'mico',
+      cwd: '/projects/mico',
+      lastActivityAt: 2
+    })
+  })
+
   it('user starts new chats in the default workspace when sending, then it is used', async () => {
     const { api, result } = renderWorkspaceState((api) => {
       api.workspaceProjects = [
@@ -626,7 +652,7 @@ describe('useChatWorkspaceState', () => {
     })
 
     await waitFor(() =>
-      expect(result.current.conversations).toEqual([
+      expect(result.current.conversations).toMatchObject([
         { id: 'session-1', title: 'Plan release notes' }
       ])
     )

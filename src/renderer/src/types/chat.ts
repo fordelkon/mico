@@ -1,6 +1,7 @@
 import type { ProviderMetadata, UIMessage } from 'ai'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
+import type { ToolPermissionData } from '@shared/ai/permissions'
 
 type AssistantCompletionState = 'complete' | 'streaming' | 'stopped'
 
@@ -11,7 +12,11 @@ type MicoMessageMetadata = {
 
 type MicoUIMessage = UIMessage<
   MicoMessageMetadata,
-  { document: ChatDocumentPart; 'tool-output-delta': ToolOutputDeltaData }
+  {
+    document: ChatDocumentPart
+    'tool-output-delta': ToolOutputDeltaData
+    'tool-permission': ToolPermissionData
+  }
 >
 
 type ChatRetryState = {
@@ -24,6 +29,9 @@ type ChatRetryState = {
 type Conversation = {
   id: string
   title: string
+  projectId?: string | null
+  cwd?: string | null
+  lastActivityAt?: number
 }
 
 type ActiveChatResponse =

@@ -53,6 +53,7 @@ function createHarness() {
     unmaximize: vi.fn<BrowserWindow['unmaximize']>()
   })
   const turnExecutor = {
+    respondToPermission: vi.fn<TurnExecutor['respondToPermission']>(),
     abortTurn: vi.fn<TurnExecutor['abortTurn']>(),
     abortAllTurns: vi.fn<TurnExecutor['abortAllTurns']>(),
     getModelCapabilities: vi.fn<TurnExecutor['getModelCapabilities']>(),
@@ -303,6 +304,24 @@ describe('registerIpc attachment handlers', () => {
 })
 
 describe('registerIpc chat handlers', () => {
+  it('user answers an approval when invoking IPC, then the trusted sender owns the decision', () => {
+    const { turnExecutor, handlers, event } = createHarness()
+    const response = { approvalId: '00000000-0000-4000-8000-000000000001', decision: 'allow' }
+    handlers.get(IpcChannel.Chat_RespondToPermission)?.(event, response)
+    expect(turnExecutor.respondToPermission).toHaveBeenCalledWith('42', response)
+  })
+
+  it('user sends arbitrary approval input when invoking IPC, then malformed decisions are rejected', () => {
+    const { turnExecutor, handlers, event } = createHarness()
+    expect(() =>
+      handlers.get(IpcChannel.Chat_RespondToPermission)?.(event, {
+        approvalId: 'invalid',
+        decision: 'allow',
+        input: { command: 'changed' }
+      })
+    ).toThrow('Invalid tool approval response')
+    expect(turnExecutor.respondToPermission).not.toHaveBeenCalled()
+  })
   it('user gets model capabilities when the renderer asks, then they are returned', async () => {
     const { turnExecutor, handlers, mainWindow, event } = createHarness()
     const capabilities: ModelReasoningCapabilities = {

@@ -10,6 +10,7 @@ import { open, stat as statFile } from 'node:fs/promises'
 import * as z from 'zod'
 
 import { TurnRequestIdSchema, TurnStartRequestSchema } from '@shared/ipc/schemas/chat'
+import { PermissionResponseSchema } from '@shared/ai/permissions'
 import { AppearancePreferenceSchema } from '@shared/data/schemas/preference'
 import { ThemePreferencesSchema } from '@shared/data/schemas/theme'
 import { ProjectIdSchema, SessionIdSchema, SessionTitleSchema } from '@shared/data/schemas/session'
@@ -54,6 +55,7 @@ interface IpcServices {
     | 'abortTurn'
     | 'getModelCapabilities'
     | 'startTurn'
+    | 'respondToPermission'
     | 'updateSessionModelEntry'
     | 'updateSessionThinkingEffort'
   >
@@ -198,6 +200,12 @@ function registerIpc(
   register({
     channel: IpcChannel.Chat_GetCapabilities,
     handle: () => turnExecutor.getModelCapabilities()
+  })
+  register({
+    channel: IpcChannel.Chat_RespondToPermission,
+    input: { schema: PermissionResponseSchema, invalidMessage: 'Invalid tool approval response' },
+    handle: (response, { event }) =>
+      turnExecutor.respondToPermission(String(event.sender.id), response)
   })
   register({
     channel: IpcChannel.Chat_AbortTurn,

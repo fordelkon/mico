@@ -12,8 +12,11 @@ import {
 } from './tool-contract'
 import { createWriteTool } from './write-tool'
 import { createGlobTool, createGrepTool } from './search-tool'
+import { authorizeTool, type ToolPermissionOptions } from './tool-permissions'
+import { runPreToolUse, runPostToolUse, type ToolHooks } from './tool-hooks'
 
 type ToolCall = { toolCallId: string; toolName: string; input: ToolInput }
+type ToolRegistryOptions = ToolPermissionOptions & { hooks?: ToolHooks }
 
 // A UTF-16 slice may encode to up to four bytes per code unit. Keep each IPC
 // fragment safely below the shared 64 KiB payload ceiling while preserving all
@@ -23,21 +26,27 @@ const MAX_OUTPUT_DELTA_CHARS = 16 * 1024
 class ToolRegistry {
   readonly #tools: Map<string, RegisteredAgentTool>
   readonly #cwd: string
+  readonly #options: ToolRegistryOptions
 
-  private constructor(cwd: string, tools: RegisteredAgentTool[]) {
+  private constructor(cwd: string, tools: RegisteredAgentTool[], options: ToolRegistryOptions) {
     this.#cwd = cwd
     this.#tools = new Map(tools.map((tool) => [tool.definition.name, tool]))
+    this.#options = options
   }
 
-  static forWorkspace(cwd: string): ToolRegistry {
-    return new ToolRegistry(cwd, [
-      registerTool(createReadTool()),
-      registerTool(createGlobTool()),
-      registerTool(createGrepTool()),
-      registerTool(createEditTool()),
-      registerTool(createWriteTool()),
-      registerTool(createBashTool())
-    ])
+  static forWorkspace(cwd: string, options: ToolRegistryOptions = {}): ToolRegistry {
+    return new ToolRegistry(
+      cwd,
+      [
+        registerTool(createReadTool()),
+        registerTool(createGlobTool()),
+        registerTool(createGrepTool()),
+        registerTool(createEditTool()),
+        registerTool(createWriteTool()),
+        registerTool(createBashTool())
+      ],
+      options
+    )
   }
 
   get definitions(): readonly ChatProviderTool[] {
@@ -51,8 +60,13 @@ class ToolRegistry {
   ): Promise<ChatProviderToolResultPart> {
     const tool = this.#tools.get(call.toolName)
     if (!tool) return this.errorResult(call, `Tool "${call.toolName}" is unavailable.`)
+    // Neither hooks nor an approval host may change the operation after validation.
+    const snapshot = { ...call, input: freezeInput(call.input) }
+    const hookContext = { ...snapshot, cwd: this.#cwd, signal }
+    const hooks = this.#options.hooks ?? {}
     try {
-      const result = await tool.execute(call.input, {
+      signal.throwIfAborted()
+      const prepared = await tool.prepare(snapshot.input, {
         cwd: this.#cwd,
         signal,
         onOutputDelta: (delta: ToolOutputDelta) => {
@@ -66,6 +80,18 @@ class ToolRegistry {
             })
         }
       })
+      const askReason = await runPreToolUse(hooks, hookContext)
+      await authorizeTool(
+        snapshot,
+        this.#cwd,
+        signal,
+        prepared.isReadOnly,
+        this.#options,
+        askReason
+      )
+      signal.throwIfAborted()
+      const result = await prepared.execute()
+      await runPostToolUse(hooks, { ...hookContext, output: result.output, isError: false })
       return {
         toolCallId: call.toolCallId,
         toolName: call.toolName,
@@ -74,10 +100,10 @@ class ToolRegistry {
         type: 'tool-result'
       }
     } catch (error) {
-      return this.errorResult(
-        call,
-        error instanceof Error ? error.message : 'Tool execution failed.'
-      )
+      if (signal.aborted) throw error
+      const output = error instanceof Error ? error.message : 'Tool execution failed.'
+      await runPostToolUse(hooks, { ...hookContext, output, isError: true })
+      return this.errorResult(call, output)
     }
   }
 
@@ -124,6 +150,12 @@ class ToolRegistry {
       type: 'tool-result'
     }
   }
+}
+
+function freezeInput(input: ToolInput): ToolInput {
+  // SAFETY: ToolInput is JSON protocol data; the reviver preserves its values
+  // and freezes nested containers before exposing them to internal hooks.
+  return JSON.parse(JSON.stringify(input), (_key, value) => Object.freeze(value)) as ToolInput
 }
 
 type PartitionedCall = { index: number; toolCall: ToolCall }

@@ -1,4 +1,4 @@
-import { IconTooltipButton, IconSwap, Textarea } from '@mico/ui'
+import { IconTooltipButton, IconSwap, RadioSelect, Textarea } from '@mico/ui'
 import { ArrowUpIcon, SquareIcon } from 'lucide-react'
 import * as React from 'react'
 
@@ -8,6 +8,7 @@ import type {
   ThinkingSelection
 } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
+import type { PermissionMode } from '@shared/ai/permissions'
 
 import { ChatModelSelector } from './chat-model-selector'
 import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
@@ -18,6 +19,8 @@ import { useComposerModelSelection } from './use-composer-model-selection'
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
 type ChatComposerProps = {
+  permissionMode?: PermissionMode
+  onPermissionModeChange?: (mode: PermissionMode) => void
   canAddProject?: boolean
   focusKey: number
   mode: ChatComposerMode
@@ -45,6 +48,8 @@ const rotatingPlaceholders = [
 ]
 
 function ChatComposer({
+  permissionMode = 'default',
+  onPermissionModeChange,
   canAddProject = false,
   focusKey,
   mode,
@@ -187,104 +192,127 @@ function ChatComposer({
         void submit()
       }}
     >
-      <div className="chat-composer__surface mx-auto flex w-full max-w-[50rem] flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
-        <ComposerAttachmentList
-          disabled={mode !== 'send' || isSending}
-          documents={documents}
-          onDocumentsChange={setDocuments}
-        />
-        <div className="relative">
-          <Textarea
-            className="min-h-16 max-h-40 resize-none border-0 px-2 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
-            ref={textareaRef}
-            disabled={isDisabled}
-            onBlur={() => setIsFocused(false)}
-            onChange={(event) => setDraft(event.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onKeyDown={handleKeyDown}
-            placeholder={showRotatingPlaceholder ? '' : 'Ask Mico anything…'}
-            value={draft}
+      <div className="mx-auto w-full max-w-[50rem]">
+        <div className="chat-composer__surface flex w-full flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
+          <ComposerAttachmentList
+            disabled={mode !== 'send' || isSending}
+            documents={documents}
+            onDocumentsChange={setDocuments}
           />
-          {showRotatingPlaceholder ? (
-            <span
-              aria-hidden="true"
-              className="chat-composer__suggestion pointer-events-none absolute left-2 top-2.5 max-w-[calc(100%-1rem)] truncate text-[15px] leading-6 text-muted-foreground/80 select-none"
-              key={placeholderIndex}
-            >
-              {rotatingPlaceholders[placeholderIndex]}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex min-h-8 select-none items-center justify-between gap-4 px-0.5">
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="relative">
+            <Textarea
+              className="min-h-16 max-h-40 resize-none border-0 px-2 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
+              ref={textareaRef}
+              disabled={isDisabled}
+              onBlur={() => setIsFocused(false)}
+              onChange={(event) => setDraft(event.target.value)}
+              onFocus={() => setIsFocused(true)}
+              onKeyDown={handleKeyDown}
+              placeholder={showRotatingPlaceholder ? '' : 'Ask Mico anything…'}
+              value={draft}
+            />
+            {showRotatingPlaceholder ? (
+              <span
+                aria-hidden="true"
+                className="chat-composer__suggestion pointer-events-none absolute left-2 top-2.5 max-w-[calc(100%-1rem)] truncate text-[15px] leading-6 text-muted-foreground/80 select-none"
+                key={placeholderIndex}
+              >
+                {rotatingPlaceholders[placeholderIndex]}
+              </span>
+            ) : null}
+          </div>
+          <div className="chat-composer__actions select-none px-0.5">
             <ComposerAttachments
               disabled={mode !== 'send' || isSending}
               documents={documents}
               onDocumentsChange={setDocuments}
             />
-            <div className="flex flex-col gap-1">
-              <ChatModelSelector
-                library={library}
-                onSelect={selectModel}
-                selectedModelId={currentModelId}
-              />
-              {selectionError ? (
-                <p className="px-2 text-xs text-destructive">{selectionError}</p>
+            <div className="chat-composer__generation">
+              <div className="flex min-w-0 flex-col gap-1">
+                <ChatModelSelector
+                  library={library}
+                  onSelect={selectModel}
+                  selectedModelId={currentModelId}
+                />
+                {selectionError ? (
+                  <p className="px-2 text-xs text-destructive">{selectionError}</p>
+                ) : null}
+              </div>
+              {reasoningCapabilities ? (
+                <ThinkingSelector
+                  disabled={mode !== 'send'}
+                  onValueChange={onThinkingEffortChange}
+                  reasoningCapabilities={reasoningCapabilities}
+                  value={thinkingEffort}
+                />
               ) : null}
             </div>
-            {reasoningCapabilities ? (
-              <ThinkingSelector
-                disabled={mode !== 'send'}
-                onValueChange={onThinkingEffortChange}
-                reasoningCapabilities={reasoningCapabilities}
-                value={thinkingEffort}
+            <div className="flex shrink-0 items-center">
+              <IconTooltipButton
+                className="size-9"
+                disabled={
+                  isSending ||
+                  mode === 'disabled' ||
+                  (mode === 'send' && (!hasSelectedModel || (!draft.trim() && !documents.length)))
+                }
+                icon={
+                  <IconSwap
+                    from={<ArrowUpIcon aria-hidden="true" />}
+                    state={mode === 'stop' ? 'to' : 'from'}
+                    to={<SquareIcon aria-hidden="true" />}
+                  />
+                }
+                label={
+                  mode === 'stop'
+                    ? 'Stop response'
+                    : hasSelectedModel
+                      ? 'Send message'
+                      : 'Select an enabled model to send messages'
+                }
+                type={mode === 'stop' ? 'button' : 'submit'}
+                variant={mode === 'stop' ? 'secondary' : 'default'}
+                size="icon-lg"
+                onClick={mode === 'stop' ? onStop : undefined}
               />
-            ) : null}
-            <ProjectSelector
-              canAddProject={canAddProject}
-              onAddProject={onAddProject}
-              onProjectSelected={onProjectSelected}
-              onProjectsRefresh={onProjectsRefresh}
-              projectId={projectId}
-              projectLabel={projectLabel}
-              projectPath={projectPath}
-              projects={projects}
-            />
+            </div>
           </div>
-          <div className="flex shrink-0 items-center">
-            <IconTooltipButton
-              className="size-9"
-              disabled={
-                isSending ||
-                mode === 'disabled' ||
-                (mode === 'send' && (!hasSelectedModel || (!draft.trim() && !documents.length)))
-              }
-              icon={
-                <IconSwap
-                  from={<ArrowUpIcon aria-hidden="true" />}
-                  state={mode === 'stop' ? 'to' : 'from'}
-                  to={<SquareIcon aria-hidden="true" />}
-                />
-              }
-              label={
-                mode === 'stop'
-                  ? 'Stop response'
-                  : hasSelectedModel
-                    ? 'Send message'
-                    : 'Select an enabled model to send messages'
-              }
-              type={mode === 'stop' ? 'button' : 'submit'}
-              variant={mode === 'stop' ? 'secondary' : 'default'}
-              size="icon-lg"
-              onClick={mode === 'stop' ? onStop : undefined}
-            />
-          </div>
+          {sendError ? (
+            <p className="px-2 text-xs text-destructive" role="alert">
+              {sendError}
+            </p>
+          ) : null}
         </div>
-        {sendError ? (
-          <p className="px-2 text-xs text-destructive" role="alert">
-            {sendError}
-          </p>
-        ) : null}
+        <div className="chat-composer__context">
+          <ProjectSelector
+            canAddProject={canAddProject}
+            onAddProject={onAddProject}
+            onProjectSelected={onProjectSelected}
+            onProjectsRefresh={onProjectsRefresh}
+            projectId={projectId}
+            projectLabel={projectLabel}
+            projectPath={projectPath}
+            projects={projects}
+          />
+          {onPermissionModeChange && projectPath && (
+            <div title="Manual asks before edits and commands. Accept edits allows ordinary workspace edits; commands still require approval.">
+              <RadioSelect
+                aria-label="Tool permissions"
+                align="end"
+                side="top"
+                sideOffset={8}
+                className="h-8 gap-1.5 px-2 text-xs"
+                contentClassName="min-w-40"
+                disabled={mode !== 'send' || isSending}
+                value={permissionMode}
+                onValueChange={onPermissionModeChange}
+                options={[
+                  { value: 'default', label: 'Manual' },
+                  { value: 'acceptEdits', label: 'Accept edits' }
+                ]}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </form>
   )

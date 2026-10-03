@@ -7,6 +7,7 @@ import type { MicoUIMessage } from '@renderer/types/chat'
 import { ElectronChatTransport } from './electron-chat-transport'
 
 class FakeChatAPI implements ChatAPI {
+  async respondToPermission(): Promise<void> {}
   readonly abortedRequestIds: string[] = []
   readonly startedRequests: Parameters<ChatAPI['startTurn']>[0][] = []
   readonly listeners = new Set<Parameters<ChatAPI['onTurnEvent']>[0]>()
@@ -72,6 +73,17 @@ afterEach(() => {
 })
 
 describe('ElectronChatTransport', () => {
+  it('user selects automatic edits when sending, then the turn retains that permission mode', async () => {
+    const api = new FakeChatAPI()
+    const transport = new ElectronChatTransport(api, {
+      sessionId: 'conversation-1',
+      getThinkingEffort: () => 'default',
+      getPermissionMode: () => 'acceptEdits'
+    })
+    const stream = await transport.sendMessages(sendOptions)
+    expect(api.startedRequests[0]?.permissionMode).toBe('acceptEdits')
+    await stream.cancel()
+  })
   it.each(['submit-message', 'regenerate-message'] as const)(
     'user keeps attached documents when sending %s, then the request carries them',
     async (trigger) => {
@@ -166,6 +178,7 @@ describe('ElectronChatTransport', () => {
       sessionId: 'conversation-1',
       requestId,
       thinkingEffort: 'default',
+      permissionMode: 'default',
       userMessage: {
         role: 'user',
         parts: [{ type: 'text', text: 'Current prompt' }]
@@ -197,7 +210,8 @@ describe('ElectronChatTransport', () => {
         sessionId: 'conversation-1',
         requestId,
         userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
-        thinkingEffort: 'default'
+        thinkingEffort: 'default',
+        permissionMode: 'default'
       }
     ])
     expect(api.unsubscribeCount).toBe(1)

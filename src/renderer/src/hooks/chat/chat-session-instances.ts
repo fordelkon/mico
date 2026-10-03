@@ -5,6 +5,7 @@ import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-
 import type { Conversation, MicoUIMessage } from '@renderer/types/chat'
 import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
+import type { PermissionMode } from '@shared/ai/permissions'
 
 import type { ChatResponseUpdate } from './chat-response-store'
 
@@ -14,6 +15,7 @@ type ChatSession = {
   modelEntryId: string | null
   thinkingEffort: ThinkingSelection | null
   project: WorkspaceProject | null
+  permissionMode: PermissionMode
 }
 
 function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
@@ -109,6 +111,8 @@ function useChatSessions(options: {
         transport: new ElectronChatTransport(window.api.chat, {
           sessionId: conversation.id,
           getThinkingEffort,
+          getPermissionMode: () =>
+            sessionsRef.current.get(conversation.id)?.permissionMode ?? 'default',
           onStatusChange: (status) => {
             const currentResponse = getResponse(conversation.id)
             if (!currentResponse || currentResponse.status === 'error') return
@@ -139,7 +143,13 @@ function useChatSessions(options: {
           })
       })
 
-      const session = { conversation, chat, project, ...selection }
+      const session: ChatSession = {
+        conversation,
+        chat,
+        project,
+        permissionMode: 'default',
+        ...selection
+      }
       sessionsRef.current.set(conversation.id, session)
       return session
     },

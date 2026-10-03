@@ -13,6 +13,8 @@ import * as React from 'react'
 import * as z from 'zod'
 
 import { toolLabel } from '@shared/ai/tool-presentation'
+import type { ToolPermissionData } from '@shared/ai/permissions'
+import { ToolPermissionCard } from './tool-permission-card'
 import { editPreview } from './edit-preview'
 import {
   formatGenericToolPayload,
@@ -35,7 +37,10 @@ type ToolDescription = {
   title: string
 }
 type ToolOutputDelta = { preview: string; stderr: string; stdout: string }
-type ToolActivityPart = DynamicToolUIPart & { liveOutput?: ToolOutputDelta }
+type ToolActivityPart = DynamicToolUIPart & {
+  liveOutput?: ToolOutputDelta
+  permission?: ToolPermissionData
+}
 type ToolActivityState =
   | 'incomplete'
   | 'completed'
@@ -43,6 +48,7 @@ type ToolActivityState =
   | 'failed'
   | 'preparing'
   | 'streaming-output'
+  | 'awaiting-approval'
 
 // Keep live summaries stable; full streaming output belongs to the disclosure.
 const MAX_SUMMARY_CHARACTERS = 2_000
@@ -61,6 +67,7 @@ function getToolActivityState(part: ToolActivityPart, isActive = true): ToolActi
   if (part.state === 'output-error' || part.state === 'output-denied') return 'failed'
   if (part.state === 'output-available') return 'completed'
   if (!isActive) return 'incomplete'
+  if (part.permission?.state === 'pending') return 'awaiting-approval'
   if (part.state === 'input-streaming') return 'preparing'
   if (part.state === 'input-available') {
     if (part.toolName === 'Bash' && (part.liveOutput?.stdout || part.liveOutput?.stderr))
@@ -283,6 +290,7 @@ function describeTool(toolName: string, input: ToolTraceInput): ToolDescription 
 type ToolNodeState = 'error' | 'incomplete' | 'running' | 'success'
 
 function getToolNodeState(state: ToolActivityState): ToolNodeState {
+  if (state === 'awaiting-approval') return 'incomplete'
   if (state === 'failed') return 'error'
   if (state === 'completed') return 'success'
   // An interrupted call must neither claim success nor pulse like it is still running.
@@ -353,21 +361,18 @@ function ToolSummaryLine({ summary }: { summary: ToolSummary }): React.JSX.Eleme
 }
 
 function useElapsedSeconds(active: boolean): number {
-  const startedAt = React.useRef<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = React.useState(0)
 
   React.useEffect(() => {
     if (!active) return
-    startedAt.current ??= Date.now()
-    const updateElapsed = (): void => {
-      const start = startedAt.current ?? Date.now()
-      setElapsedSeconds(Math.floor((Date.now() - start) / 1_000))
-    }
-    const intervalId = window.setInterval(updateElapsed, 1_000)
+    const startedAt = Date.now()
+    const intervalId = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1_000))
+    }, 1_000)
     return () => window.clearInterval(intervalId)
   }, [active])
 
-  return elapsedSeconds
+  return active ? elapsedSeconds : 0
 }
 
 /** A timeline summary uses the same validated input as the tool row. */
@@ -425,15 +430,18 @@ function ToolTrace({
       : null
   const isRunning = nodeState === 'running'
   const elapsedSeconds = useElapsedSeconds(isRunning && part.toolName === 'Bash')
-  const summary = getToolSummary(
-    part,
-    activityState,
-    input.success ? input.data : undefined,
-    output?.success ? output.data : undefined,
-    presentation,
-    part.liveOutput,
-    elapsedSeconds
-  )
+  const summary: ToolSummary =
+    activityState === 'awaiting-approval'
+      ? { kind: 'message', text: 'Waiting for your approval.', isError: false }
+      : getToolSummary(
+          part,
+          activityState,
+          input.success ? input.data : undefined,
+          output?.success ? output.data : undefined,
+          presentation,
+          part.liveOutput,
+          elapsedSeconds
+        )
   // Failed mutations must not render their proposed edits as successfully applied.
   const isFileTool = ['Read', 'Edit', 'Write'].includes(part.toolName)
   const hasPanel =
@@ -501,6 +509,13 @@ function ToolTrace({
       )}
       {(!isExpanded || activityState === 'failed' || activityState === 'incomplete') && (
         <ToolSummaryLine summary={summary} />
+      )}
+      {part.permission && (
+        <ToolPermissionCard
+          permission={part.permission}
+          isActive={isActive}
+          onRespond={(response) => window.api.chat.respondToPermission(response)}
+        />
       )}
       {hasPanel ? (
         <div className="thinking-block__panel">

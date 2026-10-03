@@ -81,7 +81,12 @@ function ThinkingSelector({
           <span>{`Reasoning · ${shortLabels[selected]}`}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80 p-2">
+      <DropdownMenuContent
+        align="end"
+        className="w-80 max-w-[calc(100vw-2rem)] p-2"
+        side="top"
+        sideOffset={8}
+      >
         <DropdownMenuLabel className="px-2 py-1.5">
           <p className="text-sm font-semibold text-foreground">Reasoning</p>
           <p className="mt-1 text-xs font-normal leading-5 text-muted-foreground">

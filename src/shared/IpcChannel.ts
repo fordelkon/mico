@@ -25,6 +25,8 @@ export enum IpcChannel {
   Chat_GetCapabilities = 'chat:get-capabilities',
   /** Starts a turn owned by the invoking renderer. */
   Chat_StartTurn = 'chat:start-turn',
+  /** Answers a pending tool approval owned by the invoking renderer. */
+  Chat_RespondToPermission = 'chat:respond-to-permission',
 
   /** Creates a persisted session before its first message. */
   Sessions_Create = 'sessions:create',

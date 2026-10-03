@@ -69,6 +69,14 @@ console.error('Diagnostic output')
   provider.enqueue({ type: 'text', text: 'Updated the greeting and checked the command.' })
   await composer(app.window).fill('Read and update the greeting, then run the command.')
   await app.window.getByRole('button', { name: 'Send message' }).click()
+  await app.window
+    .getByRole('group', { name: 'Approval for Edit', exact: true })
+    .getByRole('button', { name: 'Allow once' })
+    .click()
+  await app.window
+    .getByRole('group', { name: 'Approval for Bash', exact: true })
+    .getByRole('button', { name: 'Allow once' })
+    .click()
   const firstRequest = await searchResponse.received
   expect(firstRequest.tools?.map(({ function: tool }) => tool.name).sort()).toEqual([
     'Bash',
@@ -166,6 +174,7 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   await expect(app.window.getByRole('button', { name: /^Workspace: project/ })).toBeVisible()
   await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
   await expect(app.window.getByRole('textbox', { name: 'Search workspaces' })).toBeHidden()
+  await app.window.getByRole('combobox', { name: 'Tool permissions' }).selectOption('acceptEdits')
 
   const write = provider.enqueue({
     type: 'tool',

@@ -63,8 +63,8 @@ function ChatModelSelector({
 
   return (
     <SearchPopover
-      align="start"
-      contentClassName="w-96"
+      align="end"
+      contentClassName="w-96 max-w-[calc(100vw-2rem)]"
       searchLabel="Search models"
       searchPlaceholder="Search models"
       side="top"
@@ -102,7 +102,7 @@ function ChatModelSelector({
         return modelsByProvider.size ? (
           <div
             aria-label="Available models"
-            className="relative max-h-80 overflow-y-auto p-1"
+            className="relative max-h-[min(20rem,calc(var(--radix-popover-content-available-height)-2.5rem))] overflow-y-auto p-1"
             onMouseLeave={clearHighlight}
             role="listbox"
           >

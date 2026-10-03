@@ -14,6 +14,9 @@ import type { ChatProviderResolver } from './chat-provider-resolver'
 import { ToolAgentRunner } from '../tools/tool-agent-runner'
 import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
 import { ToolRegistry } from '../tools/tool-registry'
+import { PermissionRequests } from '../tools/permission-requests'
+import type { PermissionResponse } from '@shared/ai/permissions'
+import type { ToolHooks } from '../tools/tool-hooks'
 import {
   type ExecutionProfileSnapshot,
   type SessionRuntimeService
@@ -33,6 +36,7 @@ type ActiveTurn = {
 type SessionTitleUpdate = { sessionId: string; title: string }
 
 type TurnExecutorOptions = {
+  toolHooks?: ToolHooks
   getChatConfigurationForModelEntry?: (modelEntryId: string) => ChatProviderConfiguration | null
   getSelectedModelEntryId?: () => string | null
   getSelectedChatConfiguration?: () => ChatProviderConfiguration | null
@@ -112,6 +116,8 @@ function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
 }
 
 class TurnExecutor {
+  private readonly permissions = new PermissionRequests()
+  private readonly toolHooks: ToolHooks
   private readonly activeTurns = new Map<string, ActiveTurn>()
   private readonly titleGenerationSessions = new Set<string>()
   private readonly maxAttempts: number
@@ -123,6 +129,7 @@ class TurnExecutor {
   constructor(
     resolveProvider: ChatProviderResolver,
     {
+      toolHooks = {},
       maxAttempts = DEFAULT_MAX_ATTEMPTS,
       maxAssistantTextChars = DEFAULT_MAX_ASSISTANT_TEXT_CHARS,
       retryDelayMs = DEFAULT_RETRY_DELAY_MS,
@@ -132,6 +139,7 @@ class TurnExecutor {
       getSelectedChatConfiguration
     }: TurnExecutorOptions = {}
   ) {
+    this.toolHooks = toolHooks
     this.resolveProvider = resolveProvider
     this.maxAttempts = maxAttempts
     this.maxAssistantTextChars = maxAssistantTextChars
@@ -213,6 +221,10 @@ class TurnExecutor {
         this.cancelTurn(turn)
       }
     }
+  }
+
+  respondToPermission(ownerId: string, response: PermissionResponse): void {
+    this.permissions.respond(ownerId, response)
   }
 
   dispose(): void {
@@ -321,7 +333,29 @@ class TurnExecutor {
               emit({ type: 'chunk', requestId: request.requestId, chunk })
             }
           }
-          if (cwd) Object.assign(runnerInput, { registry: ToolRegistry.forWorkspace(cwd) })
+          if (cwd)
+            Object.assign(runnerInput, {
+              registry: ToolRegistry.forWorkspace(cwd, {
+                permissionMode: request.permissionMode ?? 'default',
+                hooks: this.toolHooks,
+                requestApproval: (call, signal) =>
+                  this.permissions.request(
+                    {
+                      ...call,
+                      ownerId: turn.ownerId,
+                      sessionId: request.sessionId,
+                      requestId: request.requestId
+                    },
+                    signal,
+                    (data) =>
+                      emit({
+                        type: 'chunk',
+                        requestId: request.requestId,
+                        chunk: { type: 'data-tool-permission', id: data.approvalId, data }
+                      })
+                  )
+              })
+            })
           const toolTraces = new Map<
             string,
             Parameters<SessionRuntimeService['recordToolTrace']>[1]

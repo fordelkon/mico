@@ -29,6 +29,10 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
 
+export const OpensAbove: Story = {
+  args: { side: 'top', align: 'end', sideOffset: 8 }
+}
+
 export const LongLabel: Story = {
   args: {
     options: [

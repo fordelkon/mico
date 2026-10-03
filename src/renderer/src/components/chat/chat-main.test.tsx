@@ -18,6 +18,8 @@ Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
 
 function createWorkspace(): ChatWorkspace {
   return {
+    permissionMode: 'default',
+    setPermissionMode: vi.fn<ChatWorkspace['setPermissionMode']>(),
     conversations: [{ id: 'conversation-1', title: 'New chat' }],
     activeConversation: { id: 'conversation-1', title: 'New chat' },
     activeChat: null,

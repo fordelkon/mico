@@ -418,7 +418,7 @@ describe('ToolAgentRunner', () => {
 
     const result = await new ToolAgentRunner().run(
       createRunInput(provider, 'Run a command.', {
-        registry: ToolRegistry.forWorkspace(cwd),
+        registry: ToolRegistry.forWorkspace(cwd, { requestApproval: async () => true }),
         onStep: () => events.push('step'),
         onToolResult: () => events.push('tool')
       })

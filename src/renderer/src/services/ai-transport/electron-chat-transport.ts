@@ -3,6 +3,7 @@ import type { ChatTransport, UIMessageChunk } from 'ai'
 import type { ChatUserMessage, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { ChatAPI, TurnStartRequest } from '@shared/ipc/schemas/chat'
 import type { MicoUIMessage } from '@renderer/types/chat'
+import type { PermissionMode } from '@shared/ai/permissions'
 
 function toLatestUserMessage(messages: MicoUIMessage[]): ChatUserMessage {
   const message = messages.findLast(({ role }) => role === 'user')
@@ -36,6 +37,7 @@ type TurnTransportStatus =
 type ElectronChatTransportOptions = {
   sessionId: string
   getThinkingEffort: () => ThinkingSelection
+  getPermissionMode?: () => PermissionMode
   onStatusChange?: (status: TurnTransportStatus) => void
 }
 
@@ -46,15 +48,22 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   readonly #api: ChatAPI
   readonly #sessionId: string
   readonly #getThinkingEffort: () => ThinkingSelection
+  readonly #getPermissionMode: () => PermissionMode
   readonly #onStatusChange?: ElectronChatTransportOptions['onStatusChange']
 
   constructor(
     api: ChatAPI,
-    { sessionId, getThinkingEffort, onStatusChange }: ElectronChatTransportOptions
+    {
+      sessionId,
+      getThinkingEffort,
+      getPermissionMode = () => 'default',
+      onStatusChange
+    }: ElectronChatTransportOptions
   ) {
     this.#api = api
     this.#sessionId = sessionId
     this.#getThinkingEffort = getThinkingEffort
+    this.#getPermissionMode = getPermissionMode
     this.#onStatusChange = onStatusChange
   }
 
@@ -67,6 +76,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   ): Promise<ReadableStream<UIMessageChunk>> {
     const requestId = crypto.randomUUID()
     const thinkingEffort = this.#getThinkingEffort()
+    const permissionMode = this.#getPermissionMode()
     let stop: (() => void) | undefined
 
     return new ReadableStream<UIMessageChunk>({
@@ -177,7 +187,8 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
             sessionId: this.#sessionId,
             requestId,
             userMessage: toLatestUserMessage(options.messages),
-            thinkingEffort
+            thinkingEffort,
+            permissionMode
           }
           if (options.trigger === 'regenerate-message') request.retry = true
           void this.#api.startTurn(request).catch(() => {
