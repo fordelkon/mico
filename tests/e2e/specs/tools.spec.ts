@@ -174,7 +174,8 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   await expect(app.window.getByRole('button', { name: /^Workspace: project/ })).toBeVisible()
   await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
   await expect(app.window.getByRole('textbox', { name: 'Search workspaces' })).toBeHidden()
-  await app.window.getByRole('combobox', { name: 'Tool permissions' }).selectOption('acceptEdits')
+  await app.window.getByRole('button', { name: 'Tool permissions' }).click()
+  await app.window.getByRole('menuitemradio', { name: 'Accept edits' }).click()
 
   const write = provider.enqueue({
     type: 'tool',
@@ -227,10 +228,12 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   await expect(app.window.locator('.conversation-row__title')).toHaveText('E2E conversation')
 
   await app.relaunch()
-  await app.window
-    .getByLabel('Sidebar', { exact: true })
-    .getByRole('button', { name: 'E2E conversation', exact: true })
-    .click()
+  const sidebar = app.window.getByLabel('Sidebar', { exact: true })
+  // The conversation files under its project group, which starts collapsed after a restart.
+  const projectGroupToggle = sidebar.getByRole('button', { name: 'Toggle project conversations' })
+  if ((await projectGroupToggle.getAttribute('aria-expanded')) === 'false')
+    await projectGroupToggle.click()
+  await sidebar.getByRole('button', { name: 'E2E conversation', exact: true }).click()
   await app.window
     .getByRole('button', {
       name: 'Agent activity: Wrote 1 file · Updated 1 file',

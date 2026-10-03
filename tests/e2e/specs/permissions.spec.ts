@@ -19,6 +19,9 @@ test('user denies then approves a write when reviewing operations, then only the
   app,
   provider
 }, testInfo) => {
+  // The scenario spans two turns, an approval roundtrip, and a theme switch;
+  // the default timeout only fits the shorter scenarios.
+  test.slow()
   await app.window.emulateMedia({ reducedMotion: 'reduce' })
   await selectWorkspace(app)
   provider.enqueue({
@@ -43,10 +46,17 @@ test('user denies then approves a write when reviewing operations, then only the
   await app.window.getByRole('radio', { name: 'Dark', exact: true }).click()
   await app.window.getByRole('button', { name: 'Back', exact: true }).click()
   await app.window.evaluate(() =>
+    // Wait only for time-based animations: scroll-driven ones (animation-timeline:
+    // scroll()) finish solely when their scroll range completes, so their
+    // `finished` promise stays pending while the list rests above the bottom.
     Promise.all(
       document
         .getAnimations()
-        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .filter(
+          (animation) =>
+            animation.timeline === document.timeline &&
+            animation.effect?.getComputedTiming().iterations !== Infinity
+        )
         .map((animation) => animation.finished.catch(() => undefined))
     )
   )
