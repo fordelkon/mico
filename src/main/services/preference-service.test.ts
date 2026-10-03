@@ -44,6 +44,30 @@ describe('PreferenceService theme preferences', () => {
     nativeTheme.themeSource = 'system'
   })
 
+  it('user changes appearance during a theme save when updates overlap, then both survive restart', async () => {
+    const { cleanup, service } = await initializeWithPreferences({})
+    try {
+      await Promise.all([
+        service.setThemePreferences({
+          appearancePreference: 'system',
+          codeThemeDark: 'github-dark',
+          codeThemeLight: 'auto',
+          themePresetDark: 'tokyo-night',
+          themePresetLight: 'mico-default'
+        }),
+        service.setAppearancePreference('light')
+      ])
+      await service.initialize()
+      expect(service.getThemeState()).toMatchObject({
+        appearancePreference: 'light',
+        codeThemeDark: 'github-dark',
+        themePresetDark: 'tokyo-night'
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('user sees migrated Shiki themes when legacy ids persist, then each mode gets one', async () => {
     const { cleanup, service } = await initializeWithPreferences({
       appearancePreference: 'system',

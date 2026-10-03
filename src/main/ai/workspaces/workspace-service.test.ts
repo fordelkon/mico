@@ -23,6 +23,40 @@ describe('WorkspaceService', () => {
     return { service, userDataPath }
   }
 
+  it('user overlaps workspace renames when saving, then the last name survives restart', async () => {
+    const { service, userDataPath } = await createService()
+    await Promise.all([
+      service.renameProject('default', 'First'),
+      service.renameProject('default', 'Last')
+    ])
+    const restored = new WorkspaceService({ getUserDataPath: () => userDataPath })
+    await restored.initialize()
+    expect(restored.listProjects()).toEqual([
+      {
+        id: 'default',
+        name: 'Last',
+        rootPath: join(userDataPath, 'workspaces', 'default'),
+        isDefault: true
+      }
+    ])
+  })
+
+  it('user retries after a failed workspace save when storage recovers, then only committed names appear', async () => {
+    const { service, userDataPath } = await createService()
+    const filePath = join(userDataPath, 'workspace-projects.json')
+    await rm(filePath)
+    await mkdir(filePath)
+    await expect(service.renameProject('default', 'Rejected')).rejects.toThrow(
+      /EPERM|EISDIR|EACCES|ENOTEMPTY/
+    )
+    expect(service.listProjects()[0].name).toBe('Default')
+    await rm(filePath, { recursive: true })
+    await service.renameProject('default', 'Recovered')
+    const restored = new WorkspaceService({ getUserDataPath: () => userDataPath })
+    await restored.initialize()
+    expect(restored.listProjects()[0].name).toBe('Recovered')
+  })
+
   it('user gets a default workspace when initializing, then it lives beneath the user-data directory', async () => {
     const { service, userDataPath } = await createService()
 

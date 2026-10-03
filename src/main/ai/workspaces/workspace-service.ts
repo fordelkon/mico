@@ -6,7 +6,7 @@ import * as z from 'zod'
 
 import { WorkspaceProjectSchema } from '@shared/data/schemas/workspace'
 
-import { writeJsonAtomically } from '../../data/atomic-json'
+import { JsonDocument } from '../../data/atomic-json'
 
 type StoredWorkspaceProject = {
   id: string
@@ -38,35 +38,38 @@ const defaults: Required<WorkspaceServiceDependencies> = {
 
 class WorkspaceService {
   private readonly dependencies: Required<WorkspaceServiceDependencies>
-  private catalog: WorkspaceCatalog | undefined
+  private document: JsonDocument<WorkspaceCatalog> | undefined
   constructor(dependencies: WorkspaceServiceDependencies = {}) {
     this.dependencies = { ...defaults, ...dependencies }
   }
   async initialize(): Promise<void> {
     await mkdir(this.getDefaultWorkspacePath(), { recursive: true })
-    this.catalog = await this.readCatalog()
-    if (this.catalog) return
-    this.catalog = {
-      version: 1,
-      defaultProjectId: 'default',
-      projects: [
-        {
-          id: 'default',
-          name: 'Default',
-          rootPath: this.getDefaultWorkspacePath(),
-          archivedAt: null
-        }
-      ]
-    }
-    await this.writeCatalog()
+    const saved = await this.readCatalog()
+    this.document = new JsonDocument(
+      this.catalogPath,
+      saved ?? {
+        version: 1,
+        defaultProjectId: 'default',
+        projects: [
+          {
+            id: 'default',
+            name: 'Default',
+            rootPath: this.getDefaultWorkspacePath(),
+            archivedAt: null
+          }
+        ]
+      }
+    )
+    if (!saved) await this.document.update((catalog) => catalog)
   }
   getDefaultWorkspacePath(): string {
     return join(this.dependencies.getUserDataPath(), 'workspaces', 'default')
   }
   listProjects(): WorkspaceProject[] {
-    return this.requireCatalog()
-      .projects.filter(({ archivedAt }) => archivedAt === null)
-      .map((project) => this.toWorkspaceProject(project))
+    const catalog = this.requireCatalog()
+    return catalog.projects
+      .filter(({ archivedAt }) => archivedAt === null)
+      .map((project) => this.toWorkspaceProject(project, catalog))
   }
   getDefaultWorkspaceContext(): WorkspaceContext {
     return this.getProjectContext(this.requireCatalog().defaultProjectId)
@@ -77,41 +80,45 @@ class WorkspaceService {
   }
   async addProject(directoryPath: string): Promise<WorkspaceProject> {
     const rootPath = await this.resolveDirectory(directoryPath)
-    const existing = this.requireCatalog().projects.find((project) => project.rootPath === rootPath)
-    if (existing) {
-      existing.archivedAt = null
-      await this.writeCatalog()
-      return this.toWorkspaceProject(existing)
-    }
-    const project = {
-      id: this.dependencies.createId(),
-      name: basename(rootPath),
-      rootPath,
-      archivedAt: null
-    }
-    this.requireCatalog().projects.push(project)
-    await this.writeCatalog()
-    return this.toWorkspaceProject(project)
+    const committed = await this.requireDocument().update((catalog) => {
+      const existing = catalog.projects.find((project) => project.rootPath === rootPath)
+      if (existing) existing.archivedAt = null
+      else
+        catalog.projects.push({
+          id: this.dependencies.createId(),
+          name: basename(rootPath),
+          rootPath,
+          archivedAt: null
+        })
+      return catalog
+    })
+    const project = committed.projects.find((candidate) => candidate.rootPath === rootPath)
+    if (!project) throw new Error('Added project is unavailable.')
+    return this.toWorkspaceProject(project, committed)
   }
   async setDefaultProject(projectId: string): Promise<WorkspaceProject> {
-    const project = this.requireActiveProject(projectId)
-    this.requireCatalog().defaultProjectId = project.id
-    await this.writeCatalog()
-    return this.toWorkspaceProject(project)
+    const committed = await this.requireDocument().update((catalog) => {
+      catalog.defaultProjectId = this.requireActiveProject(projectId, catalog).id
+      return catalog
+    })
+    return this.toWorkspaceProject(this.requireActiveProject(projectId, committed), committed)
   }
   async renameProject(projectId: string, name: string): Promise<WorkspaceProject> {
-    const project = this.requireActiveProject(projectId)
     const trimmed = name.trim()
     if (!trimmed) throw new Error('Project name is required.')
-    project.name = trimmed
-    await this.writeCatalog()
-    return this.toWorkspaceProject(project)
+    const committed = await this.requireDocument().update((catalog) => {
+      this.requireActiveProject(projectId, catalog).name = trimmed
+      return catalog
+    })
+    return this.toWorkspaceProject(this.requireActiveProject(projectId, committed), committed)
   }
   async archiveProject(projectId: string): Promise<void> {
-    if (this.requireCatalog().defaultProjectId === projectId)
-      throw new Error('Choose another default project first.')
-    this.requireActiveProject(projectId).archivedAt = this.dependencies.now()
-    await this.writeCatalog()
+    await this.requireDocument().update((catalog) => {
+      if (catalog.defaultProjectId === projectId)
+        throw new Error('Choose another default project first.')
+      this.requireActiveProject(projectId, catalog).archivedAt = this.dependencies.now()
+      return catalog
+    })
   }
   getProjectContext(projectId: string): WorkspaceContext {
     const project = this.getProject(projectId)
@@ -126,21 +133,30 @@ class WorkspaceService {
   private getProject(projectId: string): StoredWorkspaceProject | undefined {
     return this.requireCatalog().projects.find(({ id }) => id === projectId)
   }
-  private requireActiveProject(projectId: string): StoredWorkspaceProject {
-    const project = this.getProject(projectId)
+  private requireActiveProject(
+    projectId: string,
+    catalog = this.requireCatalog()
+  ): StoredWorkspaceProject {
+    const project = catalog.projects.find(({ id }) => id === projectId)
     if (!project || project.archivedAt !== null) throw new Error('Project is unavailable.')
     return project
   }
   private requireCatalog(): WorkspaceCatalog {
-    if (!this.catalog) throw new Error('Workspace service is not initialized.')
-    return this.catalog
+    return this.requireDocument().value
   }
-  private toWorkspaceProject(project: StoredWorkspaceProject): WorkspaceProject {
+  private requireDocument(): JsonDocument<WorkspaceCatalog> {
+    if (!this.document) throw new Error('Workspace service is not initialized.')
+    return this.document
+  }
+  private toWorkspaceProject(
+    project: StoredWorkspaceProject,
+    catalog = this.requireCatalog()
+  ): WorkspaceProject {
     return {
       id: project.id,
       name: project.name,
       rootPath: project.rootPath,
-      isDefault: project.id === this.requireCatalog().defaultProjectId
+      isDefault: project.id === catalog.defaultProjectId
     }
   }
   private async readCatalog(): Promise<WorkspaceCatalog | undefined> {
@@ -151,9 +167,6 @@ class WorkspaceService {
     } catch {
       return undefined
     }
-  }
-  private async writeCatalog(): Promise<void> {
-    await writeJsonAtomically(this.catalogPath, this.requireCatalog())
   }
   private get catalogPath(): string {
     return join(this.dependencies.getUserDataPath(), 'workspace-projects.json')

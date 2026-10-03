@@ -9,7 +9,7 @@ import type { DataFor } from '@shared/data/types'
 import { IpcChannel } from '@shared/IpcChannel'
 import { resolveCodeTheme, type Appearance, type CodeThemeId } from '@shared/theme/theme-registry'
 
-import { writeJsonAtomically } from '../data/atomic-json'
+import { JsonDocument } from '../data/atomic-json'
 
 type AppearancePreference = DataFor<'appearancePreference'>
 type ThemePreferences = DataFor<'themePreferences'>
@@ -66,22 +66,24 @@ function migrateCodeThemeId(value: string, appearance: Appearance): CodeThemeId 
 }
 
 class PreferenceService {
-  private appearancePreference: AppearancePreference = 'system'
-  private themePreferences: ThemePreferences = defaultThemePreferences
+  private document: JsonDocument<ThemePreferences> | undefined
+
+  private get themePreferences(): ThemePreferences {
+    return this.document?.value ?? defaultThemePreferences
+  }
 
   constructor(
     private readonly dependencies: PreferenceServiceDependencies = electronDependencies
   ) {}
 
   async initialize(): Promise<void> {
-    this.themePreferences = await this.readThemePreferences()
-    this.appearancePreference = this.themePreferences.appearancePreference
-    this.dependencies.nativeTheme.themeSource = this.appearancePreference
+    this.document = new JsonDocument(this.preferencesPath, await this.readThemePreferences())
+    this.dependencies.nativeTheme.themeSource = this.themePreferences.appearancePreference
     this.dependencies.nativeTheme.on('updated', this.broadcastResolvedAppearance)
   }
 
   getAppearancePreference(): AppearancePreference {
-    return this.appearancePreference
+    return this.themePreferences.appearancePreference
   }
 
   getResolvedAppearance(): Appearance {
@@ -89,40 +91,35 @@ class PreferenceService {
   }
 
   async setAppearancePreference(preference: AppearancePreference): Promise<Appearance> {
-    await this.setThemePreferences({ ...this.themePreferences, appearancePreference: preference })
+    await this.updatePreferences((current) => ({ ...current, appearancePreference: preference }))
     return this.getResolvedAppearance()
   }
 
   getThemeState(): ThemeState {
     const appearance = this.getResolvedAppearance()
+    const preferences = this.themePreferences
     return {
-      ...this.themePreferences,
+      ...preferences,
       activeThemePreset:
-        appearance === 'light'
-          ? this.themePreferences.themePresetLight
-          : this.themePreferences.themePresetDark,
+        appearance === 'light' ? preferences.themePresetLight : preferences.themePresetDark,
       appearance,
       shikiThemes: {
-        dark: resolveCodeTheme(
-          'dark',
-          this.themePreferences.codeThemeDark,
-          this.themePreferences.themePresetDark
-        ),
-        light: resolveCodeTheme(
-          'light',
-          this.themePreferences.codeThemeLight,
-          this.themePreferences.themePresetLight
-        )
+        dark: resolveCodeTheme('dark', preferences.codeThemeDark, preferences.themePresetDark),
+        light: resolveCodeTheme('light', preferences.codeThemeLight, preferences.themePresetLight)
       }
     }
   }
 
   async setThemePreferences(preferences: ThemePreferences): Promise<ThemeState> {
-    await this.writeThemePreferences(preferences)
-    this.themePreferences = preferences
-    const preference = preferences.appearancePreference
-    this.appearancePreference = preference
-    this.dependencies.nativeTheme.themeSource = preference
+    return this.updatePreferences(() => preferences)
+  }
+
+  private async updatePreferences(
+    change: (current: ThemePreferences) => ThemePreferences
+  ): Promise<ThemeState> {
+    if (!this.document) throw new Error('Preferences are not initialized.')
+    const committed = await this.document.update(change)
+    this.dependencies.nativeTheme.themeSource = committed.appearancePreference
     this.broadcastThemeState()
     return this.getThemeState()
   }
@@ -159,10 +156,6 @@ class PreferenceService {
     } catch {
       return defaultThemePreferences
     }
-  }
-
-  private async writeThemePreferences(preferences: ThemePreferences): Promise<void> {
-    await writeJsonAtomically(this.preferencesPath, preferences)
   }
 
   private get preferencesPath(): string {
