@@ -33,6 +33,7 @@ import {
 import { CreateSessionRequestSchema } from '@shared/ipc/schemas/sessions'
 import { TurnSenderGate } from './ai/chat/turn-sender-gate'
 import type { TurnExecutor } from './ai/chat/turn-executor'
+import type { SessionModelProfile } from './ai/chat/session-model-profile'
 import { registerChannel, type ChannelDefinition } from './ipc/define-channel'
 import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
@@ -51,13 +52,11 @@ type IpcDependencies = CodeDocumentPickerDependencies & {
 interface IpcServices {
   turnExecutor: Pick<
     TurnExecutor,
-    | 'abortAllTurns'
-    | 'abortTurn'
-    | 'getModelCapabilities'
-    | 'startTurn'
-    | 'respondToPermission'
-    | 'updateSessionModelEntry'
-    | 'updateSessionThinkingEffort'
+    'abortAllTurns' | 'abortTurn' | 'startTurn' | 'respondToPermission'
+  >
+  modelProfile: Pick<
+    SessionModelProfile,
+    'getCapabilities' | 'updateSessionModelEntry' | 'updateSessionThinkingEffort'
   >
   mainWindow: Pick<MainWindowService, 'isTrustedRendererUrl'>
   preference: Pick<
@@ -90,7 +89,7 @@ interface IpcServices {
 }
 
 function registerIpc(
-  { turnExecutor, mainWindow, preference, provider, session, workspace }: IpcServices,
+  { turnExecutor, modelProfile, mainWindow, preference, provider, session, workspace }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
     ipcMain,
@@ -199,7 +198,7 @@ function registerIpc(
   })
   register({
     channel: IpcChannel.Chat_GetCapabilities,
-    handle: () => turnExecutor.getModelCapabilities()
+    handle: () => modelProfile.getCapabilities()
   })
   register({
     channel: IpcChannel.Chat_RespondToPermission,
@@ -259,7 +258,7 @@ function registerIpc(
       invalidMessage: 'Invalid session thinking effort'
     },
     handle: ({ sessionId, thinkingEffort }) =>
-      turnExecutor.updateSessionThinkingEffort(sessionId, thinkingEffort)
+      modelProfile.updateSessionThinkingEffort(sessionId, thinkingEffort)
   })
   register({
     channel: IpcChannel.Sessions_SetModelEntry,
@@ -268,7 +267,7 @@ function registerIpc(
       invalidMessage: 'Invalid session model'
     },
     handle: ({ sessionId, modelEntryId }) =>
-      turnExecutor.updateSessionModelEntry(sessionId, modelEntryId)
+      modelProfile.updateSessionModelEntry(sessionId, modelEntryId)
   })
 
   register({

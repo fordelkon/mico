@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 
 import { createChatProviderResolver } from './ai/chat/chat-provider-resolver'
+import { SessionModelProfile } from './ai/chat/session-model-profile'
 import { TurnExecutor } from './ai/chat/turn-executor'
 import { createChatProvider } from '@mico/ai-providers'
 import { registerIpc } from './ipc'
@@ -16,6 +17,7 @@ import { TrayService } from './services/tray-service'
 
 type MainServices = {
   mainWindow: MainWindowService
+  modelProfile: SessionModelProfile
   preference: PreferenceService
   provider: ProviderService
   sessionDatabase: SessionDatabase
@@ -49,18 +51,20 @@ async function createMainServices(): Promise<MainServices> {
     modelEntryId: string
   ): ReturnType<ProviderService['getChatConfigurationForModelEntry']> =>
     provider.getChatConfigurationForModelEntry(modelEntryId)
-  const turnExecutor = new TurnExecutor(
-    createChatProviderResolver({
+  const modelProfile = new SessionModelProfile({
+    resolveProvider: createChatProviderResolver({
       createChatProvider,
       getChatConfigurationForModelEntry
     }),
-    {
-      getChatConfigurationForModelEntry,
-      getSelectedModelEntryId: () => provider.getLibrary().selectedModelId,
-      getSelectedChatConfiguration: () => provider.getSelectedChatConfiguration(),
-      runtime: sessionRuntime
-    }
-  )
+    getChatConfigurationForModelEntry,
+    getSelectedModelEntryId: () => provider.getLibrary().selectedModelId,
+    getSelectedChatConfiguration: () => provider.getSelectedChatConfiguration(),
+    runtime: sessionRuntime
+  })
+  const turnExecutor = new TurnExecutor({
+    profiles: modelProfile,
+    runtime: sessionRuntime
+  })
 
   // The tray is constructed after the window it monitors; the closure defers the
   // reference so the quit behavior reads the final tray instance.
@@ -76,6 +80,7 @@ async function createMainServices(): Promise<MainServices> {
 
   return {
     mainWindow,
+    modelProfile,
     preference,
     provider,
     sessionDatabase,
@@ -89,6 +94,7 @@ async function createMainServices(): Promise<MainServices> {
 function startApp(services: MainServices): void {
   registerIpc({
     turnExecutor: services.turnExecutor,
+    modelProfile: services.modelProfile,
     mainWindow: services.mainWindow,
     preference: services.preference,
     provider: services.provider,

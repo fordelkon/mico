@@ -6,6 +6,7 @@ import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { ReadOptions } from 'node:fs'
 import type { TurnExecutor } from './ai/chat/turn-executor'
+import type { SessionModelProfile } from './ai/chat/session-model-profile'
 import type { ProviderService } from './ai/providers/provider-service'
 import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
 import type { WorkspaceService } from './ai/workspaces/workspace-service'
@@ -56,10 +57,12 @@ function createHarness() {
     respondToPermission: vi.fn<TurnExecutor['respondToPermission']>(),
     abortTurn: vi.fn<TurnExecutor['abortTurn']>(),
     abortAllTurns: vi.fn<TurnExecutor['abortAllTurns']>(),
-    getModelCapabilities: vi.fn<TurnExecutor['getModelCapabilities']>(),
-    startTurn: vi.fn<TurnExecutor['startTurn']>(),
-    updateSessionModelEntry: vi.fn<TurnExecutor['updateSessionModelEntry']>(),
-    updateSessionThinkingEffort: vi.fn<TurnExecutor['updateSessionThinkingEffort']>()
+    startTurn: vi.fn<TurnExecutor['startTurn']>()
+  }
+  const modelProfile = {
+    getCapabilities: vi.fn<SessionModelProfile['getCapabilities']>(),
+    updateSessionModelEntry: vi.fn<SessionModelProfile['updateSessionModelEntry']>(),
+    updateSessionThinkingEffort: vi.fn<SessionModelProfile['updateSessionThinkingEffort']>()
   }
   const mainWindow = {
     isTrustedRendererUrl: vi.fn<MainWindowService['isTrustedRendererUrl']>(() => true)
@@ -108,7 +111,7 @@ function createHarness() {
   const stat = vi.fn<(filePath: string) => Promise<{ size: number }>>()
 
   registerIpc(
-    { mainWindow, preference, turnExecutor, provider, session, workspace },
+    { mainWindow, modelProfile, preference, turnExecutor, provider, session, workspace },
     {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
@@ -123,6 +126,7 @@ function createHarness() {
 
   return {
     turnExecutor,
+    modelProfile,
     handlers,
     mainWindow,
     preference,
@@ -323,29 +327,29 @@ describe('registerIpc chat handlers', () => {
     expect(turnExecutor.respondToPermission).not.toHaveBeenCalled()
   })
   it('user gets model capabilities when the renderer asks, then they are returned', async () => {
-    const { turnExecutor, handlers, mainWindow, event } = createHarness()
+    const { modelProfile, handlers, mainWindow, event } = createHarness()
     const capabilities: ModelReasoningCapabilities = {
       selectableEfforts: ['medium', 'high'],
       defaultEffort: 'medium'
     }
-    turnExecutor.getModelCapabilities.mockResolvedValue(capabilities)
+    modelProfile.getCapabilities.mockResolvedValue(capabilities)
     mainWindow.isTrustedRendererUrl.mockReturnValue(true)
 
     await expect(handlers.get(IpcChannel.Chat_GetCapabilities)?.(event)).resolves.toEqual(
       capabilities
     )
-    expect(turnExecutor.getModelCapabilities).toHaveBeenCalledOnce()
+    expect(modelProfile.getCapabilities).toHaveBeenCalledOnce()
   })
 
   it('user cannot get model capabilities when the sender is untrusted, then nothing is delegated', () => {
-    const { turnExecutor, handlers, mainWindow } = createHarness()
+    const { modelProfile, handlers, mainWindow } = createHarness()
     mainWindow.isTrustedRendererUrl.mockReturnValue(false)
     const { event } = createEvent({ id: 43, trusted: false })
 
     expect(() => handlers.get(IpcChannel.Chat_GetCapabilities)?.(event)).toThrow(
       'Untrusted window control sender'
     )
-    expect(turnExecutor.getModelCapabilities).not.toHaveBeenCalled()
+    expect(modelProfile.getCapabilities).not.toHaveBeenCalled()
   })
 
   it('user sees turn events when a turn runs, then they go only to the starting sender', () => {
@@ -474,7 +478,7 @@ describe('registerIpc chat handlers', () => {
 
 describe('registerIpc session profile handlers', () => {
   it('user sets model and thinking effort when the input is valid, then both apply', () => {
-    const { turnExecutor, handlers, event } = createHarness()
+    const { modelProfile, handlers, event } = createHarness()
 
     handlers.get(IpcChannel.Sessions_SetModelEntry)?.(event, {
       sessionId: 'session-1',
@@ -485,8 +489,8 @@ describe('registerIpc session profile handlers', () => {
       thinkingEffort: 'high'
     })
 
-    expect(turnExecutor.updateSessionModelEntry).toHaveBeenCalledWith('session-1', 'ollama:qwen3')
-    expect(turnExecutor.updateSessionThinkingEffort).toHaveBeenCalledWith('session-1', 'high')
+    expect(modelProfile.updateSessionModelEntry).toHaveBeenCalledWith('session-1', 'ollama:qwen3')
+    expect(modelProfile.updateSessionThinkingEffort).toHaveBeenCalledWith('session-1', 'high')
   })
 
   it.each([
@@ -496,13 +500,13 @@ describe('registerIpc session profile handlers', () => {
   ])(
     'user cannot update the profile when the input is invalid, then nothing applies',
     (channel, input) => {
-      const { turnExecutor, handlers, event } = createHarness()
+      const { modelProfile, handlers, event } = createHarness()
 
       expect(() => handlers.get(channel)?.(event, input)).toThrow(
         /Invalid session (model|thinking effort)/
       )
-      expect(turnExecutor.updateSessionModelEntry).not.toHaveBeenCalled()
-      expect(turnExecutor.updateSessionThinkingEffort).not.toHaveBeenCalled()
+      expect(modelProfile.updateSessionModelEntry).not.toHaveBeenCalled()
+      expect(modelProfile.updateSessionThinkingEffort).not.toHaveBeenCalled()
     }
   )
 })

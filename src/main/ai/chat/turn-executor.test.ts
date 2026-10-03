@@ -8,8 +8,10 @@ import {
   type ExecutionProfileSnapshot
 } from '../sessions/session-runtime-service'
 import { SessionDatabase } from '../../data/session-database'
-import { createChatProviderResolver } from './chat-provider-resolver'
-import { SESSION_TITLE_INSTRUCTIONS, TurnExecutor } from './turn-executor'
+import { createChatProviderResolver, type ChatProviderResolver } from './chat-provider-resolver'
+import { SessionModelProfile } from './session-model-profile'
+import { SESSION_TITLE_INSTRUCTIONS } from './title-generator'
+import { TurnExecutor } from './turn-executor'
 
 // Title generation and agent turns share one provider.stream() interface; the
 // title prompt is the only observable signal distinguishing the two calls.
@@ -73,18 +75,40 @@ async function createSession(
   }
 }
 
+function createExecutor(
+  resolveProvider: ChatProviderResolver,
+  options: { maxAttempts?: number; retryDelayMs?: number } = {}
+): TurnExecutor {
+  return new TurnExecutor({
+    profiles: new SessionModelProfile({ resolveProvider }),
+    maxAttempts: options.maxAttempts,
+    retryDelayMs: options.retryDelayMs
+  })
+}
+
 function createConfiguredExecutor(
   stream: ChatProvider['stream'],
   runtime: SessionRuntimeService,
-  options: Omit<
-    NonNullable<ConstructorParameters<typeof TurnExecutor>[1]>,
-    'getSelectedChatConfiguration' | 'runtime'
-  > = {}
+  options: {
+    getChatConfigurationForModelEntry?: (modelEntryId: string) => typeof configuration | null
+    getSelectedModelEntryId?: () => string | null
+    maxAssistantTextChars?: number
+    maxAttempts?: number
+    retryDelayMs?: number
+  } = {}
 ): TurnExecutor {
-  return new TurnExecutor(() => createProvider(stream), {
-    getSelectedChatConfiguration: () => configuration,
+  return new TurnExecutor({
+    profiles: new SessionModelProfile({
+      resolveProvider: () => createProvider(stream),
+      getChatConfigurationForModelEntry: options.getChatConfigurationForModelEntry,
+      getSelectedModelEntryId: options.getSelectedModelEntryId,
+      getSelectedChatConfiguration: () => configuration,
+      runtime
+    }),
     runtime,
-    ...options
+    maxAssistantTextChars: options.maxAssistantTextChars,
+    maxAttempts: options.maxAttempts,
+    retryDelayMs: options.retryDelayMs
   })
 }
 
@@ -185,7 +209,7 @@ describe('TurnExecutor', () => {
   it('user sends attached documents when the turn starts, then they are sent as named text', async () => {
     const calls: Parameters<ChatProvider['stream']>[0][] = []
     const recorded = collectEvents()
-    const service = new TurnExecutor(() =>
+    const service = createExecutor(() =>
       createProvider(async (input) => {
         calls.push(input)
         return streamFrom([])
@@ -241,18 +265,21 @@ describe('TurnExecutor', () => {
     })
     const resolvedEntryIds: Array<string | undefined> = []
     const recorded = collectEvents()
-    const service = new TurnExecutor(
-      (modelEntryId) => {
-        resolvedEntryIds.push(modelEntryId)
-        return modelEntryId === 'session-model' ? createProvider(async () => streamFrom([])) : null
-      },
-      {
+    const service = new TurnExecutor({
+      profiles: new SessionModelProfile({
+        resolveProvider: (modelEntryId) => {
+          resolvedEntryIds.push(modelEntryId)
+          return modelEntryId === 'session-model'
+            ? createProvider(async () => streamFrom([]))
+            : null
+        },
         getChatConfigurationForModelEntry: (modelEntryId) =>
           modelEntryId === 'session-model' ? configuration : null,
         getSelectedModelEntryId: () => 'global-model',
         runtime
-      }
-    )
+      }),
+      runtime
+    })
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
@@ -265,14 +292,15 @@ describe('TurnExecutor', () => {
 
   it('user sees an error when no enabled model is selected, then the run finishes with it', async () => {
     const recorded = collectEvents()
-    const service = new TurnExecutor(
-      createChatProviderResolver({
+    const profiles = new SessionModelProfile({
+      resolveProvider: createChatProviderResolver({
         createChatProvider: () => createProvider(async () => streamFrom([])),
         getChatConfigurationForModelEntry: () => null
       })
-    )
+    })
 
-    await expect(service.getModelCapabilities()).resolves.toBeNull()
+    await expect(profiles.getCapabilities()).resolves.toBeNull()
+    const service = new TurnExecutor({ profiles })
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
     await recorded.terminal
@@ -288,7 +316,7 @@ describe('TurnExecutor', () => {
   it('user sees every chunk when the provider streams normally, then one finish event follows', async () => {
     const recorded = collectEvents()
     const provider = createProvider(async () => streamFrom([textChunk]))
-    const service = new TurnExecutor(() => provider)
+    const service = createExecutor(() => provider)
 
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
@@ -687,7 +715,7 @@ describe('TurnExecutor', () => {
       if (signals.size === 2) streamsStarted.resolve()
       return pendingStream(signal, signals.size === 1 ? firstStreamStopped.resolve : undefined)
     })
-    const service = new TurnExecutor(() => provider)
+    const service = createExecutor(() => provider)
 
     service.startTurn({ ownerId: 'window-1', request }, (event) => events.push(event))
     service.startTurn(
@@ -713,7 +741,7 @@ describe('TurnExecutor', () => {
       if (signals.length === 2) streamsStarted.resolve()
       return pendingStream(signal)
     })
-    const service = new TurnExecutor(() => provider)
+    const service = createExecutor(() => provider)
 
     service.startTurn({ ownerId: 'window-1', request }, () => undefined)
     service.startTurn({ ownerId: 'window-2', request }, () => undefined)
@@ -733,7 +761,7 @@ describe('TurnExecutor', () => {
       if (signals.length === 2) streamsStarted.resolve()
       return pendingStream(signal)
     })
-    const service = new TurnExecutor(() => provider)
+    const service = createExecutor(() => provider)
 
     service.startTurn({ ownerId: 'window-1', request }, () => undefined)
     service.startTurn(
@@ -752,7 +780,7 @@ describe('TurnExecutor', () => {
     const stream = vi.fn<ChatProvider['stream']>(async () => {
       throw new Error('upstream credential details')
     })
-    const service = new TurnExecutor(() => createProvider(stream))
+    const service = createExecutor(() => createProvider(stream))
 
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
@@ -774,7 +802,7 @@ describe('TurnExecutor', () => {
       if (calls === 1) throw new TypeError('fetch failed')
       return streamFrom([textChunk])
     }
-    const service = new TurnExecutor(() => createProvider(stream), {
+    const service = createExecutor(() => createProvider(stream), {
       maxAttempts: 2,
       retryDelayMs: 0
     })
@@ -808,7 +836,7 @@ describe('TurnExecutor', () => {
         throw new TypeError('fetch failed')
       }
     }))
-    const service = new TurnExecutor(() => provider, { maxAttempts: 2, retryDelayMs: 0 })
+    const service = createExecutor(() => provider, { maxAttempts: 2, retryDelayMs: 0 })
 
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
@@ -829,7 +857,7 @@ describe('TurnExecutor', () => {
       streamCalled.resolve()
       return streamFrom([])
     })
-    const service = new TurnExecutor(() => createProvider(stream))
+    const service = createExecutor(() => createProvider(stream))
 
     service.startTurn(
       {
