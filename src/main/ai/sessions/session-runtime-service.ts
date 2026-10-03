@@ -66,6 +66,23 @@ type RunOutcome =
   | { status: 'completed'; assistant: ChatMessage }
   | { status: 'failed'; failure: TurnFailure }
   | { status: 'cancelled'; assistant?: ChatMessage }
+/**
+ * One accepted run, scoped to the turn executor's needs. The handle hides the
+ * runtime event log: callers record steps and traces and settle the run
+ * without knowing event kinds, ordering rules, or payload digests.
+ */
+type TurnRunHandle = {
+  runId: string
+  profile: ExecutionProfileSnapshot
+  shouldGenerateTitle: boolean
+  cwd: string | null
+  replayMessages: ChatProviderMessage[]
+  recordStep: (step: AgentStep) => void
+  recordTrace: (trace: ToolExecutionTrace) => void
+  complete: (assistant: ChatMessage) => void
+  fail: (failure: TurnFailure) => void
+  cancel: (assistant?: ChatMessage) => void
+}
 type SessionRuntimeServiceDependencies = {
   createId?: () => string
   database: SessionDatabase
@@ -384,6 +401,52 @@ class SessionRuntimeService {
                 message: visibleMessage(outcome.assistant)
               })
             : undefined
+        )
+    }
+  }
+
+  /**
+   * Accepts one turn attempt — new, retried, or an idempotent resubmission —
+   * marks the model request started, and returns the run scoped to this
+   * process. Everything the executor needs from the event log rides on the
+   * handle.
+   */
+  beginTurn(input: {
+    sessionId: string
+    requestId: string
+    userMessage: ChatMessage
+    profile: ExecutionProfileSnapshot
+    retry: boolean
+  }): TurnRunHandle {
+    const started = input.retry
+      ? this.retryTurn({
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+          userMessage: input.userMessage
+        })
+      : this.startTurn({
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+          userMessage: input.userMessage,
+          profile: input.profile
+        })
+    this.markRequestStarted(started.runId)
+    const { cwd } = this.findSession(input.sessionId)
+    const runId = started.runId
+    return {
+      runId,
+      profile: started.profile,
+      shouldGenerateTitle: started.shouldGenerateTitle,
+      cwd,
+      replayMessages: this.getReplayMessages(runId),
+      recordStep: (step) => this.recordAgentStep(runId, step),
+      recordTrace: (trace) => this.recordToolTrace(runId, trace),
+      complete: (assistant) => this.finishRun(runId, { status: 'completed', assistant }),
+      fail: (failure) => this.finishRun(runId, { status: 'failed', failure }),
+      cancel: (assistant) =>
+        this.finishRun(
+          runId,
+          assistant ? { status: 'cancelled', assistant } : { status: 'cancelled' }
         )
     }
   }
@@ -765,5 +828,6 @@ export type {
   PersistedSession,
   SessionRuntimeServiceDependencies,
   SessionSummary,
-  StartedRun
+  StartedRun,
+  TurnRunHandle
 }
