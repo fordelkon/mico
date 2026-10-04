@@ -7,6 +7,11 @@ test.describe('App launch', () => {
     mainWindow
   }) => {
     await waitForAppReady(mainWindow)
+    const capabilities = await mainWindow.evaluate(() => ({
+      genericElectronBridge: 'electron' in window,
+      platform: document.querySelector('[data-platform]')?.getAttribute('data-platform')
+    }))
+    expect(capabilities).toEqual({ genericElectronBridge: false, platform: process.platform })
 
     const bounds = await electronApp.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0]

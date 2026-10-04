@@ -44,11 +44,7 @@ interface IpcServices {
   mainWindow: Pick<MainWindowService, 'isTrustedRendererUrl'>
   preference: Pick<
     PreferenceService,
-    | 'getAppearancePreference'
-    | 'getResolvedAppearance'
-    | 'getThemeState'
-    | 'setAppearancePreference'
-    | 'setThemePreferences'
+    'getThemeState' | 'setAppearancePreference' | 'setThemePreferences'
   >
   provider: Pick<
     ProviderService,
@@ -140,14 +136,6 @@ function registerIpc(
     handle: (_input, { window }) => window.unmaximize()
   })
 
-  register({
-    channel: IpcChannel.Appearance_GetPreference,
-    handle: () => preference.getAppearancePreference()
-  })
-  register({
-    channel: IpcChannel.Appearance_GetResolved,
-    handle: () => preference.getResolvedAppearance()
-  })
   register({
     channel: IpcChannel.Appearance_SetPreference,
     invalidMessage: 'Invalid appearance preference',

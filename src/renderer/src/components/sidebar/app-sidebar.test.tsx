@@ -26,20 +26,20 @@ const sidebarProps = {
   settingsActive: false
 }
 
-let electronDescriptor: PropertyDescriptor | undefined
+let apiDescriptor: PropertyDescriptor | undefined
 
 describe('AppSidebar', () => {
   beforeEach(() => {
-    electronDescriptor = Object.getOwnPropertyDescriptor(window, 'electron')
-    Object.defineProperty(window, 'electron', {
+    apiDescriptor = Object.getOwnPropertyDescriptor(window, 'api')
+    Object.defineProperty(window, 'api', {
       configurable: true,
-      value: { process: { platform: 'darwin' } }
+      value: { windowControls: { platform: 'darwin' } }
     })
   })
 
   afterEach(() => {
-    if (electronDescriptor) Object.defineProperty(window, 'electron', electronDescriptor)
-    else Reflect.deleteProperty(window, 'electron')
+    if (apiDescriptor) Object.defineProperty(window, 'api', apiDescriptor)
+    else Reflect.deleteProperty(window, 'api')
   })
 
   function renderSidebar(overrides: Partial<AppSidebarProps> = {}) {

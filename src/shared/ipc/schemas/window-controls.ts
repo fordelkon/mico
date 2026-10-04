@@ -1,6 +1,7 @@
 import { IpcChannel } from '../../IpcChannel'
 import type { IpcMethod } from '../contracts'
 interface WindowControlsAPI {
+  readonly platform: 'darwin' | 'win32' | 'linux'
   close: IpcMethod<IpcChannel.WindowControls_Close>
   isFocused: IpcMethod<IpcChannel.WindowControls_IsFocused>
   isFullScreen: IpcMethod<IpcChannel.WindowControls_IsFullscreen>

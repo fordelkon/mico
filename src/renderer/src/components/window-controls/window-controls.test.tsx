@@ -42,11 +42,7 @@ describe('WindowControls', () => {
 
     Object.defineProperty(window, 'api', {
       configurable: true,
-      value: { windowControls }
-    })
-    Object.defineProperty(window, 'electron', {
-      configurable: true,
-      value: { process: { platform: 'darwin' } }
+      value: { windowControls: { ...windowControls, platform: 'darwin' } }
     })
   })
 

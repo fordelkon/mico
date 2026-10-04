@@ -120,6 +120,34 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('user navigates when first-send creation is delayed, then the new response stays in the background', async () => {
+    const pending = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['create']>>>()
+    const { api, result } = renderWorkspaceState((api) => {
+      api.createSession.mockImplementationOnce(() => pending.promise)
+    })
+    let sending: Promise<boolean>
+    act(() => {
+      sending = result.current.responses.sendMessage({ text: 'First message', documents: [] })
+    })
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() =>
+      expect(result.current.session.activeSession?.conversationId).toBe('session-1')
+    )
+    await act(async () => {
+      pending.resolve({
+        id: 'session-new',
+        title: 'New chat',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 1,
+        lastActivityAt: 1
+      })
+      await sending
+    })
+    expect(result.current.session.activeSession?.conversationId).toBe('session-1')
+    await waitFor(() => expect(api.startedRequests[0]?.sessionId).toBe('session-new'))
+  })
+
   it('user leaves a conversation when its model refresh callback resumes, then the current capabilities stay selected', async () => {
     const capabilities = Promise.withResolvers<ModelReasoningCapabilities | null>()
     const { result } = renderWorkspaceState((api) => {

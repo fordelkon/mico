@@ -144,7 +144,7 @@ function AppearanceSection({ appearance }: { appearance: Appearance }): React.JS
 }
 
 function AppearanceSettings(): React.JSX.Element {
-  const { appearance, preference } = useAppearance()
+  const { appearance, preference, error } = useAppearance()
   const selectedAppearance = preference === 'system' ? appearance : preference
 
   return (
@@ -157,6 +157,7 @@ function AppearanceSettings(): React.JSX.Element {
       </header>
       <Separator className="bg-border-subtle" />
       <main className="appearance-settings__content min-h-0 flex-1 overflow-y-auto p-6">
+        {error && <p role="alert">{error}</p>}
         <ThemePreferenceSection />
         <AppearanceSection appearance={selectedAppearance} />
       </main>

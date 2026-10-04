@@ -14,19 +14,22 @@ import {
   Textarea,
   Toggle
 } from '@mico/ui'
-import type {
-  CustomProvider,
-  ProviderConfiguration as ProviderConnection
+import {
+  CustomProviderSchema,
+  ProviderHeadersSchema,
+  type CustomProvider,
+  type ProviderConfiguration as ProviderConnection
 } from '@shared/data/schemas/provider'
 import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
 import * as React from 'react'
 
 import { useProviderLibraryActions, useProviderLibraryState } from './provider-library'
-import { useProviderDraftAutosave } from './use-provider-draft-autosave'
 import { GlidingRadioSelect } from './gliding-radio-select'
 import { ProviderModelsSection } from './provider-models-section'
 import { ProviderTestMenu, type ProviderTestState } from './provider-test-menu'
 import type { ProviderId } from './providers-sidebar'
+
+const CustomProviderUpdatesSchema = CustomProviderSchema.omit({ id: true }).partial()
 
 function toCustomProviderConfiguration(provider: CustomProvider): ProviderConnection {
   switch (provider.apiFormat) {
@@ -71,7 +74,7 @@ function ProvidersSection({
 }): React.JSX.Element {
   const { flushLibrary, removeCustomProvider, updateConfiguration, updateCustomProvider } =
     useProviderLibraryActions()
-  const { library } = useProviderLibraryState()
+  const { library, saveError } = useProviderLibraryState()
   const [isApiKeyVisible, setIsApiKeyVisible] = React.useState(false)
   const [hasFetchedModels, setHasFetchedModels] = React.useState(false)
   const [isTestingModel, setIsTestingModel] = React.useState(false)
@@ -80,10 +83,9 @@ function ProvidersSection({
     providerId: ProviderId
     value: string
   } | null>(null)
-  type CustomProviderDraft = {
-    providerId: ProviderId
-    values: Partial<Omit<CustomProvider, 'id'>>
-  }
+  const [fieldText, setFieldText] = React.useState<
+    Partial<Pick<CustomProvider, 'name' | 'baseUrl' | 'apiKey'>>
+  >({})
   const [status, setStatus] = React.useState<{ kind: 'error' | 'success'; message: string } | null>(
     null
   )
@@ -98,29 +100,6 @@ function ProvidersSection({
   const models = library.models.filter((model) => model.providerId === providerId)
   const hasModels = hasFetchedModels || models.length > 0
 
-  // The draft accumulates debounced field edits; flushes persist them through
-  // the library actions, which own the actual save timing and queues.
-  const providerDraft = useProviderDraftAutosave<CustomProviderDraft>({
-    delayMs: 150,
-    save: async (draft, updates) => {
-      if (!customProvider) return false
-      const draftValues = draft?.providerId === providerId ? draft.values : {}
-      const values = { ...draftValues, ...updates.values }
-      const apiKey =
-        values.apiKey === undefined ? customProvider.apiKey : values.apiKey.trim() || undefined
-      try {
-        await updateCustomProvider({ ...customProvider, ...values, apiKey })
-        return true
-      } catch (error) {
-        setStatus({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Unable to update the custom provider.'
-        })
-        return false
-      }
-    }
-  })
-
   const customProviderHeaders =
     customProviderHeadersDraft?.providerId === providerId
       ? customProviderHeadersDraft.value
@@ -129,13 +108,8 @@ function ProvidersSection({
           ? ''
           : JSON.stringify(customProvider.headers, null, 2)
         : ''
-  const customProviderValues =
-    providerDraft.draft?.providerId === providerId && customProvider
-      ? { ...customProvider, ...providerDraft.draft.values }
-      : customProvider
-
-  const customProviderConfiguration = customProviderValues
-    ? toCustomProviderConfiguration(customProviderValues)
+  const customProviderConfiguration = customProvider
+    ? toCustomProviderConfiguration(customProvider)
     : undefined
   const providerConfiguration: ProviderConnection = customProviderConfiguration ?? {
     provider: builtInProviderId,
@@ -174,16 +148,12 @@ function ProvidersSection({
     }
   }
   const editCustomProvider = (updates: Partial<Omit<CustomProvider, 'id'>>): void => {
-    providerDraft.editWith((current) => ({
-      providerId,
-      values:
-        current?.providerId === providerId ? { ...current.values, ...updates } : { ...updates }
-    }))
+    const parsed = CustomProviderUpdatesSchema.safeParse(updates)
+    if (parsed.success) updateCustomProvider(providerId, parsed.data)
   }
   const saveCustomProvider = (updates: Partial<Omit<CustomProvider, 'id'>> = {}): void => {
-    void (Object.keys(updates).length
-      ? providerDraft.flushWith({ values: updates })
-      : providerDraft.flush())
+    if (Object.keys(updates).length) editCustomProvider(updates)
+    void flushLibrary().catch(() => undefined)
   }
 
   return (
@@ -269,6 +239,14 @@ function ProvidersSection({
             />
           </div>
         </header>
+        {saveError && (
+          <div role="alert">
+            <p>{saveError}</p>
+            <Button variant="outline" onClick={() => saveCustomProvider()}>
+              Retry saving
+            </Button>
+          </div>
+        )}
         <div className="mt-8 space-y-6">
           {!customProvider ? (
             <section aria-labelledby="getting-started-heading" className="space-y-1">
@@ -320,9 +298,10 @@ function ProvidersSection({
                   id={`${providerId}-name`}
                   onBlur={() => saveCustomProvider()}
                   onChange={(event) => {
+                    setFieldText((current) => ({ ...current, name: event.target.value }))
                     editCustomProvider({ name: event.target.value })
                   }}
-                  value={customProviderValues?.name ?? ''}
+                  value={fieldText.name ?? customProvider.name}
                 />
               </label>
             </section>
@@ -338,6 +317,7 @@ function ProvidersSection({
                 id={`${providerId}-base-url`}
                 onChange={(event) => {
                   if (customProvider) {
+                    setFieldText((current) => ({ ...current, baseUrl: event.target.value }))
                     editCustomProvider({ baseUrl: event.target.value })
                   } else
                     updateConfiguration(providerId, {
@@ -347,9 +327,9 @@ function ProvidersSection({
                 }}
                 onBlur={() => {
                   if (customProvider) saveCustomProvider()
-                  else void flushLibrary()
+                  else void flushLibrary().catch(() => undefined)
                 }}
-                value={customProviderValues?.baseUrl ?? configuration.baseUrl}
+                value={fieldText.baseUrl ?? customProvider?.baseUrl ?? configuration.baseUrl}
               />
             </label>
             {customProvider ? (
@@ -361,7 +341,8 @@ function ProvidersSection({
                     id={`${providerId}-api-key`}
                     onChange={(event) => {
                       if (customProvider) {
-                        editCustomProvider({ apiKey: event.target.value })
+                        setFieldText((current) => ({ ...current, apiKey: event.target.value }))
+                        editCustomProvider({ apiKey: event.target.value.trim() || undefined })
                       } else
                         updateConfiguration(providerId, {
                           ...configuration,
@@ -371,9 +352,9 @@ function ProvidersSection({
                     type={isApiKeyVisible ? 'text' : 'password'}
                     onBlur={() => {
                       if (customProvider) saveCustomProvider()
-                      else void flushLibrary()
+                      else void flushLibrary().catch(() => undefined)
                     }}
-                    value={customProviderValues?.apiKey ?? configuration.apiKey}
+                    value={fieldText.apiKey ?? customProvider.apiKey ?? ''}
                   />
                   <IconTooltipButton
                     icon={
@@ -426,7 +407,7 @@ function ProvidersSection({
                     try {
                       saveCustomProvider({
                         headers: customProviderHeaders.trim()
-                          ? JSON.parse(customProviderHeaders)
+                          ? ProviderHeadersSchema.parse(JSON.parse(customProviderHeaders))
                           : {}
                       })
                     } catch {
@@ -437,10 +418,11 @@ function ProvidersSection({
                     setCustomProviderHeadersDraft({ providerId, value: event.target.value })
                     try {
                       editCustomProvider({
-                        headers: event.target.value.trim() ? JSON.parse(event.target.value) : {}
+                        headers: event.target.value.trim()
+                          ? ProviderHeadersSchema.parse(JSON.parse(event.target.value))
+                          : {}
                       })
                     } catch {
-                      providerDraft.cancel()
                       // Keep the invalid draft local until the user corrects it.
                     }
                   }}

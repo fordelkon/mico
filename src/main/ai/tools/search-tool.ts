@@ -106,7 +106,7 @@ async function searchPath(
   path: string | undefined,
   context: ToolExecutionContext
 ): Promise<string> {
-  const target = await resolveWorkspacePath(context.cwd, path ?? '.')
+  const { path: target } = await resolveWorkspacePath(context.cwd, path ?? '.')
   return relative(context.cwd, target) || '.'
 }
 
@@ -125,7 +125,7 @@ function createGlobTool() {
     operation: () => ({ kind: 'read-only' }),
     async execute({ pattern, path }, context) {
       const target = await searchPath(path, context)
-      const resolved = await resolveWorkspacePath(context.cwd, target)
+      const { path: resolved } = await resolveWorkspacePath(context.cwd, target)
       if (!(await stat(resolved)).isDirectory())
         throw new Error('Glob path must be a directory. Use Grep or Read for a file.')
       const files = await runSearch(

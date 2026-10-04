@@ -1,12 +1,6 @@
 export enum IpcChannel {
-  /** Returns the persisted appearance preference. */
-  Appearance_GetPreference = 'appearance:get-preference',
-  /** Returns the operating-system-resolved appearance. */
-  Appearance_GetResolved = 'appearance:get-resolved',
   /** Persists a new appearance preference. */
   Appearance_SetPreference = 'appearance:set-preference',
-  /** Notifies the renderer that the resolved appearance changed. */
-  Appearance_Changed = 'appearance:changed',
   /** Returns the complete persisted and resolved theme state. */
   Appearance_GetThemeState = 'appearance:get-theme-state',
   /** Persists all independent light and dark theme selections. */

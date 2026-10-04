@@ -5,8 +5,6 @@ type AutosaveQueue = {
   schedule: () => void
   /** Cancel the debounce timer and persist immediately; errors reach the caller. */
   flush: () => Promise<void>
-  /** Cancel the debounce timer, keeping the state dirty for the next flush. */
-  cancel: () => void
   /** Cancel the timer, drain in-flight saves, then persist if still dirty. */
   settle: () => Promise<void>
   /** Monotonic revision of scheduled changes, for staleness comparisons. */
@@ -35,17 +33,19 @@ function useAutosaveQueue(options: {
   const revisionRef = React.useRef(0)
   const hasUnsaved = React.useRef(false)
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const saveQueue = React.useRef(Promise.resolve())
+  const saveQueue = React.useRef(Promise.resolve(true))
 
-  const run = React.useCallback(async (): Promise<void> => {
+  const run = React.useCallback(async (): Promise<boolean> => {
     const tail = saveQueue.current.catch(() => undefined)
     const task = tail.then(async () => {
+      if (!hasUnsaved.current) return true
       const atRevision = revisionRef.current
       const persisted = await saveRef.current(atRevision)
       if (persisted && revisionRef.current === atRevision) hasUnsaved.current = false
+      return persisted
     })
     saveQueue.current = task
-    await task
+    return task
   }, [])
 
   const cancelTimer = React.useCallback((): void => {
@@ -74,7 +74,9 @@ function useAutosaveQueue(options: {
   const settle = React.useCallback(async (): Promise<void> => {
     cancelTimer()
     await saveQueue.current.catch(() => undefined)
-    if (hasUnsaved.current) await run()
+    while (hasUnsaved.current) {
+      if (!(await run())) break
+    }
   }, [cancelTimer, run])
 
   React.useEffect(
@@ -90,11 +92,10 @@ function useAutosaveQueue(options: {
     () => ({
       schedule,
       flush,
-      cancel: cancelTimer,
       settle,
       revision: () => revisionRef.current
     }),
-    [cancelTimer, flush, schedule, settle]
+    [flush, schedule, settle]
   )
 }
 

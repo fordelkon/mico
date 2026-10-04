@@ -57,8 +57,7 @@ function useChatWorkspaceState(): ChatWorkspace {
   } = conversationList
   const { getSession, removeSession, updateSession } = sessions
   const activeSessionSlice = useActiveSession({ sessions })
-  const { activeSession, activateNewSession, closeSessionIfActive, pendingProject } =
-    activeSessionSlice
+  const { activeSession, createNewSession, closeSessionIfActive } = activeSessionSlice
   const activeConversation = React.useMemo(
     () =>
       activeSession
@@ -102,19 +101,8 @@ function useChatWorkspaceState(): ChatWorkspace {
       if (isCreatingSessionRef.current) return false
 
       isCreatingSessionRef.current = true
-      const createInput = pendingProject
-        ? { title: 'New chat', projectId: pendingProject.id }
-        : { title: 'New chat' }
       try {
-        const summary = await window.api.sessions.create(createInput)
-        const conversation = {
-          id: summary.id,
-          title: summary.title,
-          projectId: summary.projectId,
-          cwd: summary.cwd,
-          lastActivityAt: summary.lastActivityAt
-        }
-        activateNewSession(conversation, pendingProject)
+        const { conversation } = await createNewSession()
         addConversation(conversation)
         queueFirstMessage(conversation.id, parts)
         return true
@@ -123,11 +111,10 @@ function useChatWorkspaceState(): ChatWorkspace {
       }
     },
     [
-      activateNewSession,
+      createNewSession,
       activeSession,
       addConversation,
       sendSessionMessage,
-      pendingProject,
       getSession,
       queueFirstMessage,
       touchConversationActivity

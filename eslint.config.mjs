@@ -4,6 +4,7 @@ import eslintPluginReact from 'eslint-plugin-react'
 import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 import oxlint from 'eslint-plugin-oxlint'
+import architecture from './scripts/lint/architecture.mjs'
 
 export default defineConfig(
   {
@@ -18,6 +19,11 @@ export default defineConfig(
     ]
   },
   tseslint.configs.recommended,
+  {
+    files: ['src/**/*.{js,jsx,mjs,cjs,ts,tsx}', 'packages/*/src/**/*.{js,jsx,mjs,cjs,ts,tsx}'],
+    plugins: { architecture },
+    rules: { 'architecture/process-imports': 'error' }
+  },
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat['jsx-runtime'],
   {

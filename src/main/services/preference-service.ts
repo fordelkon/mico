@@ -82,17 +82,12 @@ class PreferenceService {
     this.dependencies.nativeTheme.on('updated', this.broadcastResolvedAppearance)
   }
 
-  getAppearancePreference(): AppearancePreference {
-    return this.themePreferences.appearancePreference
-  }
-
-  getResolvedAppearance(): Appearance {
+  private getResolvedAppearance(): Appearance {
     return this.dependencies.nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   }
 
-  async setAppearancePreference(preference: AppearancePreference): Promise<Appearance> {
-    await this.updatePreferences((current) => ({ ...current, appearancePreference: preference }))
-    return this.getResolvedAppearance()
+  async setAppearancePreference(preference: AppearancePreference): Promise<ThemeState> {
+    return this.updatePreferences((current) => ({ ...current, appearancePreference: preference }))
   }
 
   getThemeState(): ThemeState {
@@ -131,7 +126,6 @@ class PreferenceService {
   private broadcastThemeState(): void {
     const state = this.getThemeState()
     for (const window of this.dependencies.getWindows()) {
-      window.webContents.send(IpcChannel.Appearance_Changed, state.appearance)
       window.webContents.send(IpcChannel.Appearance_ThemeChanged, state)
     }
   }

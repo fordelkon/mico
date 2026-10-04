@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataFor } from '@shared/data/types'
@@ -25,7 +25,6 @@ const initialTheme: ThemeState = {
 
 const appearanceApi = {
   getThemeState: vi.fn<AppearanceAPI['getThemeState']>(),
-  onAppearanceChange: vi.fn<AppearanceAPI['onAppearanceChange']>(() => () => undefined),
   onThemeChange: vi.fn<AppearanceAPI['onThemeChange']>(() => () => undefined),
   setPreference: vi.fn<AppearanceAPI['setPreference']>(),
   setThemePreferences: vi.fn<AppearanceAPI['setThemePreferences']>()
@@ -43,10 +42,13 @@ describe('AppearanceSettings', () => {
   beforeEach(() => {
     appearanceApi.getThemeState.mockReset()
     appearanceApi.getThemeState.mockResolvedValue(initialTheme)
-    appearanceApi.onAppearanceChange.mockClear()
     appearanceApi.onThemeChange.mockClear()
     appearanceApi.setPreference.mockReset()
-    appearanceApi.setPreference.mockResolvedValue('dark')
+    appearanceApi.setPreference.mockImplementation(async (preference) => ({
+      ...initialTheme,
+      appearancePreference: preference,
+      appearance: preference === 'system' ? 'dark' : preference
+    }))
     appearanceApi.setThemePreferences.mockReset()
     appearanceApi.setThemePreferences.mockImplementation(
       async (preferences: ThemePreferences): Promise<ThemeState> => ({
@@ -72,6 +74,32 @@ describe('AppearanceSettings', () => {
       expect(document.documentElement).toHaveAttribute('data-theme-preset', 'tokyo-night')
       expect(document.documentElement).toHaveAttribute('data-appearance', 'dark')
     })
+  })
+
+  it('user receives a theme update when the initial read is delayed, then the newer theme stays visible', async () => {
+    const pending = Promise.withResolvers<ThemeState>()
+    appearanceApi.getThemeState.mockReturnValueOnce(pending.promise)
+    renderAppearanceSettings()
+    const notify = appearanceApi.onThemeChange.mock.calls.at(-1)?.[0]
+    if (!notify) throw new Error('Theme changes must be subscribed before reading.')
+    act(() => notify({ ...initialTheme, appearance: 'light', appearancePreference: 'light' }))
+    await act(async () => {
+      pending.resolve(initialTheme)
+      await pending.promise
+    })
+    expect(document.documentElement).toHaveAttribute('data-appearance', 'light')
+    expect(screen.getByRole('radio', { name: 'Light' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('user changes appearance when saving fails, then the committed theme remains selected', async () => {
+    const user = userEvent.setup()
+    appearanceApi.setPreference.mockRejectedValueOnce(new Error('Storage unavailable'))
+    renderAppearanceSettings()
+    await screen.findByRole('heading', { name: 'Dark Mode Theme' })
+    await user.click(screen.getByRole('radio', { name: 'Light' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not save appearance settings')
+    expect(screen.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
+    expect(document.documentElement).toHaveAttribute('data-appearance', 'dark')
   })
 
   it('user sees the Dark card selected when picked, then the preference is persisted', async () => {

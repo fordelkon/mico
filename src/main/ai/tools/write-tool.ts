@@ -37,7 +37,9 @@ function createWriteTool(): AgentTool<WriteInput> {
     operation: ({ file_path }) => ({ kind: 'file-write', path: file_path, allowMissing: true }),
     async execute({ file_path, content }, context) {
       context.signal.throwIfAborted()
-      const target = await resolveWorkspacePath(context.cwd, file_path, { allowMissing: true })
+      const { path: target } = await resolveWorkspacePath(context.cwd, file_path, {
+        allowMissing: true
+      })
       const existed = existsSync(target)
       // This is a preview of the already validated input, not a claim that the
       // file has been written. The final tool result remains the commit signal.

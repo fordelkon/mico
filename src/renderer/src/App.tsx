@@ -87,7 +87,7 @@ function AppContent(): React.JSX.Element {
   return (
     <SidebarProvider
       className="home-workspace"
-      data-platform={window.electron.process.platform}
+      data-platform={window.api.windowControls.platform}
       resize={{ defaultWidth: 240, maxWidth: 320, minWidth: 180 }}
     >
       <div aria-hidden="true" className="home-workspace__titlebar" />

@@ -34,7 +34,7 @@ function createReadTool(): AgentTool<ReadInput> {
     inputSchema: ReadInputSchema,
     async execute({ file_path, offset = 1, limit = MAX_READ_LINES }, context) {
       context.signal.throwIfAborted()
-      const target = await resolveWorkspacePath(context.cwd, file_path)
+      const { path: target } = await resolveWorkspacePath(context.cwd, file_path)
       const bytes = await readFile(target)
       if (bytes.byteLength > MAX_READ_BYTES)
         throw new Error(`File is larger than the ${MAX_READ_BYTES / 1024} KiB read limit.`)

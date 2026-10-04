@@ -2,6 +2,38 @@ import { lstat, readlink, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 type ResolveWorkspacePathOptions = { allowMissing?: boolean }
+type WorkspacePath = {
+  path: string
+  isProtected: boolean
+  /** Checks containment and identity again after an approval wait. */
+  revalidate: () => Promise<void>
+}
+
+const PROTECTED_DIRECTORIES = new Set(['.git', '.mico', '.claude', '.vscode'])
+const PROTECTED_FILES = new Set([
+  '.bashrc',
+  '.bash_profile',
+  '.bash_login',
+  '.bash_logout',
+  '.profile',
+  '.zshrc',
+  '.zprofile',
+  '.zshenv',
+  '.zlogin',
+  '.zlogout',
+  'config.fish'
+])
+
+function isProtectedPath(cwd: string, path: string): boolean {
+  const segments = relative(cwd, path).split(sep)
+  const name = basename(path).toLowerCase()
+  return (
+    segments.some((segment) => PROTECTED_DIRECTORIES.has(segment.toLowerCase())) ||
+    name === '.env' ||
+    name.startsWith('.env.') ||
+    PROTECTED_FILES.has(name)
+  )
+}
 
 /** Matches one `..` path segment with its preceding separator. */
 const DOT_DOT_SEGMENT = /(^|[\\/])\.\.(?=[\\/]|$)/
@@ -72,11 +104,11 @@ function isWithinWorkspace(workspace: string, target: string): boolean {
   )
 }
 
-async function resolveWorkspacePath(
+async function resolveTarget(
   cwd: string,
   requestedPath: string,
   { allowMissing = false }: ResolveWorkspacePathOptions = {}
-): Promise<string> {
+): Promise<{ path: string; canonical: string; isProtected: boolean }> {
   const lexicalWorkspace = resolve(cwd)
   const workspace = await realpath(lexicalWorkspace)
   const candidate = resolve(lexicalWorkspace, requestedPath)
@@ -87,7 +119,31 @@ async function resolveWorkspacePath(
   if (!isWithinWorkspace(workspace, resolvedTarget))
     throw new Error('Path must be inside the session workspace.')
 
-  return candidate
+  return {
+    path: candidate,
+    canonical: resolvedTarget,
+    isProtected:
+      isProtectedPath(lexicalWorkspace, candidate) || isProtectedPath(workspace, resolvedTarget)
+  }
 }
 
-export { resolveCanonicalPath, resolveWorkspacePath, type ResolveWorkspacePathOptions }
+async function resolveWorkspacePath(
+  cwd: string,
+  requestedPath: string,
+  options: ResolveWorkspacePathOptions = {}
+): Promise<WorkspacePath> {
+  const target = await resolveTarget(cwd, requestedPath, options)
+  return {
+    path: target.path,
+    isProtected: target.isProtected,
+    revalidate: async () => {
+      const current = await resolveTarget(cwd, requestedPath, options)
+      if (current.canonical !== target.canonical)
+        throw new Error(
+          'The file target changed while waiting for approval. The operation was not executed. Review the new target and request approval again.'
+        )
+    }
+  }
+}
+
+export { resolveWorkspacePath, type WorkspacePath }

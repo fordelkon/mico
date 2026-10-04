@@ -68,8 +68,6 @@ function createHarness() {
     isTrustedRendererUrl: vi.fn<MainWindowService['isTrustedRendererUrl']>(() => true)
   }
   const preference = {
-    getAppearancePreference: vi.fn<PreferenceService['getAppearancePreference']>(),
-    getResolvedAppearance: vi.fn<PreferenceService['getResolvedAppearance']>(),
     getThemeState: vi.fn<PreferenceService['getThemeState']>(),
     setAppearancePreference: vi.fn<PreferenceService['setAppearancePreference']>(),
     setThemePreferences: vi.fn<PreferenceService['setThemePreferences']>()

@@ -3,7 +3,7 @@ import * as z from 'zod'
 import { IpcChannel } from '../IpcChannel'
 import { PermissionResponseSchema } from '../ai/permissions'
 import { ModelReasoningCapabilitiesSchema, ThinkingSelectionSchema } from '../data/schemas/chat'
-import { AppearancePreferenceSchema, AppearanceSchema } from '../data/schemas/preference'
+import { AppearancePreferenceSchema } from '../data/schemas/preference'
 import {
   ModelEntryIdSchema,
   ModelEntrySchema,
@@ -42,11 +42,9 @@ const taskSchemas = {
   [IpcChannel.WindowControls_Minimize]: { input: empty, output: completion },
   [IpcChannel.WindowControls_ToggleFullscreen]: { input: empty, output: completion },
   [IpcChannel.WindowControls_Unmaximize]: { input: empty, output: completion },
-  [IpcChannel.Appearance_GetPreference]: { input: empty, output: AppearancePreferenceSchema },
-  [IpcChannel.Appearance_GetResolved]: { input: empty, output: AppearanceSchema },
   [IpcChannel.Appearance_SetPreference]: {
     input: AppearancePreferenceSchema,
-    output: AppearanceSchema
+    output: ThemeStateSchema
   },
   [IpcChannel.Appearance_GetThemeState]: { input: empty, output: ThemeStateSchema },
   [IpcChannel.Appearance_SetThemePreferences]: {

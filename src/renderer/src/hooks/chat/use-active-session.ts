@@ -38,8 +38,8 @@ type ChatActiveSessionSlice = {
   selectProjectForNewChat: (project: WorkspaceProject) => void
   startNewChat: () => void
   selectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
-  /** Activates a freshly created session as the workspace's active chat. */
-  activateNewSession: (conversation: Conversation, project: WorkspaceProject | null) => ChatSession
+  /** Creates a session for the current draft; activates it only if navigation has not changed. */
+  createNewSession: () => Promise<ChatSession>
   /** Clears the active session when its conversation is deleted. */
   closeSessionIfActive: (conversationId: string) => void
 }
@@ -280,34 +280,42 @@ function useActiveSession(options: {
     [focusComposer, sessions]
   )
 
-  const activateNewSession = React.useCallback(
-    (conversation: Conversation, project: WorkspaceProject | null): ChatSession => {
-      activationRef.current = {
-        revision: activationRef.current.revision + 1,
-        conversationId: conversation.id
-      }
-      setActivationError(null)
-      setReasoningCapabilities(null)
-      const instance = sessions.createSession(
-        conversation,
-        [],
-        {
-          modelEntryId: null,
-          thinkingEffort: thinkingEffortRef.current
-        },
-        project
-      )
-      instance.permissionMode = permissionMode
-      setActiveSession({
-        conversationId: conversation.id,
-        chat: instance.chat,
-        project: instance.project
-      })
-      setSelectedProjectId(null)
-      return instance
-    },
-    [permissionMode, sessions]
-  )
+  const createNewSession = React.useCallback(async (): Promise<ChatSession> => {
+    const activation = activationRef.current
+    const project = resolvePendingProject(projects, selectedProjectId)
+    const thinkingEffort = thinkingEffortRef.current
+    const summary = await window.api.sessions.create(
+      project ? { title: 'New chat', projectId: project.id } : { title: 'New chat' }
+    )
+    const conversation = {
+      id: summary.id,
+      title: summary.title,
+      projectId: summary.projectId,
+      cwd: summary.cwd,
+      lastActivityAt: summary.lastActivityAt
+    }
+    const instance = sessions.createSession(
+      conversation,
+      [],
+      {
+        modelEntryId: null,
+        thinkingEffort
+      },
+      project
+    )
+    instance.permissionMode = permissionMode
+    if (activationRef.current !== activation) return instance
+    activationRef.current = { revision: activation.revision + 1, conversationId: conversation.id }
+    setActivationError(null)
+    setReasoningCapabilities(null)
+    setActiveSession({
+      conversationId: conversation.id,
+      chat: instance.chat,
+      project: instance.project
+    })
+    setSelectedProjectId(null)
+    return instance
+  }, [permissionMode, projects, selectedProjectId, sessions])
 
   const closeSessionIfActive = React.useCallback((conversationId: string): void => {
     if (activationRef.current.conversationId === conversationId)
@@ -349,7 +357,7 @@ function useActiveSession(options: {
       selectProjectForNewChat,
       startNewChat,
       selectConversation,
-      activateNewSession,
+      createNewSession,
       closeSessionIfActive
     }),
     [
@@ -372,7 +380,7 @@ function useActiveSession(options: {
       selectProjectForNewChat,
       startNewChat,
       selectConversation,
-      activateNewSession,
+      createNewSession,
       closeSessionIfActive
     ]
   )

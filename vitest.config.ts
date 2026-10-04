@@ -33,7 +33,7 @@ export default defineConfig({
         extends: true,
         test: {
           environment: 'node',
-          include: ['src/main/**/*.{test,spec}.ts'],
+          include: ['src/main/**/*.{test,spec}.ts', 'scripts/lint/*.test.mjs'],
           name: 'main'
         }
       }

@@ -11,7 +11,7 @@ function isWindowControl(value: string | null): value is WindowControl {
 }
 
 function WindowControls(): React.JSX.Element | null {
-  const platform = window.electron.process.platform
+  const platform = window.api.windowControls.platform
   const isMac = platform === 'darwin'
   const isWindows = platform === 'win32'
   const [isFullScreen, setIsFullScreen] = React.useState(false)

@@ -45,7 +45,7 @@ function createEditTool() {
     },
     async execute({ file_path, old_string, new_string, replace_all = false }, context) {
       context.signal.throwIfAborted()
-      const target = await resolveWorkspacePath(context.cwd, file_path)
+      const { path: target } = await resolveWorkspacePath(context.cwd, file_path)
       const original = await readFile(target, 'utf8')
       const lineEnding = original.includes('\r\n') ? '\r\n' : '\n'
       const source = original.replaceAll('\r\n', '\n')

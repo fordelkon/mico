@@ -11,6 +11,7 @@ type AppearanceContextValue = {
   appearance: Appearance
   preference: AppearancePreference
   theme: ThemeState
+  error: string | null
   setPreference: (preference: AppearancePreference) => Promise<void>
   setThemePreferences: (preferences: ThemePreferences) => Promise<void>
 }
@@ -28,6 +29,7 @@ const defaultTheme: ThemeState = {
 const AppearanceContext = React.createContext<AppearanceContextValue>({
   appearance: 'light',
   preference: 'system',
+  error: null,
   setPreference: async () => undefined,
   setThemePreferences: async () => undefined,
   theme: defaultTheme
@@ -41,34 +43,34 @@ function applyTheme(root: HTMLElement, theme: ThemeState): void {
 }
 
 function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.Element {
-  const [appearance, setAppearance] = React.useState<Appearance>('light')
-  const [preference, setPreferenceState] = React.useState<AppearancePreference>('system')
   const [theme, setTheme] = React.useState<ThemeState>(defaultTheme)
+  const [error, setError] = React.useState<string | null>(null)
+  const revision = React.useRef(0)
 
   // Subscribe before the initial read completes so a concurrent main-process update is not lost.
   React.useEffect(() => {
     let active = true
-    const unsubscribe = window.api.appearance.onAppearanceChange((nextAppearance) => {
-      if (active) setAppearance(nextAppearance)
-    })
+    const initialRevision = revision.current
     const unsubscribeTheme = window.api.appearance.onThemeChange((nextTheme) => {
       if (!active) return
+      revision.current += 1
       setTheme(nextTheme)
-      setAppearance(nextTheme.appearance)
-      setPreferenceState(nextTheme.appearancePreference)
+      setError(null)
     })
 
-    void window.api.appearance.getThemeState().then((nextTheme) => {
-      if (!active) return
-
-      setTheme(nextTheme)
-      setPreferenceState(nextTheme.appearancePreference)
-      setAppearance(nextTheme.appearance)
-    })
+    void window.api.appearance.getThemeState().then(
+      (nextTheme) => {
+        if (active && revision.current === initialRevision) setTheme(nextTheme)
+      },
+      () => {
+        if (active && revision.current === initialRevision)
+          setError('Could not load appearance settings. Reopen Mico to try again.')
+      }
+    )
 
     return () => {
       active = false
-      unsubscribe()
+      revision.current += 1
       unsubscribeTheme()
     }
   }, [])
@@ -78,24 +80,41 @@ function AppearanceProvider({ children }: React.PropsWithChildren): React.JSX.El
     applyTheme(document.documentElement, theme)
   }, [theme])
 
-  const setPreference = React.useCallback(
-    async (nextPreference: AppearancePreference): Promise<void> => {
-      setPreferenceState(nextPreference)
-      const nextAppearance = await window.api.appearance.setPreference(nextPreference)
-      setAppearance(nextAppearance)
-    },
-    []
-  )
-  const setThemePreferences = React.useCallback(async (nextPreferences: ThemePreferences) => {
-    const nextTheme = await window.api.appearance.setThemePreferences(nextPreferences)
-    setTheme(nextTheme)
-    setAppearance(nextTheme.appearance)
-    setPreferenceState(nextTheme.appearancePreference)
+  const save = React.useCallback(async (commit: () => Promise<ThemeState>): Promise<void> => {
+    const atRevision = ++revision.current
+    try {
+      const nextTheme = await commit()
+      if (revision.current !== atRevision) return
+      setTheme(nextTheme)
+      setError(null)
+    } catch {
+      if (revision.current === atRevision)
+        setError(
+          'Could not save appearance settings. Your previous theme is still active. Try selecting the theme again.'
+        )
+    }
   }, [])
+  const setPreference = React.useCallback(
+    (nextPreference: AppearancePreference): Promise<void> =>
+      save(() => window.api.appearance.setPreference(nextPreference)),
+    [save]
+  )
+  const setThemePreferences = React.useCallback(
+    (nextPreferences: ThemePreferences): Promise<void> =>
+      save(() => window.api.appearance.setThemePreferences(nextPreferences)),
+    [save]
+  )
 
   const value = React.useMemo(
-    () => ({ appearance, preference, setPreference, setThemePreferences, theme }),
-    [appearance, preference, setPreference, setThemePreferences, theme]
+    () => ({
+      appearance: theme.appearance,
+      preference: theme.appearancePreference,
+      setPreference,
+      setThemePreferences,
+      theme,
+      error
+    }),
+    [setPreference, setThemePreferences, theme, error]
   )
 
   return <AppearanceContext value={value}>{children}</AppearanceContext>

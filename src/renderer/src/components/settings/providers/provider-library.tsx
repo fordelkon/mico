@@ -40,12 +40,16 @@ type ProviderLibraryActions = {
   syncModels: (providerId: ProviderId, models: DiscoveredModel[]) => Promise<void>
   toggleModel: (model: CatalogModel, enabled: boolean) => Promise<void>
   updateConfiguration: (providerId: ProviderId, configuration: ProviderConfiguration) => void
-  updateCustomProvider: (provider: CustomProvider) => Promise<void>
+  updateCustomProvider: (
+    providerId: ProviderId,
+    updates: Partial<Omit<CustomProvider, 'id'>>
+  ) => void
 }
 type ProviderLibraryState = {
   isLoaded: boolean
   /** Copy shown when the initial catalog load fails; null once loaded. */
   loadError: string | null
+  saveError: string | null
   library: ProviderCatalog
 }
 
@@ -112,17 +116,19 @@ const ProviderLibraryActionsContext = React.createContext<ProviderLibraryActions
   syncModels: unavailable,
   toggleModel: unavailable,
   updateConfiguration: () => undefined,
-  updateCustomProvider: unavailable
+  updateCustomProvider: () => undefined
 })
 const ProviderLibraryStateContext = React.createContext<ProviderLibraryState>({
   isLoaded: false,
   loadError: null,
+  saveError: null,
   library: toProviderCatalog(initialLibrary)
 })
 function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.JSX.Element {
   const [library, setLibrary] = React.useState(initialLibrary)
   const [isLoaded, setIsLoaded] = React.useState(false)
   const [loadError, setLoadError] = React.useState<string | null>(null)
+  const [saveError, setSaveError] = React.useState<string | null>(null)
   const libraryRef = React.useRef(library)
   React.useEffect(() => {
     libraryRef.current = library
@@ -146,10 +152,20 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
 
   const autosave = useAutosaveQueue({
     delayMs: configurationSaveDelay,
-    save: async () => {
+    save: async (atRevision) => {
       if (!isLibraryLoaded.current) return false
       const snapshot = libraryRef.current
-      const saved = await window.api.providers.saveLibrary(snapshot)
+      let saved: PersistedProviderLibrary
+      try {
+        saved = await window.api.providers.saveLibrary(snapshot)
+        setSaveError(null)
+      } catch (error) {
+        setSaveError(
+          'Could not save provider settings. Your edits are still here. Retry saving before closing Mico.'
+        )
+        throw error
+      }
+      if (autosave.revision() !== atRevision) return true
       // Local state is already the snapshot's source, so only main's
       // selection sanitization is absorbed back — never the whole snapshot.
       libraryRef.current = {
@@ -190,7 +206,7 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   React.useEffect(
     () => () => {
       // Strict Mode also runs cleanup during hydration; an unloaded or clean draft must never replace persisted data.
-      void commitProviderDrafts()
+      void commitProviderDrafts().catch(() => undefined)
     },
     [commitProviderDrafts]
   )
@@ -267,19 +283,22 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     [commitProviderDrafts, refresh]
   )
   const updateCustomProvider = React.useCallback(
-    async (provider: CustomProvider) => {
-      await commitProviderDrafts()
-      editLibrary((current) => ({
-        ...current,
-        customProviders: current.customProviders.map((item) =>
-          item.id === provider.id ? provider : item
-        ),
-        enabledProviderIds: provider.enabled
-          ? [...new Set([...current.enabledProviderIds, provider.id])]
-          : current.enabledProviderIds.filter((id) => id !== provider.id)
-      }))
+    (providerId: ProviderId, updates: Partial<Omit<CustomProvider, 'id'>>) => {
+      editLibrary((current) => {
+        const customProviders = current.customProviders.map((item) =>
+          item.id === providerId ? { ...item, ...updates } : item
+        )
+        const enabled = customProviders.find(({ id }) => id === providerId)?.enabled
+        return {
+          ...current,
+          customProviders,
+          enabledProviderIds: enabled
+            ? [...new Set([...current.enabledProviderIds, providerId])]
+            : current.enabledProviderIds.filter((id) => id !== providerId)
+        }
+      })
     },
-    [commitProviderDrafts, editLibrary]
+    [editLibrary]
   )
   const toggleModel = React.useCallback(
     async (model: CatalogModel, enabled: boolean) => {
@@ -353,8 +372,8 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     ]
   )
   const state = React.useMemo(
-    () => ({ isLoaded, loadError, library: catalog }),
-    [isLoaded, loadError, catalog]
+    () => ({ isLoaded, loadError, saveError, library: catalog }),
+    [isLoaded, loadError, saveError, catalog]
   )
   return (
     <ProviderLibraryActionsContext value={actions}>

@@ -41,7 +41,7 @@ function createSessionSlice(): ChatActiveSessionSlice {
     startNewChat: vi.fn<() => void>(),
     selectConversation:
       vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
-    activateNewSession: vi.fn<ChatActiveSessionSlice['activateNewSession']>(),
+    createNewSession: vi.fn<ChatActiveSessionSlice['createNewSession']>(),
     closeSessionIfActive: vi.fn<(conversationId: string) => void>()
   }
 }

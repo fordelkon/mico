@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest'
 import type { ProviderLibrary as PersistedProviderLibrary } from '@shared/data/schemas/provider'
 import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { UserEvent } from '@testing-library/user-event'
 import * as React from 'react'
@@ -154,6 +154,72 @@ beforeEach(() => {
 })
 
 describe('SettingsMain', () => {
+  it('user edits during a slow save when closing, then the latest field value is persisted', async () => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: [exampleAiCustomProvider],
+      selectedProviderId: exampleAiCustomProvider.id
+    }
+    renderSettings()
+    const name = await screen.findByLabelText('Provider name')
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    providerApi.saveLibrary.mockImplementationOnce(async (snapshot) => {
+      started.resolve()
+      await release.promise
+      persistedLibrary = snapshot
+      return snapshot
+    })
+    fireEvent.change(name, { target: { value: 'First edit' } })
+    const flush = windowControlsApi.onProviderDraftFlush.mock.calls.at(-1)?.[0]
+    if (!flush) throw new Error('The window close listener must be registered.')
+    await act(async () => {
+      const closing = flush()
+      await started.promise
+      fireEvent.change(name, { target: { value: 'Latest edit' } })
+      release.resolve()
+      await closing
+    })
+    expect(persistedLibrary.customProviders[0].name).toBe('Latest edit')
+  })
+
+  it('user retries saving when a provider write fails, then the retained draft is persisted', async () => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: [exampleAiCustomProvider],
+      selectedProviderId: exampleAiCustomProvider.id
+    }
+    renderSettings()
+    const name = await screen.findByLabelText('Provider name')
+    providerApi.saveLibrary.mockRejectedValueOnce(new Error('Storage unavailable'))
+    fireEvent.change(name, { target: { value: 'Retained edit' } })
+    const flush = windowControlsApi.onProviderDraftFlush.mock.calls.at(-1)?.[0]
+    if (!flush) throw new Error('The window close listener must be registered.')
+    await act(async () => {
+      await expect(flush()).rejects.toThrow('Storage unavailable')
+    })
+    expect(persistedLibrary.customProviders[0].name).toBe('Example AI')
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not save provider settings')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry saving' }))
+    await waitFor(() => expect(persistedLibrary.customProviders[0].name).toBe('Retained edit'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('user closes settings when a custom field was just edited, then the draft is persisted', async () => {
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: [exampleAiCustomProvider],
+      selectedProviderId: exampleAiCustomProvider.id
+    }
+    renderSettings()
+    const name = await screen.findByLabelText('Provider name')
+    fireEvent.change(name, { target: { value: 'Latest name' } })
+    const flush = windowControlsApi.onProviderDraftFlush.mock.calls.at(-1)?.[0]
+    if (!flush) throw new Error('The window close listener must be registered.')
+    await act(flush)
+    expect(persistedLibrary.customProviders[0].name).toBe('Latest name')
+  })
+
   it('user lands on the Appearance page when opening it, then the heading is visible', () => {
     render(<SettingsMain page="appearance" />)
 

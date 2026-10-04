@@ -28,6 +28,7 @@ pnpm playwright show-report
 Runtime settings have one home in [playwright.config.ts](../../playwright.config.ts).
 Tests run sequentially within each platform. The [E2E workflow](../../.github/workflows/e2e.yml)
 runs local regression on Windows and macOS for pull requests and pushes to main.
+The same workflow runs non-mutating lint, formatting, and regular test checks in a separate quality job.
 Paid endpoint checks run only on manual dispatch with `real_provider` enabled.
 
 ## Coverage and ownership

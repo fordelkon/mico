@@ -75,7 +75,9 @@ describe('resolveWorkspacePath', () => {
     const filePath = join(workspaceAlias, 'file.txt')
     await writeFile(join(workspace, 'file.txt'), 'contents')
 
-    await expect(resolveWorkspacePath(workspaceAlias, filePath)).resolves.toBe(filePath)
+    await expect(resolveWorkspacePath(workspaceAlias, filePath)).resolves.toMatchObject({
+      path: filePath
+    })
   })
 
   it('user reads an outside alias when it points into workspace, then lexical escape is rejected', async () => {

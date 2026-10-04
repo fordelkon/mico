@@ -26,6 +26,8 @@ async function invoke<C extends InvokeChannel>(
 }
 
 const windowControls: WindowControlsAPI = {
+  platform:
+    process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'win32' : 'linux',
   close: () => invoke(IpcChannel.WindowControls_Close),
   isFocused: () => invoke(IpcChannel.WindowControls_IsFocused),
   isFullScreen: () => invoke(IpcChannel.WindowControls_IsFullscreen),
@@ -74,16 +76,6 @@ const windowControls: WindowControlsAPI = {
 }
 
 const appearance: AppearanceAPI = {
-  getPreference: () => invoke(IpcChannel.Appearance_GetPreference),
-  getResolvedAppearance: () => invoke(IpcChannel.Appearance_GetResolved),
-  onAppearanceChange: (listener) => {
-    const wrappedListener = (_event: IpcRendererEvent, nextAppearance: 'light' | 'dark'): void => {
-      listener(nextAppearance)
-    }
-
-    ipcRenderer.on(IpcChannel.Appearance_Changed, wrappedListener)
-    return () => ipcRenderer.removeListener(IpcChannel.Appearance_Changed, wrappedListener)
-  },
   setPreference: (preference) => invoke(IpcChannel.Appearance_SetPreference, preference),
   getThemeState: () => invoke(IpcChannel.Appearance_GetThemeState),
   onThemeChange: (listener) => {
