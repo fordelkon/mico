@@ -124,12 +124,10 @@ console.error('Diagnostic output')
   await expect(
     assistantMessages(app.window).last().getByRole('button', { name: 'Copy message' })
   ).toBeAttached()
-  const activity = app.window.getByRole('button', {
-    name: 'Agent activity: Searched 1 pattern · Read 1 file · Updated 1 file · Ran 1 command',
-    exact: true
-  })
-  await expect(activity).toHaveAttribute('aria-expanded', 'false')
-  await activity.click()
+  const activity = app.window.getByRole('region', { name: 'Agent activity', exact: true })
+  await expect(activity.getByRole('status').filter({ hasText: /^Searched/ })).toHaveText(
+    'Searched 1 pattern · Read 1 file · Updated 1 file · Ran 1 command'
+  )
   const completedCommand = app.window.getByRole('button', {
     name: /^Bash node trace-command\.cjs/
   })
@@ -147,7 +145,6 @@ console.error('Diagnostic output')
     BrowserWindow.getAllWindows()[0].setSize(1000, 850)
   )
   await expect(app.window.locator('html')).toHaveClass(/dark/)
-  if ((await activity.getAttribute('aria-expanded')) === 'false') await activity.click()
   const update = app.window.getByRole('button', { name: /^Update greeting.ts/ })
   if ((await update.getAttribute('aria-expanded')) === 'false') await update.click()
   if ((await completedCommand.getAttribute('aria-expanded')) === 'false')
@@ -156,9 +153,13 @@ console.error('Diagnostic output')
   expect(
     await app.window.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
   ).toBe(true)
-  await activity.click()
-  await expect(activity).toHaveAttribute('aria-expanded', 'false')
-  await app.window.screenshot({ path: testInfo.outputPath('activity-summary.png') })
+  await completedCommand.click()
+  await expect(completedCommand).toHaveAttribute('aria-expanded', 'false')
+  await expect(app.window.getByRole('log', { name: 'Terminal output' })).toBeHidden()
+  await update.click()
+  await expect(update).toHaveAttribute('aria-expanded', 'false')
+  await expect(diff).toBeHidden()
+  await app.window.screenshot({ path: testInfo.outputPath('tool-details-collapsed.png') })
 })
 
 // The only native stub is the OS folder picker; the selected directory is real.
@@ -234,12 +235,9 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   if ((await projectGroupToggle.getAttribute('aria-expanded')) === 'false')
     await projectGroupToggle.click()
   await sidebar.getByRole('button', { name: 'E2E conversation', exact: true }).click()
-  await app.window
-    .getByRole('button', {
-      name: 'Agent activity: Wrote 1 file · Updated 1 file',
-      exact: true
-    })
-    .click()
+  await expect(
+    app.window.getByRole('region', { name: 'Agent activity', exact: true }).getByRole('status')
+  ).toHaveText('Wrote 1 file · Updated 1 file')
   await app.window
     .getByRole('button', { name: 'Write result.txt Wrote 1 line to result.txt.', exact: true })
     .click()
@@ -262,13 +260,8 @@ test('user sees a failed file read when the tool cannot find it, then the error 
   })
   provider.enqueue({ type: 'text', text: 'The file could not be read.' })
   await sendUserMessage(app.window, 'Read the missing file.')
-  const activity = app.window.getByRole('button', {
-    name: 'Agent activity: 1 tool failed',
-    exact: true
-  })
-  await expect(activity).toBeVisible()
-  // A live group stays open; reopen only when restored/mounted as historical content.
-  if ((await activity.getAttribute('aria-expanded')) === 'false') await activity.click()
+  const activity = app.window.getByRole('region', { name: 'Agent activity', exact: true })
+  await expect(activity.getByRole('status')).toHaveText('1 tool failed')
   // A failed read has no panel: its invocation header and error line are the whole row.
   await expect(app.window.getByText('(missing-e2e-file.txt)', { exact: true })).toBeVisible()
   await expect(app.window.locator('.agent-activity__result--error')).toContainText(

@@ -82,9 +82,6 @@ test('user denies then approves a write when reviewing operations, then only the
     .getByRole('group', { name: 'Approval for Write', exact: true })
     .last()
   await expect(nextApproval.getByLabel('Proposed file content')).toHaveText('approved bytes')
-  await app.window
-    .getByRole('button', { name: 'Agent activity: Waiting for your approval', exact: true })
-    .click()
   await expect(nextApproval.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible()
   await nextApproval.getByRole('button', { name: 'Allow once', exact: true }).focus()
   await app.window.keyboard.press('Enter')
