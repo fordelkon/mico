@@ -7,7 +7,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from '@mico/ui'
-import { BrainIcon, CircleOffIcon, LightbulbIcon } from 'lucide-react'
+import { CircleOffIcon, LightbulbIcon } from 'lucide-react'
 import * as React from 'react'
 
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
@@ -43,17 +43,6 @@ const descriptions = {
   max: 'Maximum reasoning for the most demanding tasks'
 } satisfies Record<Exclude<ThinkingSelection, 'default'>, string>
 
-const shortLabels = {
-  none: 'Off',
-  auto: 'On',
-  minimal: 'Min',
-  low: 'Low',
-  medium: 'Med',
-  high: 'High',
-  xhigh: 'X High',
-  max: 'Max'
-} satisfies Record<Exclude<ThinkingSelection, 'default'>, string>
-
 function ThinkingSelector({
   disabled,
   onValueChange,
@@ -68,17 +57,12 @@ function ThinkingSelector({
       <DropdownMenuTrigger asChild>
         <Button
           aria-label={`Thinking effort: ${labels[selected]}`}
-          className={
-            selected === 'none'
-              ? 'h-8 gap-1.5 px-2 text-xs'
-              : 'h-8 gap-1.5 bg-accent px-2 text-xs text-accent-foreground hover:bg-accent'
-          }
+          className="h-8 gap-1.5 px-2 text-xs font-normal text-text-secondary"
           disabled={disabled}
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
-          <BrainIcon aria-hidden="true" className="size-3.5" />
-          <span>{`Reasoning · ${shortLabels[selected]}`}</span>
+          <span>{labels[selected]}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

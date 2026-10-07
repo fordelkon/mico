@@ -6,6 +6,8 @@ import * as React from 'react'
 
 import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
 import { EmptyConversation } from './empty-conversation'
+import { ProjectSelector } from './composer/project-selector'
+import { ChatApproval } from './composer/chat-approval'
 import './chat-main.css'
 
 const SubscribedChatMessageList = React.lazy(async () => {
@@ -33,6 +35,15 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
   const retry = response.status === 'retrying' && isForActiveConversation ? response : undefined
   const composer = (
     <ChatComposer
+      approval={
+        session.activeConversation && session.activeChat ? (
+          <ChatApproval
+            key={session.activeConversation.id}
+            chat={session.activeChat}
+            isActive={isActiveResponse}
+          />
+        ) : undefined
+      }
       permissionMode={session.permissionMode}
       onPermissionModeChange={session.setPermissionMode}
       canAddProject={!session.activeConversation}
@@ -61,6 +72,23 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
       {session.activationError && <p role="alert">{session.activationError}</p>}
       {session.activeConversation ? (
         <>
+          {session.activeProject && (
+            <header
+              aria-label="Conversation workspace"
+              className="shrink-0 px-4 py-2 sm:px-6"
+              role="group"
+            >
+              <div className="mx-auto w-full max-w-[50rem]">
+                <ProjectSelector
+                  canAddProject={false}
+                  projectId={session.activeProject.id}
+                  projectLabel={session.activeProject.name}
+                  projectPath={session.activeProject.rootPath}
+                  projects={session.projects}
+                />
+              </div>
+            </header>
+          )}
           <div
             className="chat-paper__conversation flex min-h-0 flex-1"
             key={session.activeConversation.id}

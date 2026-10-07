@@ -1,7 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Chat } from '@ai-sdk/react'
+import type { MicoUIMessage } from '@renderer/types/chat'
+import type { ToolPermissionData } from '@shared/ai/permissions'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
@@ -64,6 +67,38 @@ function createResponseSlice(): ChatResponseSlice {
   }
 }
 
+const pendingPermission: ToolPermissionData = {
+  approvalId: '00000000-0000-4000-8000-000000000001',
+  toolCallId: 'bash-approval',
+  toolName: 'Bash',
+  cwd: '/workspace',
+  input: { command: 'echo approval-demo' },
+  reason: 'This command runs on your computer.',
+  state: 'pending'
+}
+
+function approvalMessage(permissions: ToolPermissionData[]): MicoUIMessage {
+  return {
+    id: 'assistant-approval',
+    role: 'assistant',
+    parts: [
+      ...[
+        ...new Map(permissions.map((permission) => [permission.toolCallId, permission])).values()
+      ].map((permission) => ({
+        type: 'dynamic-tool' as const,
+        toolName: permission.toolName,
+        toolCallId: permission.toolCallId,
+        state: 'input-available' as const,
+        input: permission.input
+      })),
+      ...permissions.map((permission) => ({
+        type: 'data-tool-permission' as const,
+        data: permission
+      }))
+    ]
+  }
+}
+
 describe('ChatMain', () => {
   beforeEach(() => {
     const library = {
@@ -111,6 +146,131 @@ describe('ChatMain', () => {
         }
       }
     })
+  })
+
+  it('user reviews a pending command when messages are visible, then approval controls stay outside the transcript', async () => {
+    const session = createSessionSlice()
+    session.activeChat = new Chat<MicoUIMessage>({
+      id: 'chat-approval',
+      messages: [approvalMessage([pendingPermission])]
+    })
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain session={session} responses={createResponseSlice()} />
+      </ProviderLibraryProvider>
+    )
+    const approval = screen.getByRole('group', { name: 'Pending tool approval' })
+    expect(within(approval).getByRole('button', { name: 'Allow once' })).toBeVisible()
+    const transcript = await screen.findByLabelText('Messages')
+    expect(within(transcript).queryByRole('button', { name: 'Allow once' })).not.toBeInTheDocument()
+    expect(within(transcript).queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument()
+  })
+
+  it('user answers one of two requests when decisions stream back, then only the next pending request remains', async () => {
+    const nextPermission = {
+      ...pendingPermission,
+      approvalId: '00000000-0000-4000-8000-000000000002',
+      toolCallId: 'bash-next',
+      input: { command: 'echo next-demo' }
+    }
+    const chat = new Chat<MicoUIMessage>({
+      id: 'chat-queue',
+      messages: [approvalMessage([pendingPermission, nextPermission])]
+    })
+    const session = { ...createSessionSlice(), activeChat: chat }
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain session={session} responses={createResponseSlice()} />
+      </ProviderLibraryProvider>
+    )
+    expect(
+      within(screen.getByRole('group', { name: 'Pending tool approval' })).getByLabelText('Command')
+    ).toHaveTextContent('echo approval-demo')
+    await act(async () => {
+      chat.messages = [
+        approvalMessage([
+          pendingPermission,
+          nextPermission,
+          { ...pendingPermission, state: 'approved' }
+        ])
+      ]
+    })
+    expect(
+      within(screen.getByRole('group', { name: 'Pending tool approval' })).getByLabelText('Command')
+    ).toHaveTextContent('echo next-demo')
+    await act(async () => {
+      chat.messages = [
+        approvalMessage([
+          { ...pendingPermission, state: 'approved' },
+          { ...nextPermission, state: 'denied' }
+        ])
+      ]
+    })
+    expect(screen.queryByRole('group', { name: 'Pending tool approval' })).not.toBeInTheDocument()
+  })
+
+  it('user changes conversations when approval is pending, then only the active turn can show the card', () => {
+    const session = {
+      ...createSessionSlice(),
+      activeChat: new Chat<MicoUIMessage>({
+        id: 'chat-switch',
+        messages: [approvalMessage([pendingPermission])]
+      })
+    }
+    const responses = createResponseSlice()
+    const { rerender } = render(
+      <ProviderLibraryProvider>
+        <ChatMain session={session} responses={responses} />
+      </ProviderLibraryProvider>
+    )
+    expect(screen.getByRole('group', { name: 'Pending tool approval' })).toBeVisible()
+    rerender(
+      <ProviderLibraryProvider>
+        <ChatMain
+          session={{
+            ...session,
+            activeConversation: { id: 'conversation-2', title: 'Other chat' },
+            activeChat: new Chat<MicoUIMessage>({ id: 'chat-other', messages: [] })
+          }}
+          responses={responses}
+        />
+      </ProviderLibraryProvider>
+    )
+    expect(screen.queryByRole('group', { name: 'Pending tool approval' })).not.toBeInTheDocument()
+    rerender(
+      <ProviderLibraryProvider>
+        <ChatMain session={session} responses={{ ...responses, response: { status: 'idle' } }} />
+      </ProviderLibraryProvider>
+    )
+    expect(screen.queryByRole('group', { name: 'Pending tool approval' })).not.toBeInTheDocument()
+  })
+
+  it('user opens a bound conversation when a workspace exists, then its entry appears once at the top', async () => {
+    const user = userEvent.setup()
+    const session = createSessionSlice()
+    session.activeProject = {
+      id: 'project-1',
+      name: 'Project one',
+      rootPath: '/projects/one',
+      isDefault: false
+    }
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain session={session} responses={createResponseSlice()} />
+      </ProviderLibraryProvider>
+    )
+    const workspace = screen.getByRole('group', { name: 'Conversation workspace' })
+    expect(
+      within(workspace).getByRole('button', { name: 'Workspace: Project one (/projects/one)' })
+    ).toBeVisible()
+    expect(
+      screen.getAllByRole('button', { name: 'Workspace: Project one (/projects/one)' })
+    ).toHaveLength(1)
+    await user.click(
+      within(workspace).getByRole('button', { name: 'Workspace: Project one (/projects/one)' })
+    )
+    expect(screen.getByText('This workspace is set for the current conversation.')).toBeVisible()
+    expect(screen.queryByRole('menuitem', { name: 'Add workspace' })).not.toBeInTheDocument()
   })
 
   it('user keeps the stop control when a response reconnects, then it stays visible', () => {

@@ -19,6 +19,7 @@ import { useComposerModelSelection } from './use-composer-model-selection'
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
 type ChatComposerProps = {
+  approval?: React.ReactNode
   permissionMode?: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
   canAddProject?: boolean
@@ -48,6 +49,7 @@ const rotatingPlaceholders = [
 ]
 
 function ChatComposer({
+  approval,
   permissionMode = 'default',
   onPermissionModeChange,
   canAddProject = false,
@@ -193,7 +195,22 @@ function ChatComposer({
       }}
     >
       <div className="mx-auto w-full max-w-[50rem]">
-        <div className="chat-composer__surface flex w-full flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
+        {canAddProject && (
+          <div className="chat-composer__context">
+            <ProjectSelector
+              canAddProject={canAddProject}
+              onAddProject={onAddProject}
+              onProjectSelected={onProjectSelected}
+              onProjectsRefresh={onProjectsRefresh}
+              projectId={projectId}
+              projectLabel={projectLabel}
+              projectPath={projectPath}
+              projects={projects}
+            />
+          </div>
+        )}
+        {approval}
+        <div className="chat-composer__surface relative flex w-full flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
           <ComposerAttachmentList
             disabled={mode !== 'send' || isSending}
             documents={documents}
@@ -201,7 +218,7 @@ function ChatComposer({
           />
           <div className="relative">
             <Textarea
-              className="min-h-16 max-h-40 resize-none border-0 px-2 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
+              className="min-h-10 max-h-40 resize-none border-0 px-2 py-2 pr-12 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
               ref={textareaRef}
               disabled={isDisabled}
               onBlur={() => setIsFocused(false)}
@@ -214,40 +231,13 @@ function ChatComposer({
             {showRotatingPlaceholder ? (
               <span
                 aria-hidden="true"
-                className="chat-composer__suggestion pointer-events-none absolute left-2 top-2.5 max-w-[calc(100%-1rem)] truncate text-[15px] leading-6 text-muted-foreground/80 select-none"
+                className="chat-composer__suggestion pointer-events-none absolute left-2 top-2 max-w-[calc(100%-4rem)] truncate text-[15px] leading-6 text-muted-foreground/80 select-none"
                 key={placeholderIndex}
               >
                 {rotatingPlaceholders[placeholderIndex]}
               </span>
             ) : null}
-          </div>
-          <div className="chat-composer__actions select-none px-0.5">
-            <ComposerAttachments
-              disabled={mode !== 'send' || isSending}
-              documents={documents}
-              onDocumentsChange={setDocuments}
-            />
-            <div className="chat-composer__generation">
-              <div className="flex min-w-0 flex-col gap-1">
-                <ChatModelSelector
-                  library={library}
-                  onSelect={selectModel}
-                  selectedModelId={currentModelId}
-                />
-                {selectionError ? (
-                  <p className="px-2 text-xs text-destructive">{selectionError}</p>
-                ) : null}
-              </div>
-              {reasoningCapabilities ? (
-                <ThinkingSelector
-                  disabled={mode !== 'send'}
-                  onValueChange={onThinkingEffortChange}
-                  reasoningCapabilities={reasoningCapabilities}
-                  value={thinkingEffort}
-                />
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center">
+            <div className="chat-composer__send">
               <IconTooltipButton
                 className="size-9"
                 disabled={
@@ -282,36 +272,53 @@ function ChatComposer({
             </p>
           ) : null}
         </div>
-        <div className="chat-composer__context">
-          <ProjectSelector
-            canAddProject={canAddProject}
-            onAddProject={onAddProject}
-            onProjectSelected={onProjectSelected}
-            onProjectsRefresh={onProjectsRefresh}
-            projectId={projectId}
-            projectLabel={projectLabel}
-            projectPath={projectPath}
-            projects={projects}
-          />
-          {onPermissionModeChange && projectPath && (
-            <div title="Manual asks before edits and commands. Accept edits allows ordinary workspace edits; commands still require approval.">
-              <RadioSelect
-                aria-label="Tool permissions"
-                align="end"
-                side="top"
-                sideOffset={8}
-                className="h-8 gap-1.5 px-2 text-xs"
-                contentClassName="min-w-40"
-                disabled={mode !== 'send' || isSending}
-                value={permissionMode}
-                onValueChange={onPermissionModeChange}
-                options={[
-                  { value: 'default', label: 'Manual' },
-                  { value: 'acceptEdits', label: 'Accept edits' }
-                ]}
+        <div className="chat-composer__actions">
+          <div className="chat-composer__tools">
+            <ComposerAttachments
+              disabled={mode !== 'send' || isSending}
+              documents={documents}
+              onDocumentsChange={setDocuments}
+            />
+            {onPermissionModeChange && projectPath && (
+              <div title="Manual asks before edits and commands. Accept edits allows ordinary workspace edits; commands still require approval.">
+                <RadioSelect
+                  aria-label="Tool permissions"
+                  align="end"
+                  side="top"
+                  sideOffset={8}
+                  className="h-8 gap-1.5 border-transparent bg-transparent px-2 text-xs font-normal shadow-none"
+                  contentClassName="min-w-40"
+                  disabled={mode !== 'send' || isSending}
+                  value={permissionMode}
+                  onValueChange={onPermissionModeChange}
+                  options={[
+                    { value: 'default', label: 'Manual' },
+                    { value: 'acceptEdits', label: 'Accept edits' }
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+          <div className="chat-composer__generation">
+            <div className="flex min-w-0 flex-col gap-1">
+              <ChatModelSelector
+                library={library}
+                onSelect={selectModel}
+                selectedModelId={currentModelId}
               />
+              {selectionError ? (
+                <p className="px-2 text-xs text-destructive">{selectionError}</p>
+              ) : null}
             </div>
-          )}
+            {reasoningCapabilities ? (
+              <ThinkingSelector
+                disabled={mode !== 'send'}
+                onValueChange={onThinkingEffortChange}
+                reasoningCapabilities={reasoningCapabilities}
+                value={thinkingEffort}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
     </form>

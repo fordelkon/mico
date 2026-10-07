@@ -34,12 +34,18 @@ function ToolPermissionCard({
   return (
     <div
       aria-label={`Approval for ${permission.toolName}`}
-      className="my-2 space-y-3 rounded-lg border border-border-subtle bg-background p-3 text-foreground"
+      className={
+        pending
+          ? 'space-y-3 rounded-lg border border-border-subtle bg-background p-3 text-foreground shadow-hairline'
+          : 'px-2 py-1 text-text-tertiary'
+      }
       role="group"
     >
-      <p className="text-sm font-medium" role="status">
+      <p className={pending ? 'text-sm font-medium' : 'text-xs'} role="status">
         {pending
-          ? 'Approval required'
+          ? permission.toolName === 'Bash'
+            ? 'Allow Mico to run this command?'
+            : `Allow Mico to use ${permission.toolName}?`
           : permission.state === 'pending' || permission.state === 'cancelled'
             ? 'Approval cancelled. The operation was not executed.'
             : permission.state === 'denied'
@@ -48,34 +54,36 @@ function ToolPermissionCard({
       </p>
       {pending && (
         <>
-          <p className="text-xs text-muted-foreground">{permission.reason}</p>
-          <p className="break-all font-mono text-xs">{permission.cwd}</p>
-          {input?.file_path !== undefined && (
-            <p className="break-all font-mono text-xs">{input.file_path}</p>
-          )}
-          {input?.command !== undefined ? (
-            <pre
-              aria-label="Command"
-              className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
-            >
-              {input.command}
-            </pre>
-          ) : input?.content !== undefined ? (
-            <pre
-              aria-label="Proposed file content"
-              className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
-            >
-              {input.content || '(Empty file)'}
-            </pre>
-          ) : (
-            <pre
-              aria-label="Tool arguments"
-              className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
-            >
-              {JSON.stringify(permission.input, null, 2)}
-            </pre>
-          )}
-          <div className="flex flex-wrap gap-2">
+          <div className="max-h-[min(20rem,40vh)] space-y-3 overflow-y-auto overscroll-contain">
+            <p className="text-xs text-muted-foreground">{permission.reason}</p>
+            <p className="break-all font-mono text-xs">{permission.cwd}</p>
+            {input?.file_path !== undefined && (
+              <p className="break-all font-mono text-xs">{input.file_path}</p>
+            )}
+            {input?.command !== undefined ? (
+              <pre
+                aria-label="Command"
+                className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
+              >
+                {input.command}
+              </pre>
+            ) : input?.content !== undefined ? (
+              <pre
+                aria-label="Proposed file content"
+                className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
+              >
+                {input.content || '(Empty file)'}
+              </pre>
+            ) : (
+              <pre
+                aria-label="Tool arguments"
+                className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
+              >
+                {JSON.stringify(permission.input, null, 2)}
+              </pre>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2">
             <Button
               disabled={submitting}
               onClick={() => void respond('deny')}

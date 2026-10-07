@@ -510,7 +510,7 @@ function ToolTrace({
       {(!isExpanded || activityState === 'failed' || activityState === 'incomplete') && (
         <ToolSummaryLine summary={summary} />
       )}
-      {part.permission && (
+      {part.permission && (part.permission.state !== 'pending' || !isActive) && (
         <ToolPermissionCard
           permission={part.permission}
           isActive={isActive}

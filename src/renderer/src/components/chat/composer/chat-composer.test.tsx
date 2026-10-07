@@ -428,20 +428,6 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('option', { name: 'Existing workspace' })).toBeVisible()
   })
 
-  it('user cannot add a workspace when a conversation has started, then the control is absent', async () => {
-    const user = userEvent.setup()
-    renderWorkspaceComposer({
-      canAddProject: false,
-      projectLabel: 'Project one',
-      projectPath: '/projects/one'
-    })
-
-    await user.click(screen.getByRole('button', { name: 'Workspace: Project one (/projects/one)' }))
-
-    expect(screen.getByText('This workspace is set for the current conversation.')).toBeVisible()
-    expect(screen.queryByRole('menuitem', { name: 'Add workspace' })).toBeNull()
-  })
-
   it('user sees rotating suggestions when the composer is blank, then focusing shows the placeholder', async () => {
     vi.useFakeTimers()
     try {
