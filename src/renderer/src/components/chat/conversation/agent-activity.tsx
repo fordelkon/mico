@@ -1,6 +1,4 @@
-import { Button } from '@mico/ui'
 import type { ReasoningUIPart } from 'ai'
-import { CheckIcon, ChevronDownIcon, CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
 import { toolLabel } from '@shared/ai/tool-presentation'
 
@@ -99,21 +97,8 @@ function AgentActivityTimeline({
   parts: AgentActivityPart[]
 }): React.JSX.Element {
   const isLive = isStreaming && !isSettled
-  // Live runs start open. Untouched runs compact when they settle, while any
-  // explicit disclosure choice remains authoritative.
-  const [expanded, setExpanded] = React.useState(isLive)
-  const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
-  const userControlledDisclosure = React.useRef(false)
-  React.useEffect(() => {
-    if (!isLive && !userControlledDisclosure.current) {
-      setAnimateDisclosure(false)
-      setExpanded(false)
-    }
-  }, [isLive])
-  const contentId = `agent-activity-${id}`
   const tools = parts.filter((part): part is ToolActivityPart => part.type === 'dynamic-tool')
   const awaitingApproval = isLive && tools.some((part) => part.permission?.state === 'pending')
-  const isExpanded = expanded || awaitingApproval
   const failed = tools.filter((part) => getToolActivityState(part, isLive) === 'failed').length
   const incomplete = tools.filter(
     (part) => getToolActivityState(part, isLive) === 'incomplete'
@@ -144,53 +129,18 @@ function AgentActivityTimeline({
   ]
     .filter(Boolean)
     .join(' · ')
-  const OutcomeIcon = failed || incomplete ? CircleAlertIcon : CheckIcon
   return (
     <section
       aria-label="Agent activity"
       className="agent-activity"
       data-live={isLive}
-      data-open={isExpanded}
-      data-animate-disclosure={animateDisclosure}
       data-testid="agent-activity-event"
     >
-      <Button
-        aria-label={`Agent activity: ${label}`}
-        aria-controls={contentId}
-        aria-expanded={isExpanded}
-        className="agent-activity__header hover:bg-transparent hover:text-text-secondary aria-expanded:bg-transparent aria-expanded:text-text-secondary"
-        variant="ghost"
-        onClick={(event) => {
-          userControlledDisclosure.current = true
-          setAnimateDisclosure(event.detail > 0)
-          setExpanded((current) => !current)
-        }}
-      >
-        {isLive ? (
-          <span aria-hidden="true" className="agent-activity__live-dot" />
-        ) : (
-          <OutcomeIcon
-            aria-hidden="true"
-            className={
-              failed ? 'agent-activity__step-icon text-destructive' : 'agent-activity__step-icon'
-            }
-          />
-        )}
-        <span className="agent-activity__heading" title={label}>
-          {label}
-        </span>
-        <ChevronDownIcon aria-hidden="true" className="agent-activity__group-chevron size-3.5" />
-      </Button>
       <span className="sr-only" role="status">
         {label}
       </span>
-      <div className="agent-activity__body" id={contentId}>
-        <div
-          aria-hidden={!isExpanded}
-          className="agent-activity__body-inner"
-          inert={!isExpanded}
-          role="list"
-        >
+      <div className="agent-activity__timeline">
+        <div className="agent-activity__body-inner" role="list">
           {toTimelineSegments(parts).map((segment, index) => (
             <div
               className="agent-activity__item"

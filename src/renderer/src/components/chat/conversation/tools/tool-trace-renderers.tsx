@@ -15,12 +15,14 @@ function searchDetails(content: string): string {
 }
 
 function ToolTracePresentationView({
+  command,
   isDraft = false,
   isStreaming = false,
   liveOutput,
   path,
   presentation
 }: {
+  command?: string
   isDraft?: boolean
   isStreaming?: boolean
   liveOutput?: { preview: string; stderr: string; stdout: string }
@@ -40,6 +42,7 @@ function ToolTracePresentationView({
   if (presentation.type === 'bash')
     return (
       <BashToolTrace
+        command={command}
         isStreaming={isStreaming}
         output={liveOutput ? liveOutput.stdout : presentation.content}
         stderr={liveOutput?.stderr}

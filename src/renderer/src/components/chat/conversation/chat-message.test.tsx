@@ -168,9 +168,10 @@ describe('ChatMessage', () => {
       { isStreaming: true }
     )
 
-    expect(
-      screen.getByRole('button', { name: 'Agent activity: Reasoning finished' })
-    ).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
     expect(screen.getByTestId('thinking-panel').firstElementChild).toHaveAttribute(
       'aria-hidden',
       'true'
@@ -186,7 +187,7 @@ describe('ChatMessage', () => {
       { isStreaming: true }
     )
 
-    expect(screen.getByRole('button', { name: 'Agent activity: Reasoning finished' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Thought' })).toBeVisible()
     expect(screen.getByTestId('thinking-panel').firstElementChild).toHaveAttribute(
       'aria-hidden',
       'true'
@@ -277,9 +278,9 @@ describe('ChatMessage', () => {
       { isStreaming: true, id: 'assistant-interim' }
     )
 
-    expect(screen.getByRole('button', { name: 'Agent activity: Thinking' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Thinking' })).toHaveAttribute(
       'aria-expanded',
-      'true'
+      'false'
     )
 
     rerender(
@@ -297,13 +298,14 @@ describe('ChatMessage', () => {
       />
     )
 
-    // The untouched finished group compacts when the next step starts.
-    expect(
-      screen.getByRole('button', { name: 'Agent activity: Reasoning finished' })
-    ).toHaveAttribute('aria-expanded', 'false')
+    // Finished reasoning keeps its own compact disclosure when the next step starts.
+    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
     expect(screen.getAllByRole('status')).toHaveLength(2)
 
-    expect(screen.queryByRole('button', { name: 'Thought' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Thought' })).toBeVisible()
     expect(screen.getByText('Reading file…')).toBeVisible()
     expect(screen.getByText('(src/index.ts)')).toBeVisible()
   })

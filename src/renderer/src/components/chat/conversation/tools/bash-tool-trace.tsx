@@ -4,11 +4,13 @@ import { ChatCodeBlock } from '../../markdown/chat-code-block'
 import { stripTerminalControlSequences } from './terminal-output'
 
 function BashToolTrace({
+  command,
   isStreaming = false,
   output,
   stderr,
   isTruncated
 }: {
+  command?: string
   isStreaming?: boolean
   output: string
   stderr?: string
@@ -40,6 +42,11 @@ function BashToolTrace({
 
   return (
     <div aria-busy={isStreaming} className="tool-trace__detail overflow-hidden">
+      {command ? (
+        <pre aria-label="Command" className="tool-trace__command font-mono">
+          {command}
+        </pre>
+      ) : null}
       <div
         aria-label="Terminal output"
         aria-live="off"

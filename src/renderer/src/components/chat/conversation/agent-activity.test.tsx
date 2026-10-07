@@ -196,48 +196,34 @@ describe('ToolTrace', () => {
     expect(diff).toHaveTextContent('after')
   })
 
-  it('user sees recent bash output when the call completes, then details do not repeat the command', () => {
-    render(
+  it('user opens a compact command when output streams, then updates preserve the expanded detail', () => {
+    const part = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'compact-stream',
+      toolName: 'Bash',
+      input: { command: 'pnpm test' }
+    }
+    const { rerender } = render(
       <ToolTrace
         part={{
-          type: 'dynamic-tool',
-          toolCallId: 'call-3',
-          toolName: 'Bash',
-          state: 'output-available',
-          input: { command: 'pnpm test' },
-          output: 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6'
+          ...part,
+          state: 'input-available',
+          liveOutput: { preview: '', stdout: 'first line', stderr: '' }
         }}
       />
     )
-
-    const note = screen.getByText('+1 earlier line')
-    expect(note.parentElement).toHaveTextContent('line 2')
-    expect(note.parentElement).toHaveTextContent('line 6')
-    expect(note.parentElement).not.toHaveTextContent('line 1')
-    fireEvent.click(screen.getByRole('button', { name: 'Bash pnpm test Output available' }))
-    expect(screen.queryByText('Command')).not.toBeInTheDocument()
-    expect(screen.getByText('Output')).toBeVisible()
-    expect(screen.getAllByTitle('pnpm test')).toHaveLength(1)
-    expect(screen.getByRole('log', { name: 'Terminal output' })).toHaveTextContent('line 1')
-  })
-
-  it('user sees the true output tail when a completed command is very long, then early content stays hidden', () => {
-    const { container } = render(
-      <ToolTrace
-        part={{
-          type: 'dynamic-tool',
-          toolCallId: 'long-bash-tail',
-          toolName: 'Bash',
-          state: 'output-available',
-          input: { command: 'cargo test' },
-          output: `EARLIEST MARKER\n${'filler\n'.repeat(500)}UNIQUE FINAL RESULT`
-        }}
-      />
+    expect(screen.queryByText('first line')).not.toBeInTheDocument()
+    const trigger = screen.getByRole('button', { name: 'Bash pnpm test Live output' })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('log')).toHaveTextContent('first line')
+    rerender(
+      <ToolTrace part={{ ...part, state: 'output-available', output: 'first line\nlast line' }} />
     )
-
-    const summary = container.querySelector('.agent-activity__result--output')
-    expect(summary).toHaveTextContent('UNIQUE FINAL RESULT')
-    expect(summary).not.toHaveTextContent('EARLIEST MARKER')
+    expect(screen.getByRole('button', { name: 'Bash pnpm test Output available' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    expect(screen.getByRole('log')).toHaveTextContent('last line')
   })
 
   it('user scans a workspace command when it includes a directory wrapper, then sees the meaningful action first', () => {
@@ -265,7 +251,7 @@ describe('ToolTrace', () => {
   })
 
   it('user sees a failed command when stderr is available, then the actionable final line is visible', () => {
-    const { container } = render(
+    render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
@@ -283,7 +269,7 @@ describe('ToolTrace', () => {
       />
     )
 
-    const result = container.querySelector('.agent-activity__result--error')
+    const result = screen.getByText('Command exited with code 1').parentElement
     expect(result).toHaveTextContent('Command exited with code 1')
     expect(result).toHaveTextContent('error: could not compile `quicksort-demo`')
   })
@@ -306,8 +292,8 @@ describe('ToolTrace', () => {
     expect(document.body.textContent).not.toContain(String.fromCodePoint(27))
   })
 
-  it('user views a collapsed command when output has formatting controls, then sees clean text', () => {
-    const { container } = render(
+  it('user expands a command when output has formatting controls, then sees clean text', () => {
+    render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
@@ -320,7 +306,8 @@ describe('ToolTrace', () => {
       />
     )
 
-    const summary = container.querySelector('.agent-activity__result--output')
+    fireEvent.click(screen.getByRole('button', { name: /^Bash / }))
+    const summary = screen.getByRole('log', { name: 'Terminal output' })
     expect(summary).toHaveTextContent('-error')
     expect(summary).toHaveTextContent('+formatted')
     expect(summary).not.toHaveTextContent('\u001b')
@@ -328,7 +315,7 @@ describe('ToolTrace', () => {
   })
 
   it('user views terminal hyperlinks when output contains OSC controls, then only the visible label remains', () => {
-    const { container } = render(
+    render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
@@ -341,7 +328,8 @@ describe('ToolTrace', () => {
       />
     )
 
-    const summary = container.querySelector('.agent-activity__result--output')
+    fireEvent.click(screen.getByRole('button', { name: /^Bash / }))
+    const summary = screen.getByRole('log', { name: 'Terminal output' })
     expect(summary).toHaveTextContent('visible link')
     expect(summary).toHaveTextContent('finished')
     expect(summary).not.toHaveTextContent('secret.example')
@@ -370,8 +358,8 @@ describe('ToolTrace', () => {
     expect(screen.getByRole('log', { name: 'Tool output' })).toHaveTextContent('temperature')
   })
 
-  it('user revisits a persisted command when output is restored, then its recent result stays visible', () => {
-    const { container } = render(
+  it('user expands a persisted command when output is restored, then its result is available', () => {
+    render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
@@ -396,12 +384,13 @@ describe('ToolTrace', () => {
         name: 'Bash cargo --version && rustc --version Output available'
       })
     ).toBeVisible()
-    const summary = container.querySelector('.agent-activity__result--output')
+    fireEvent.click(screen.getByRole('button', { name: /^Bash / }))
+    const summary = screen.getByRole('log', { name: 'Terminal output' })
     expect(summary).toHaveTextContent('cargo 1.95.0')
     expect(summary).toHaveTextContent('rustc 1.95.0')
   })
 
-  it('user sees recent output when a command runs, then full stdout and stderr remain inspectable', () => {
+  it('user expands a running command when output arrives, then stdout and stderr are available', () => {
     render(
       <ToolTrace
         part={{
@@ -419,11 +408,6 @@ describe('ToolTrace', () => {
       />
     )
 
-    const note = screen.getByText('+2 earlier lines')
-    expect(note.parentElement).toHaveTextContent('line 3')
-    expect(note.parentElement).toHaveTextContent('12 tests passed')
-    expect(note.parentElement).toHaveTextContent('warning: cached')
-    expect(note.parentElement).not.toHaveTextContent('line 1')
     expect(screen.queryByRole('log')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Bash pnpm test Live output' }))
     const output = screen
@@ -436,9 +420,9 @@ describe('ToolTrace', () => {
     expect(screen.getAllByRole('log')).toHaveLength(1)
   })
 
-  it('user waits for a long command when output streams, then sees elapsed time and line volume', async () => {
+  it('user waits for a command when output streams, then elapsed time stays visible', async () => {
     vi.useFakeTimers()
-    const { container } = render(
+    render(
       <ToolTrace
         part={{
           type: 'dynamic-tool',
@@ -453,8 +437,10 @@ describe('ToolTrace', () => {
 
     await act(() => vi.advanceTimersByTimeAsync(2_100))
 
-    expect(container.querySelector('.agent-activity__result-meta')).toHaveTextContent(
-      '2 lines · 2s'
+    expect(screen.getByText('2s')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Bash cargo test Live output' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
     )
   })
 
@@ -617,7 +603,6 @@ describe('AgentActivityTimeline', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Agent activity: Reasoning finished' }))
     const reasoning = screen.getByRole('button', { name: 'Reasoning · 2 steps' })
     expect(screen.queryByRole('button', { name: 'Thought' })).not.toBeInTheDocument()
     fireEvent.click(reasoning)
@@ -727,40 +712,10 @@ describe('AgentActivityTimeline', () => {
       />
     )
     expect(screen.getByRole('status')).toHaveTextContent('Read 1 file')
-    expect(screen.getByRole('button', { name: 'Agent activity: Read 1 file' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
+    expect(screen.getByRole('button', { name: 'Read src/index.ts Read 1 line.' })).toBeVisible()
   })
 
-  it('user reopens a live step when inspecting it, then settling preserves that choice', () => {
-    const tool = {
-      type: 'dynamic-tool' as const,
-      toolCallId: 'bash-inspected',
-      toolName: 'Bash',
-      state: 'input-available' as const,
-      input: { command: 'pnpm test' }
-    }
-    const { rerender } = render(<AgentActivityTimeline id="inspected" isStreaming parts={[tool]} />)
-    const liveHeader = screen.getByRole('button', { name: 'Agent activity: Running pnpm test' })
-
-    fireEvent.click(liveHeader)
-    fireEvent.click(liveHeader)
-    rerender(
-      <AgentActivityTimeline
-        id="inspected"
-        isStreaming={false}
-        parts={[{ ...tool, state: 'output-available', output: 'Tests passed' }]}
-      />
-    )
-
-    expect(screen.getByRole('button', { name: 'Agent activity: Ran 1 command' })).toHaveAttribute(
-      'aria-expanded',
-      'true'
-    )
-  })
-
-  it('user sees a model step summarize when it finishes, then expanding it reveals tool details', () => {
+  it('user revisits a finished step when tools are present, then each tool is directly expandable', () => {
     render(
       <AgentActivityTimeline
         id="step-1"
@@ -787,12 +742,7 @@ describe('AgentActivityTimeline', () => {
       />
     )
 
-    const activity = screen.getByRole('button', {
-      name: 'Agent activity: Read 1 file · Ran 1 command'
-    })
-    expect(activity).toHaveAttribute('aria-expanded', 'false')
-
-    fireEvent.click(activity)
+    expect(screen.queryByRole('button', { name: /^Agent activity:/ })).not.toBeInTheDocument()
 
     expect(screen.getByText('Read 1 line.')).toBeVisible()
     const run = screen.getByRole('button', { name: 'Bash pnpm test Output available' })
@@ -830,9 +780,6 @@ describe('Read group collapsing', () => {
         ]}
       />
     )
-
-    const activity = screen.getByRole('button', { name: 'Agent activity: Read 2 files' })
-    fireEvent.click(activity)
 
     const group = screen.getByRole('button', { name: 'Read 2 files' })
     expect(group).toHaveAttribute('aria-expanded', 'false')
@@ -895,43 +842,12 @@ describe('Read group collapsing', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Agent activity: 2 tools not completed' }))
     expect(screen.getByRole('button', { name: '2 file reads · 2 not completed' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Read 2 files' })).not.toBeInTheDocument()
   })
 })
 
 describe('Activity disclosure and outcomes', () => {
-  it('user closes a live group when tools arrive, then it stays closed through completion', () => {
-    const { rerender } = render(<AgentActivityTimeline id="live" isStreaming parts={[]} />)
-    const header = screen.getByRole('button', { name: 'Agent activity: Thinking' })
-    header.focus()
-    fireEvent.click(header)
-    const tool = {
-      type: 'dynamic-tool' as const,
-      toolCallId: 'read',
-      toolName: 'Read',
-      state: 'input-available' as const,
-      input: { file_path: 'package.json' }
-    }
-    rerender(<AgentActivityTimeline id="live" isStreaming parts={[tool]} />)
-    expect(
-      screen.getByRole('button', { name: 'Agent activity: Reading package.json' })
-    ).toHaveAttribute('aria-expanded', 'false')
-    rerender(
-      <AgentActivityTimeline
-        id="live"
-        isStreaming={false}
-        parts={[{ ...tool, state: 'output-available', output: '{}' }]}
-      />
-    )
-    expect(screen.getByRole('button', { name: 'Agent activity: Read 1 file' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
-    expect(header).toHaveFocus()
-  })
-
   it('user opens a live tool when inspecting output, then it stays open after completion', () => {
     const part = {
       type: 'dynamic-tool' as const,
@@ -968,7 +884,6 @@ describe('Activity disclosure and outcomes', () => {
         ]}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Agent activity: 1 tool failed' }))
     expect(screen.getByText('Could not edit index.ts. Read the file and try again.')).toBeVisible()
     expect(screen.queryByText('Applied change 1')).not.toBeInTheDocument()
   })
@@ -989,7 +904,6 @@ describe('Activity disclosure and outcomes', () => {
         ]}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Agent activity: 1 tool not completed' }))
     expect(screen.getByRole('button', { name: 'Bash pnpm test Not completed.' })).toBeVisible()
     expect(screen.queryByText('Completed.')).not.toBeInTheDocument()
   })
@@ -1018,15 +932,12 @@ describe('Activity disclosure and outcomes', () => {
         ]}
       />
     )
-    expect(
-      screen.getByRole('button', { name: 'Agent activity: Reading package.json' })
-    ).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('button', { name: 'Reading 2 files…' })).toBeVisible()
   })
 })
 
 describe('Unfinished tool details', () => {
-  it('user opens a multiline command when output is pending, then the invocation stays compact', () => {
+  it('user opens a multiline command when output is pending, then the full command is available', () => {
     render(
       <ToolTrace
         part={{
@@ -1039,7 +950,7 @@ describe('Unfinished tool details', () => {
       />
     )
     fireEvent.click(screen.getByRole('button', { name: 'Bash pnpm test Running…' }))
-    expect(screen.queryByText(/printf finished/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Command')).toHaveTextContent('printf finished')
     expect(screen.getByText('Waiting for output…')).toBeVisible()
   })
 

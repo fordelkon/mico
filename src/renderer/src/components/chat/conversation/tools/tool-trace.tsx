@@ -391,8 +391,7 @@ function getToolActivityLabel(part: ToolActivityPart): string {
   return [action ?? toolLabel(part.toolName), target].filter(Boolean).join(' ')
 }
 
-/** The shared trace row: an icon node header with the invocation label, an always
- * visible result line, and an opt-in panel delegating to the tool's renderer. */
+/** Compact invocation with opt-in details; failures remain visible for recovery. */
 function ToolTrace({
   part,
   isActive = true,
@@ -466,10 +465,29 @@ function ToolTrace({
   const header = (
     <>
       <ToolNode state={nodeState} toolName={part.toolName} />
-      <span className="agent-activity__action">{tool.title}</span>
+      <span className="agent-activity__action">
+        {part.toolName === 'Bash'
+          ? activityState === 'completed'
+            ? 'Ran'
+            : activityState === 'awaiting-approval'
+              ? 'Awaiting approval'
+              : activityState === 'preparing'
+                ? 'Preparing'
+                : activityState === 'failed'
+                  ? 'Failed to run'
+                  : activityState === 'incomplete'
+                    ? 'Stopped'
+                    : 'Running'
+          : tool.title}
+      </span>
       {tool.detail ? (
         <span className="agent-activity__summary font-mono" title={tool.fullDetail ?? tool.detail}>
           ({tool.detail})
+        </span>
+      ) : null}
+      {isRunning && elapsedSeconds > 0 ? (
+        <span aria-hidden="true" className="text-xs text-text-tertiary">
+          {elapsedSeconds}s
         </span>
       ) : null}
       {hasPanel ? (
@@ -507,9 +525,9 @@ function ToolTrace({
           {header}
         </div>
       )}
-      {(!isExpanded || activityState === 'failed' || activityState === 'incomplete') && (
-        <ToolSummaryLine summary={summary} />
-      )}
+      {(activityState === 'failed' ||
+        activityState === 'incomplete' ||
+        (!isExpanded && part.toolName !== 'Bash')) && <ToolSummaryLine summary={summary} />}
       {part.permission && (part.permission.state !== 'pending' || !isActive) && (
         <ToolPermissionCard
           permission={part.permission}
@@ -526,8 +544,9 @@ function ToolTrace({
             inert={!isExpanded}
           >
             {presentation != null
-              ? (!isFileTool || hasOpened) && (
+              ? hasOpened && (
                   <ToolTracePresentationView
+                    command={input.success ? input.data.command : undefined}
                     isDraft={activityState !== 'completed'}
                     isStreaming={isRunning}
                     liveOutput={part.liveOutput}
