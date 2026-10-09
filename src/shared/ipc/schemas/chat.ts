@@ -1,13 +1,12 @@
-import { IpcChannel } from '../../IpcChannel'
-import type { IpcMethod } from '../contracts'
-import * as z from 'zod'
-
 import type { UIMessageChunk } from 'ai'
+import * as z from 'zod'
+import { PermissionModeSchema } from '../../ai/permissions'
+import { defineSchema } from '../../data/define'
 
 import { ChatUserMessageSchema, ThinkingSelectionSchema } from '../../data/schemas/chat'
-import { defineSchema } from '../../data/define'
 import { SessionIdSchema } from '../../data/schemas/session'
-import { PermissionModeSchema } from '../../ai/permissions'
+import { IpcChannel } from '../../IpcChannel'
+import type { IpcMethod } from '../contracts'
 
 type TurnTerminalEvent =
   | { type: 'cancelled'; requestId: string }
@@ -82,6 +81,7 @@ type TurnStartRequest = z.infer<typeof TurnStartRequestSchema>
 
 interface ChatAPI {
   getCapabilities: IpcMethod<IpcChannel.Chat_GetCapabilities>
+  getSkillCatalog: IpcMethod<IpcChannel.Chat_GetSkillCatalog>
   startTurn: IpcMethod<IpcChannel.Chat_StartTurn>
   abortTurn: IpcMethod<IpcChannel.Chat_AbortTurn>
   respondToPermission: IpcMethod<IpcChannel.Chat_RespondToPermission>
@@ -89,13 +89,13 @@ interface ChatAPI {
 }
 
 export {
-  TurnRequestIdSchema,
-  TurnStartRequestSchema,
-  TurnStreamEventSchema,
-  ToolOutputDeltaDataSchema,
   type ChatAPI,
+  type ToolOutputDeltaData,
+  ToolOutputDeltaDataSchema,
+  TurnRequestIdSchema,
   type TurnStartRequest,
+  TurnStartRequestSchema,
   type TurnStreamEvent,
-  type TurnTerminalEvent,
-  type ToolOutputDeltaData
+  TurnStreamEventSchema,
+  type TurnTerminalEvent
 }

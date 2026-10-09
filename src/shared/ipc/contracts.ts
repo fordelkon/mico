@@ -1,7 +1,6 @@
 import * as z from 'zod'
-
-import { IpcChannel } from '../IpcChannel'
 import { PermissionResponseSchema } from '../ai/permissions'
+import { SkillCatalogRequestSchema, SkillCatalogSchema } from '../ai/skills'
 import { ModelReasoningCapabilitiesSchema, ThinkingSelectionSchema } from '../data/schemas/chat'
 import { AppearancePreferenceSchema } from '../data/schemas/preference'
 import {
@@ -19,6 +18,7 @@ import {
 } from '../data/schemas/session'
 import { ThemePreferencesSchema, ThemeStateSchema } from '../data/schemas/theme'
 import { WorkspaceProjectSchema } from '../data/schemas/workspace'
+import { IpcChannel } from '../IpcChannel'
 import { CodeDocumentPartsSchema } from './schemas/attachments'
 import { TurnRequestIdSchema, TurnStartRequestSchema } from './schemas/chat'
 import {
@@ -53,6 +53,10 @@ const taskSchemas = {
   },
   [IpcChannel.Attachments_PickCodeDocuments]: { input: empty, output: CodeDocumentPartsSchema },
   [IpcChannel.Chat_StartTurn]: { input: TurnStartRequestSchema, output: completion },
+  [IpcChannel.Chat_GetSkillCatalog]: {
+    input: SkillCatalogRequestSchema,
+    output: SkillCatalogSchema
+  },
   [IpcChannel.Chat_GetCapabilities]: {
     input: SessionIdSchema.optional(),
     output: ModelReasoningCapabilitiesSchema.nullable()
@@ -127,11 +131,11 @@ function outputSchema<C extends InvokeChannel>(channel: C): z.ZodType<IpcOutput<
 }
 
 export {
-  inputSchema,
-  outputSchema,
   type InvokeChannel,
-  type IpcInput,
-  type IpcOutput,
   type IpcArgs,
-  type IpcMethod
+  type IpcInput,
+  type IpcMethod,
+  type IpcOutput,
+  inputSchema,
+  outputSchema
 }

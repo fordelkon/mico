@@ -1,6 +1,6 @@
-import { IconTooltipButton, IconSwap, RadioSelect, Textarea } from '@mico/ui'
-import { ArrowUpIcon, SquareIcon } from 'lucide-react'
-import * as React from 'react'
+import { IconSwap, IconTooltipButton, RadioSelect, Textarea } from '@mico/ui'
+import type { PermissionMode } from '@shared/ai/permissions'
+import type { ChatSkillInvocationPart } from '@shared/ai/skills'
 
 import type {
   ChatDocumentPart,
@@ -8,13 +8,14 @@ import type {
   ThinkingSelection
 } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import type { PermissionMode } from '@shared/ai/permissions'
-
+import { ArrowUpIcon, SquareIcon } from 'lucide-react'
+import * as React from 'react'
 import { ChatModelSelector } from './chat-model-selector'
 import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
 import { ProjectSelector } from './project-selector'
 import { ThinkingSelector } from './thinking-selector'
 import { useComposerModelSelection } from './use-composer-model-selection'
+import { useComposerSkills } from './use-composer-skills'
 
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
@@ -35,7 +36,11 @@ type ChatComposerProps = {
   projects?: WorkspaceProject[]
   selectedModelEntryId?: string | null
   selectSessionModel?: (modelEntryId: string) => Promise<void>
-  onSend: (content: { text: string; documents: ChatDocumentPart[] }) => Promise<boolean>
+  onSend: (content: {
+    text: string
+    documents: ChatDocumentPart[]
+    skillInvocation?: ChatSkillInvocationPart['data']
+  }) => Promise<boolean>
   onStop: () => void
   reasoningCapabilities: ModelReasoningCapabilities | null
   thinkingEffort: ThinkingSelection
@@ -74,6 +79,12 @@ function ChatComposer({
   const { currentModelId, hasSelectedModel, library, selectionError, selectModel } =
     useComposerModelSelection({ onModelSelected, selectedModelEntryId, selectSessionModel })
   const [draft, setDraft] = React.useState('')
+  const skills = useComposerSkills(projectId, draft)
+  const skillMenuId = React.useId()
+  const activeSkillRef = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => {
+    if (skills.isOpen) activeSkillRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [skills.isOpen, skills.selectedIndex, draft])
   const [documents, setDocuments] = React.useState<ChatDocumentPart[]>([])
   const [isSending, setIsSending] = React.useState(false)
   const [sendError, setSendError] = React.useState<string | null>(null)
@@ -114,6 +125,10 @@ function ChatComposer({
       const isEditableTarget =
         target instanceof HTMLElement &&
         (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
+      const isActivatingControl =
+        event.key === ' ' &&
+        target instanceof HTMLElement &&
+        Boolean(target.closest('button, summary, a[href], [role="button"]'))
 
       if (
         mode !== 'send' ||
@@ -124,7 +139,8 @@ function ChatComposer({
         event.ctrlKey ||
         event.metaKey ||
         event.key.length !== 1 ||
-        isEditableTarget
+        isEditableTarget ||
+        isActivatingControl
       )
         return
 
@@ -165,7 +181,11 @@ function ChatComposer({
     setIsSending(true)
     setSendError(null)
     try {
-      if (await onSend({ text: draft, documents })) {
+      const skillInvocation = skills.resolveInvocation()
+      const content = skillInvocation
+        ? { text: draft, documents, skillInvocation }
+        : { text: draft, documents }
+      if (await onSend(content)) {
         setDraft('')
         setDocuments([])
       }
@@ -179,7 +199,31 @@ function ChatComposer({
     }
   }
 
+  const selectSkill = (name: string): void => {
+    setDraft(`/skill:${name} `)
+    setSendError(null)
+    textareaRef.current?.focus()
+  }
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
+    if (skills.isOpen && !event.shiftKey) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        skills.dismiss()
+        return
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        skills.moveSelection(event.key === 'ArrowDown' ? 1 : -1)
+        return
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && skills.matches.length) {
+        event.preventDefault()
+        selectSkill(skills.matches[skills.selectedIndex].name)
+        return
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void submit()
@@ -211,6 +255,88 @@ function ChatComposer({
         )}
         {approval}
         <div className="chat-composer__surface relative flex w-full flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
+          {skills.isOpen && !isDisabled && mode === 'send' ? (
+            <section
+              aria-label="Skill commands"
+              className="absolute bottom-full left-0 z-20 mb-2 max-h-72 w-full overflow-y-auto rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+            >
+              <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Skills</p>
+              {skills.status === 'loading' ? (
+                <p role="status" className="px-2 py-2 text-sm text-muted-foreground">
+                  Loading skills…
+                </p>
+              ) : null}
+              {skills.error ? (
+                <div className="px-2 py-2 text-sm">
+                  <p role="alert">{skills.error}</p>
+                  <button
+                    type="button"
+                    className="mt-2 rounded-md px-2 py-1 text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                    onClick={skills.retry}
+                  >
+                    Retry skills
+                  </button>
+                </div>
+              ) : null}
+              <div id={skillMenuId} role="listbox" aria-label="Skills">
+                {skills.matches.map((skill, index) => (
+                  <button
+                    key={skill.id}
+                    ref={index === skills.selectedIndex ? activeSkillRef : undefined}
+                    id={`${skillMenuId}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={index === skills.selectedIndex}
+                    tabIndex={-1}
+                    className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-accent aria-selected:bg-accent aria-selected:text-accent-foreground"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectSkill(skill.name)}
+                  >
+                    <span className="w-full truncate text-sm font-medium">{skill.name}</span>
+                    <span
+                      className="w-full truncate text-xs text-muted-foreground"
+                      title={skill.description}
+                    >
+                      {skill.description.replace(/\s+/g, ' ').trim()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {skills.status === 'ready' && !skills.matches.length ? (
+                <p className="px-2 py-2 text-sm text-muted-foreground">
+                  {projectId ? 'No matching skills.' : 'Choose a workspace to use skills.'}
+                </p>
+              ) : null}
+              {skills.diagnostics.length ? (
+                <div className="mt-1 border-t border-border px-2 pt-2 text-xs text-muted-foreground">
+                  <details>
+                    <summary className="cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                      {skills.diagnostics.length} skill discovery{' '}
+                      {skills.diagnostics.length === 1 ? 'warning' : 'warnings'}
+                    </summary>
+                    <ul
+                      aria-label="Skill discovery warnings"
+                      className="mt-2 max-h-32 space-y-3 overflow-y-auto overscroll-contain break-words pr-2 [overflow-wrap:anywhere]"
+                    >
+                      {skills.diagnostics.map(({ path, message, source }, index) => (
+                        <li key={`${source}:${path}:${index}`}>
+                          <p className="font-medium text-popover-foreground">{path}</p>
+                          <p>{message}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                  <button
+                    type="button"
+                    className="mt-1 rounded-md px-2 py-1 text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                    onClick={skills.retry}
+                  >
+                    Retry skills
+                  </button>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           <ComposerAttachmentList
             disabled={mode !== 'send' || isSending}
             documents={documents}
@@ -220,9 +346,19 @@ function ChatComposer({
             <Textarea
               className="min-h-10 max-h-40 resize-none border-0 px-2 py-2 pr-12 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
               ref={textareaRef}
+              aria-controls={skills.isOpen ? skillMenuId : undefined}
+              aria-autocomplete="list"
+              aria-activedescendant={
+                skills.isOpen && skills.matches.length
+                  ? `${skillMenuId}-${skills.selectedIndex}`
+                  : undefined
+              }
               disabled={isDisabled}
               onBlur={() => setIsFocused(false)}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                skills.resetDismissal()
+                setDraft(event.target.value)
+              }}
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
               placeholder={showRotatingPlaceholder ? '' : 'Ask Mico anything…'}

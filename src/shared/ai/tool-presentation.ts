@@ -7,7 +7,9 @@ function toolLabel(toolName: string): string {
       Read: 'Read',
       Write: 'Write',
       Glob: 'Glob',
-      Grep: 'Grep'
+      Grep: 'Grep',
+      LoadSkill: 'Load skill',
+      ReadSkillResource: 'Read skill resource'
     }[toolName] ?? toolName
   )
 }

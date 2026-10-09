@@ -1,6 +1,11 @@
 import './validation-runtime'
-import { ipcRenderer, type IpcRendererEvent } from 'electron'
-
+import { IpcChannel } from '@shared/IpcChannel'
+import {
+  type InvokeChannel,
+  type IpcArgs,
+  type IpcOutput,
+  outputSchema
+} from '@shared/ipc/contracts'
 import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
 import type { AttachmentsAPI } from '@shared/ipc/schemas/attachments'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
@@ -8,14 +13,8 @@ import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
 import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
-import { IpcChannel } from '@shared/IpcChannel'
+import { type IpcRendererEvent, ipcRenderer } from 'electron'
 import * as z from 'zod'
-import {
-  outputSchema,
-  type InvokeChannel,
-  type IpcArgs,
-  type IpcOutput
-} from '@shared/ipc/contracts'
 
 async function invoke<C extends InvokeChannel>(
   channel: C,
@@ -101,6 +100,7 @@ const chat: ChatAPI = {
   respondToPermission: (response) => invoke(IpcChannel.Chat_RespondToPermission, response),
   abortTurn: (requestId) => invoke(IpcChannel.Chat_AbortTurn, requestId),
   getCapabilities: (sessionId) => invoke(IpcChannel.Chat_GetCapabilities, sessionId),
+  getSkillCatalog: (request) => invoke(IpcChannel.Chat_GetSkillCatalog, request),
   onTurnEvent: (listener) => {
     const wrappedListener = (
       _event: IpcRendererEvent,

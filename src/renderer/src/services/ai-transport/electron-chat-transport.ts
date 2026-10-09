@@ -1,9 +1,8 @@
-import type { ChatTransport, UIMessageChunk } from 'ai'
-
-import type { ChatUserMessage, ThinkingSelection } from '@shared/data/schemas/chat'
-import type { ChatAPI, TurnStartRequest } from '@shared/ipc/schemas/chat'
 import type { MicoUIMessage } from '@renderer/types/chat'
 import type { PermissionMode } from '@shared/ai/permissions'
+import type { ChatUserMessage, ThinkingSelection } from '@shared/data/schemas/chat'
+import type { ChatAPI, TurnStartRequest } from '@shared/ipc/schemas/chat'
+import type { ChatTransport, UIMessageChunk } from 'ai'
 
 function toLatestUserMessage(messages: MicoUIMessage[]): ChatUserMessage {
   const message = messages.findLast(({ role }) => role === 'user')
@@ -12,6 +11,7 @@ function toLatestUserMessage(messages: MicoUIMessage[]): ChatUserMessage {
   const parts: ChatUserMessage['parts'] = []
   for (const part of message.parts) {
     if (part.type === 'data-document') parts.push(part.data)
+    if (part.type === 'data-skill-invocation') parts.push({ type: part.type, data: part.data })
     if (part.type === 'text' && part.text.trim()) parts.push({ type: 'text', text: part.text })
     if (part.type === 'reasoning' && part.text) {
       const reasoningPart: ChatUserMessage['parts'][number] = {

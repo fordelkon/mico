@@ -1,23 +1,29 @@
 import type { ChatProviderTool, ChatProviderToolResultPart } from '@mico/ai-providers'
 import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
 
+import type { SkillSnapshot } from '../skills'
 import { createBashTool } from './bash-tool'
 import { createEditTool } from './edit-tool'
 import { createReadTool } from './read-tool'
+import { createGlobTool, createGrepTool } from './search-tool'
+import { createLoadSkillTool, createReadSkillResourceTool } from './skill-tools'
 import {
-  registerTool,
   type RegisteredAgentTool,
-  type ToolInput,
+  registerTool,
   type ToolExecutionTrace,
+  type ToolInput,
   type ToolOutputDelta
 } from './tool-contract'
-import { createWriteTool } from './write-tool'
-import { createGlobTool, createGrepTool } from './search-tool'
+import { runPostToolUse, runPreToolUse, type ToolHooks } from './tool-hooks'
 import { authorizeTool, type ToolPermissionOptions } from './tool-permissions'
-import { runPreToolUse, runPostToolUse, type ToolHooks } from './tool-hooks'
+import { createWriteTool } from './write-tool'
 
 type ToolCall = { toolCallId: string; toolName: string; input: ToolInput }
-type ToolRegistryOptions = ToolPermissionOptions & { hooks?: ToolHooks }
+type ToolRegistryOptions = ToolPermissionOptions & {
+  hooks?: ToolHooks
+  skills?: SkillSnapshot
+  authorizedSkillIds?: readonly string[]
+}
 type ToolExecution = { result: ChatProviderToolResultPart; trace: ToolExecutionTrace }
 
 // A UTF-16 slice may encode to up to four bytes per code unit. Keep each IPC
@@ -45,7 +51,13 @@ class ToolRegistry {
         registerTool(createGrepTool()),
         registerTool(createEditTool()),
         registerTool(createWriteTool()),
-        registerTool(createBashTool())
+        registerTool(createBashTool()),
+        ...(options.skills
+          ? [
+              registerTool(createLoadSkillTool(options.skills, options.authorizedSkillIds)),
+              registerTool(createReadSkillResourceTool(options.skills, options.authorizedSkillIds))
+            ]
+          : [])
       ],
       options
     )
@@ -194,4 +206,4 @@ function partitionCalls(
   }, [])
 }
 
-export { ToolRegistry, type ToolCall, type ToolExecution }
+export { type ToolCall, type ToolExecution, ToolRegistry }

@@ -1,5 +1,3 @@
-import * as z from 'zod'
-
 import type { ChatProviderMessage } from '@mico/ai-providers'
 import { toolLabel } from '@shared/ai/tool-presentation'
 import type { TurnFailure } from '@shared/ai/turn-failure'
@@ -9,29 +7,53 @@ import type {
   PersistedSession,
   SessionSummary
 } from '@shared/data/schemas/session'
+import * as z from 'zod'
 import { SessionDatabase } from '../../data/session-database'
 import { toProviderReplayContext } from '../chat/conversation-context'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
 import {
+  type AgentStep,
   assembleReplayEvents,
   assembleTranscript,
   assertPayloadDigest,
   digest,
+  type LoadEventRow,
   parseMessagePayload,
   sanitizeAgentStep,
-  visibleMessage,
-  type LoadEventRow,
   type ToolTraceSummary,
   type VisibleMessage,
-  type AgentStep
+  visibleMessage
 } from './session-transcript'
 import {
   parseToolTracePayload,
-  toStoredToolTrace,
-  type StoredToolTrace
+  type StoredToolTrace,
+  toStoredToolTrace
 } from './tool-trace-presentation'
 
+type ProviderUserMessage = Extract<ChatProviderMessage, { role: 'system' | 'user' }> & {
+  role: 'user'
+}
+const ContextPayloadSchema = z.object({
+  messages: z.array(
+    z.object({
+      role: z.literal('user'),
+      parts: z.array(
+        z.union([
+          z.object({ type: z.literal('text'), text: z.string() }),
+          z.object({
+            type: z.literal('reasoning'),
+            text: z.string(),
+            providerMetadata: z.record(z.string(), z.record(z.string(), z.json())).optional()
+          })
+        ])
+      ),
+      providerMetadata: z.record(z.string(), z.record(z.string(), z.json())).optional()
+    })
+  )
+})
+
 type RuntimeEventPayloads = {
+  turn_context_recorded: { messages: ProviderUserMessage[] }
   run_started: {
     attempt: number
     profile: ExecutionProfileSnapshot
@@ -77,6 +99,9 @@ type TurnRunHandle = {
   shouldGenerateTitle: boolean
   cwd: string | null
   replayMessages: ChatProviderMessage[]
+  /** Accepted model-only context snapshot for this turn; retries reuse it. */
+  contextMessages: ProviderUserMessage[]
+  recordContext: (messages: ProviderUserMessage[]) => void
   recordStep: (step: AgentStep) => void
   recordTrace: (trace: ToolExecutionTrace) => void
   complete: (assistant: ChatMessage) => void
@@ -199,6 +224,38 @@ class SessionRuntimeService {
     })
   }
 
+  private getTurnContext(turnId: string): ProviderUserMessage[] | undefined {
+    // SAFETY: the fixed query selects only the declared runtime-event payload columns.
+    const row = this.dependencies.database.connection
+      .prepare(
+        `SELECT runtime_events.payload_json, runtime_events.payload_digest
+       FROM runtime_events JOIN runs ON runs.id = runtime_events.run_id
+       WHERE runs.turn_id = ? AND runtime_events.kind = 'turn_context_recorded'`
+      )
+      .get(turnId) as { payload_json: string; payload_digest: string } | undefined
+    if (!row) return undefined
+    assertPayloadDigest(row)
+    return ContextPayloadSchema.parse(JSON.parse(row.payload_json)).messages
+  }
+
+  private recordTurnContext(runId: string, messages: ProviderUserMessage[]): void {
+    const context = ContextPayloadSchema.parse({ messages })
+    this.dependencies.database.transaction(() => {
+      const run = this.getRunRow(runId)
+      const accepted = this.getTurnContext(run.turn_id)
+      if (accepted) {
+        if (
+          canonicalJson(toJsonValue({ messages: accepted })) !== canonicalJson(toJsonValue(context))
+        )
+          throw new Error('Turn context was already accepted with different content.')
+        return
+      }
+      if (run.status !== 'running' || this.findTerminalEvent(runId))
+        throw new Error('Turn context cannot be accepted after the run ended.')
+      this.appendEvent(run, 'turn_context_recorded', context)
+    })
+  }
+
   getDefaultProfile(sessionId: string): ExecutionProfileSnapshot | null {
     return toSessionSummary(this.findSession(sessionId)).defaultProfile
   }
@@ -232,24 +289,11 @@ class SessionRuntimeService {
     const messages: ChatProviderMessage[] = []
     for (const prior of priorRuns) {
       messages.push(toProviderReplayContext(this.getTurnUserMessage(prior.turn_id)))
-      const events = this.getRunReplayEvents(prior.id)
-      if (events.length) messages.push(...events)
-      else {
-        // SAFETY: the fixed query selects the two declared runtime-event columns.
-        const finalized = this.dependencies.database.connection
-          .prepare(
-            "SELECT payload_json, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'assistant_output_finalized'"
-          )
-          .get(prior.id) as { payload_json: string; payload_digest: string } | undefined
-        if (finalized) {
-          assertPayloadDigest(finalized)
-          messages.push(
-            toProviderReplayContext(parseMessagePayload(finalized.payload_json).message)
-          )
-        }
-      }
+      messages.push(...(this.getTurnContext(prior.turn_id) ?? []))
+      messages.push(...this.getRunReplayEvents(prior.id))
     }
     messages.push(toProviderReplayContext(this.getTurnUserMessage(run.turn_id)))
+    messages.push(...(this.getTurnContext(run.turn_id) ?? []))
     // SAFETY: the fixed query selects only the declared run identity column.
     const retryRuns = this.dependencies.database.connection
       .prepare('SELECT id FROM runs WHERE turn_id = ? AND attempt < ? ORDER BY attempt')
@@ -269,7 +313,17 @@ class SessionRuntimeService {
       payload_json: string
       payload_digest: string
     }>
-    return assembleReplayEvents(rows)
+    // SAFETY: this fixed query selects only the declared finalized-event columns.
+    const finalized = this.dependencies.database.connection
+      .prepare(
+        "SELECT payload_json, payload_digest FROM runtime_events WHERE run_id = ? AND kind = 'assistant_output_finalized'"
+      )
+      .get(runId) as { payload_json: string; payload_digest: string } | undefined
+    if (finalized) assertPayloadDigest(finalized)
+    return assembleReplayEvents(
+      rows,
+      finalized ? parseMessagePayload(finalized.payload_json).message : undefined
+    )
   }
 
   renameSession(sessionId: string, title: string): SessionSummary {
@@ -439,6 +493,8 @@ class SessionRuntimeService {
       shouldGenerateTitle: started.shouldGenerateTitle,
       cwd,
       replayMessages: this.getReplayMessages(runId),
+      contextMessages: this.getTurnContext(started.turnId) ?? [],
+      recordContext: (messages) => this.recordTurnContext(runId, messages),
       recordStep: (step) => this.recordAgentStep(runId, step),
       recordTrace: (trace) => this.recordToolTrace(runId, trace),
       complete: (assistant) => this.finishRun(runId, { status: 'completed', assistant }),
@@ -822,7 +878,6 @@ function canonicalJson(value: JsonValue): string {
   return JSON.stringify(value)
 }
 
-export { SessionRuntimeService }
 export type {
   ExecutionProfileSnapshot,
   PersistedSession,
@@ -831,3 +886,4 @@ export type {
   StartedRun,
   TurnRunHandle
 }
+export { SessionRuntimeService }

@@ -1,18 +1,19 @@
-import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
 import type { PermissionResponse } from '@shared/ai/permissions'
-
-import { getMessageText, toProviderContext } from './conversation-context'
-import { NoModelSelectedError, toTurnFailure } from './turn-failure'
-import { resolveEffectiveThinkingEffort, SessionModelProfile } from './session-model-profile'
-import { TurnDisplayAssembler } from './turn-display-assembler'
-import { TitleGenerator, type SessionTitleUpdate } from './title-generator'
-import { ToolAgentRunner } from '../tools/tool-agent-runner'
-import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
-import { ToolRegistry } from '../tools/tool-registry'
-import { PermissionRequests } from '../tools/permission-requests'
-import type { ToolHooks } from '../tools/tool-hooks'
-import type { ToolExecutionTrace } from '../tools/tool-contract'
+import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
+import { loadProjectInstructions } from '../context/project-instructions'
 import type { SessionRuntimeService, TurnRunHandle } from '../sessions/session-runtime-service'
+import { createSkillSnapshot } from '../skills'
+import { PermissionRequests } from '../tools/permission-requests'
+import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
+import { ToolAgentRunner } from '../tools/tool-agent-runner'
+import type { ToolExecutionTrace } from '../tools/tool-contract'
+import type { ToolHooks } from '../tools/tool-hooks'
+import { ToolRegistry } from '../tools/tool-registry'
+import { getMessageText, toProviderContext } from './conversation-context'
+import { resolveEffectiveThinkingEffort, SessionModelProfile } from './session-model-profile'
+import { type SessionTitleUpdate, TitleGenerator } from './title-generator'
+import { TurnDisplayAssembler } from './turn-display-assembler'
+import { NoModelSelectedError, SkillInvocationError, toTurnFailure } from './turn-failure'
 
 type ActiveTurn = {
   assembler: TurnDisplayAssembler
@@ -174,25 +175,120 @@ class TurnExecutor {
         })
         turn.handle = handle
         effectiveThinkingEffort = handle.profile.thinkingEffort
-        if (handle.shouldGenerateTitle)
-          this.titleGenerator.maybeGenerate({
-            sessionId: request.sessionId,
-            provider,
-            sourceText: getMessageText(request.userMessage),
-            signal: turn.controller.signal,
-            onTitleUpdated
-          })
       }
+
+      const cwd = handle?.cwd
+      const skills = cwd ? await createSkillSnapshot(cwd) : undefined
+      const invocation = request.userMessage.parts.find(
+        (part) => part.type === 'data-skill-invocation'
+      )
+      const acceptedContext = handle?.contextMessages ?? []
+      const authorizedSkillIds: string[] = []
+      let skillContext: string | null = null
+      if (invocation) {
+        if (!skills)
+          throw new SkillInvocationError(
+            'Cannot invoke this skill without a project workspace. Open a project and select the skill again.'
+          )
+        if (acceptedContext.length === 0) {
+          try {
+            const body = await skills.loadForUser(invocation.data.skillId)
+            const metadata = skills.skills.find(({ id }) => id === invocation.data.skillId)
+            if (metadata?.name !== invocation.data.name)
+              throw new Error(
+                'The selected skill identity changed. Refresh the catalog and select it again.'
+              )
+            skillContext = `The user explicitly invoked this skill. Its complete instructions are already loaded; do not call LoadSkill again. Apply them within the user request and their scope.\nSkill arguments: ${invocation.data.arguments}\n\n${body}`
+          } catch (error) {
+            throw new SkillInvocationError(
+              error instanceof Error
+                ? error.message
+                : 'Cannot load the selected skill. Refresh the skill catalog and try again.'
+            )
+          }
+        }
+        authorizedSkillIds.push(invocation.data.skillId)
+      }
+      if (handle?.shouldGenerateTitle)
+        this.titleGenerator.maybeGenerate({
+          sessionId: request.sessionId,
+          provider,
+          sourceText: getMessageText(request.userMessage),
+          signal: turn.controller.signal,
+          onTitleUpdated
+        })
+      const projectInstructions = cwd ? await loadProjectInstructions(cwd) : null
+      const contextMessages =
+        acceptedContext.length > 0
+          ? []
+          : skillContext
+            ? [
+                {
+                  role: 'user' as const,
+                  parts: [{ type: 'text' as const, text: skillContext }]
+                }
+              ]
+            : []
+      if (handle && acceptedContext.length === 0) handle.recordContext(contextMessages)
+      const registry = cwd
+        ? ToolRegistry.forWorkspace(cwd, {
+            skills,
+            authorizedSkillIds,
+            permissionMode: request.permissionMode ?? 'default',
+            hooks: this.toolHooks,
+            requestApproval: (call, signal) =>
+              this.permissions.request(
+                {
+                  ...call,
+                  ownerId: turn.ownerId,
+                  sessionId: request.sessionId,
+                  requestId: request.requestId
+                },
+                signal,
+                (data) =>
+                  emit({
+                    type: 'chunk',
+                    requestId: request.requestId,
+                    chunk: { type: 'data-tool-permission', id: data.approvalId, data }
+                  })
+              )
+          })
+        : undefined
+      const systemInstructions = cwd
+        ? createProjectAgentInstructions(cwd, registry?.definitions, skills)
+        : null
+      const replayMessages = handle
+        ? handle.replayMessages
+        : [toProviderContext(request.userMessage)]
 
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
-          const cwd = handle?.cwd
-          const messages = handle ? handle.replayMessages : [toProviderContext(request.userMessage)]
-          if (cwd)
-            messages.unshift({
-              role: 'system',
-              parts: [{ type: 'text', text: createProjectAgentInstructions(cwd) }]
-            })
+          const messages = [
+            ...(systemInstructions
+              ? [
+                  {
+                    role: 'system' as const,
+                    parts: [{ type: 'text' as const, text: systemInstructions }]
+                  }
+                ]
+              : []),
+            ...replayMessages,
+            // Fresh project guidance remains ephemeral; only accepted skill context is durable.
+            ...(projectInstructions
+              ? [
+                  {
+                    role: 'user' as const,
+                    parts: [
+                      {
+                        type: 'text' as const,
+                        text: `Context for the current user request; does not replace that request.\n\n${projectInstructions}`
+                      }
+                    ]
+                  }
+                ]
+              : []),
+            ...contextMessages
+          ]
           const runnerInput = {
             provider,
             messages,
@@ -215,29 +311,7 @@ class TurnExecutor {
               emit({ type: 'chunk', requestId: request.requestId, chunk })
             }
           }
-          if (cwd)
-            Object.assign(runnerInput, {
-              registry: ToolRegistry.forWorkspace(cwd, {
-                permissionMode: request.permissionMode ?? 'default',
-                hooks: this.toolHooks,
-                requestApproval: (call, signal) =>
-                  this.permissions.request(
-                    {
-                      ...call,
-                      ownerId: turn.ownerId,
-                      sessionId: request.sessionId,
-                      requestId: request.requestId
-                    },
-                    signal,
-                    (data) =>
-                      emit({
-                        type: 'chunk',
-                        requestId: request.requestId,
-                        chunk: { type: 'data-tool-permission', id: data.approvalId, data }
-                      })
-                  )
-              })
-            })
+          if (registry) Object.assign(runnerInput, { registry })
           const toolTraces = new Map<string, ToolExecutionTrace>()
           if (handle)
             Object.assign(runnerInput, {

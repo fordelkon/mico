@@ -1,14 +1,19 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createTemporaryWorkspace, removeTemporaryPaths } from '../tools/test-helpers'
 
-import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+afterEach(removeTemporaryPaths)
+
 import type { ChatProvider } from '@mico/ai-providers'
+import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { UIMessageChunk } from 'ai'
-import {
-  SessionRuntimeService,
-  type ExecutionProfileSnapshot
-} from '../sessions/session-runtime-service'
 import { SessionDatabase } from '../../data/session-database'
-import { createChatProviderResolver, type ChatProviderResolver } from './chat-provider-resolver'
+import {
+  type ExecutionProfileSnapshot,
+  SessionRuntimeService
+} from '../sessions/session-runtime-service'
+import { type ChatProviderResolver, createChatProviderResolver } from './chat-provider-resolver'
 import { SessionModelProfile } from './session-model-profile'
 import { SESSION_TITLE_INSTRUCTIONS } from './title-generator'
 import { TurnExecutor } from './turn-executor'
@@ -171,6 +176,147 @@ function partialPendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk
 }
 
 describe('TurnExecutor', () => {
+  it('user invokes a manual skill when retrying after reload, then accepted instructions stay durable', async () => {
+    const cwd = await createTemporaryWorkspace('mico-explicit-skill-')
+    const base = join(cwd, '.agents/skills/manual')
+    await mkdir(base, { recursive: true })
+    const skillPath = join(base, 'SKILL.md')
+    await writeFile(
+      skillPath,
+      '---\nname: manual\ndescription: Manual\ndisable-model-invocation: true\n---\nOriginal manual instructions'
+    )
+    await writeFile(join(base, 'reference.md'), 'Current manual reference')
+    const { runtime, database, session } = await createSession('Manual chat', {
+      projectId: 'p',
+      cwd
+    })
+    const calls: Parameters<ChatProvider['stream']>[0][] = []
+    const userMessage: TurnStartRequest['userMessage'] = {
+      role: 'user',
+      parts: [
+        { type: 'text', text: '/skill:manual Unicode 文件 😀' },
+        {
+          type: 'data-skill-invocation',
+          data: { skillId: 'project-agents:manual', name: 'manual', arguments: 'Unicode 文件 😀' }
+        }
+      ]
+    }
+    const first = collectEvents()
+    const executor = createConfiguredExecutor(
+      async (input) => {
+        if (isTitleStream(input)) return streamFrom([])
+        calls.push(input)
+        throw new Error('Stop after accepting context')
+      },
+      runtime,
+      { maxAttempts: 1 }
+    )
+    executor.startTurn(
+      { ownerId: 'w', request: { ...request, sessionId: session.id, userMessage } },
+      first.emit
+    )
+    await first.terminal
+    expect(first.events.at(-1)?.type).toBe('error')
+    expect(JSON.stringify(calls[0]?.messages)).toContain('Original manual instructions')
+    expect(calls[0]?.messages.at(-1)).toMatchObject({ role: 'user' })
+    expect(JSON.stringify(calls[0]?.messages)).toContain('Unicode 文件 😀')
+    expect(runtime.loadSession(session.id).messages[0]?.parts).toEqual(userMessage.parts)
+    await writeFile(
+      skillPath,
+      '---\nname: manual\ndescription: Manual\ndisable-model-invocation: true\n---\nChanged manual instructions'
+    )
+    const reloaded = new SessionRuntimeService({ database })
+    const second = collectEvents()
+    const retried = createConfiguredExecutor(
+      async (input) => {
+        calls.push(input)
+        if (calls.length === 2)
+          return streamFrom([
+            // SAFETY: fixture matches the provider's completed tool-input chunk contract.
+            {
+              type: 'tool-input-available',
+              toolCallId: 'resource',
+              toolName: 'ReadSkillResource',
+              input: { skill_id: 'manual', relative_path: 'reference.md' }
+            } as UIMessageChunk
+          ])
+        return streamFrom([textChunk])
+      },
+      reloaded,
+      { getChatConfigurationForModelEntry: () => configuration }
+    )
+    retried.startTurn(
+      {
+        ownerId: 'w',
+        request: {
+          ...request,
+          requestId: 'retry-manual',
+          sessionId: session.id,
+          userMessage,
+          retry: true
+        }
+      },
+      second.emit
+    )
+    await second.terminal
+    expect(second.events.at(-1)?.type).toBe('finish')
+    expect(JSON.stringify(calls[1]?.messages)).toContain('Original manual instructions')
+    expect(JSON.stringify(calls[1]?.messages)).not.toContain('Changed manual instructions')
+    expect(
+      calls[1]?.messages.filter((message) =>
+        JSON.stringify(message).includes('Original manual instructions')
+      )
+    ).toHaveLength(1)
+    expect(JSON.stringify(calls[2]?.messages)).toContain('Current manual reference')
+  })
+
+  it.each(['missing', 'hidden', 'no-workspace'])(
+    'user invokes %s when starting a turn, then no provider request is made',
+    async (scenario) => {
+      const cwd = await createTemporaryWorkspace('mico-invalid-skill-')
+      const base = join(cwd, '.agents/skills/hidden')
+      await mkdir(base, { recursive: true })
+      await writeFile(
+        join(base, 'SKILL.md'),
+        '---\nname: hidden\ndescription: Hidden\nuser-invocable: false\n---\nHidden body'
+      )
+      const { runtime, session } = await createSession(
+        'Invalid skill',
+        scenario === 'no-workspace' ? {} : { projectId: 'p', cwd }
+      )
+      const stream = vi.fn<ChatProvider['stream']>(async () => streamFrom([]))
+      const executor = createConfiguredExecutor(stream, runtime)
+      const recorded = collectEvents()
+      executor.startTurn(
+        {
+          ownerId: 'w',
+          request: {
+            ...request,
+            sessionId: session.id,
+            userMessage: {
+              role: 'user',
+              parts: [
+                {
+                  type: 'data-skill-invocation',
+                  data: { skillId: `project-agents:${scenario}`, name: scenario, arguments: '' }
+                }
+              ]
+            }
+          }
+        },
+        recorded.emit
+      )
+      await recorded.terminal
+      expect(stream).not.toHaveBeenCalled()
+      expect(recorded.events).toEqual([
+        expect.objectContaining({
+          type: 'error',
+          message: expect.stringMatching(/skill|workspace/i)
+        })
+      ])
+    }
+  )
+
   it('user sends a document-only message when starting a turn, then it is sent as named text', async () => {
     const { runtime, session } = await createSession('New chat')
     const calls: Parameters<ChatProvider['stream']>[0][] = []
@@ -1012,6 +1158,101 @@ describe('TurnExecutor', () => {
       ],
       metadata: { completionState: 'complete' }
     })
+  })
+
+  it('user retries before output when project skills change, then one stable context drives the turn', async () => {
+    const cwd = await createTemporaryWorkspace('mico-turn-skills-')
+    const base = join(cwd, '.agents', 'skills', 'mico-turn-review')
+    await mkdir(base, { recursive: true })
+    const skillPath = join(base, 'SKILL.md')
+    await writeFile(
+      skillPath,
+      '---\nname: mico-turn-review\ndescription: Review project\n---\nOriginal skill body'
+    )
+    await writeFile(join(cwd, 'AGENTS.md'), 'Original project guidance')
+    const { runtime, session } = await createSession('Project chat', {
+      projectId: 'project-1',
+      cwd
+    })
+    const calls: Parameters<ChatProvider['stream']>[0][] = []
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(
+      async (input) => {
+        if (isTitleStream(input)) return streamFrom([])
+        calls.push(input)
+        if (calls.length === 1) {
+          await writeFile(
+            skillPath,
+            '---\nname: mico-turn-review\ndescription: Review project\n---\nChanged skill body'
+          )
+          await writeFile(join(cwd, 'AGENTS.md'), 'Changed project guidance')
+          throw new TypeError('fetch failed')
+        }
+        if (calls.length === 2)
+          return streamFrom([
+            // SAFETY: this fixture conforms to the provider completed tool-call chunk.
+            {
+              type: 'tool-input-available',
+              toolCallId: 'skill-call',
+              toolName: 'LoadSkill',
+              input: { skill_id: 'mico-turn-review' }
+            } as UIMessageChunk
+          ])
+        return streamFrom([{ type: 'text-delta', id: 'answer', delta: 'Done.' }])
+      },
+      runtime,
+      {
+        maxAttempts: 2,
+        retryDelayMs: 0,
+        getChatConfigurationForModelEntry: () => configuration
+      }
+    )
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+    expect(recorded.events.at(-1)?.type).toBe('finish')
+    for (const call of calls) {
+      expect(call.messages.filter((message) => message.role === 'system')).toHaveLength(1)
+      const context = JSON.stringify(call.messages)
+      expect(context).toContain('Original project guidance')
+      expect(context).not.toContain('Changed project guidance')
+    }
+    expect(calls[1]?.messages.slice(1, 2)).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
+    ])
+    expect(calls[1]?.messages.at(-1)).toMatchObject({
+      role: 'user',
+      parts: [
+        {
+          type: 'text',
+          text: expect.stringContaining(
+            'Context for the current user request; does not replace that request.'
+          )
+        }
+      ]
+    })
+    expect(calls[1]?.tools?.some((tool) => tool.name === 'LoadSkill')).toBe(true)
+    expect(JSON.stringify(calls[2]?.messages)).toContain('Original skill body')
+    expect(JSON.stringify(calls[2]?.messages)).not.toContain('Changed skill body')
+    const persisted = JSON.stringify(runtime.loadSession(session.id).messages)
+    expect(persisted).not.toContain('Original project guidance')
+    expect(persisted).toContain('Original skill body')
+    const next = collectEvents()
+    service.startTurn(
+      {
+        ownerId: 'window-1',
+        request: { ...request, requestId: 'request-2', sessionId: session.id }
+      },
+      next.emit
+    )
+    await next.terminal
+    expect(next.events.at(-1)?.type).toBe('finish')
+    expect(JSON.stringify(calls.at(-1)?.messages)).toContain('Changed project guidance')
+    expect(JSON.stringify(runtime.loadSession(session.id).messages)).toContain(
+      'Original skill body'
+    )
   })
 
   it('user gets workspace instructions prepended when in a project session, then they lead the request', async () => {

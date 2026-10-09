@@ -8,14 +8,12 @@ import type {
   ThinkingSelection
 } from '@mico/ai-providers'
 import { isProviderFinish } from '@mico/ai-providers'
-import type { UIMessageChunk } from 'ai'
-import type { ProviderMetadata } from 'ai'
-import * as z from 'zod'
-
-import { ToolRegistry, type ToolCall } from './tool-registry'
-import type { ToolExecutionTrace } from './tool-contract'
-import { AgentBudgetError } from '../chat/turn-failure'
 import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
+import type { ProviderMetadata, UIMessageChunk } from 'ai'
+import * as z from 'zod'
+import { AgentBudgetError } from '../chat/turn-failure'
+import type { ToolExecutionTrace } from './tool-contract'
+import { type ToolCall, ToolRegistry } from './tool-registry'
 
 // OUTPUT_TOKEN_RECOVERY is a model-only continuation after a length stop; it is
 // bounded independently of successful tool rounds.
@@ -42,6 +40,8 @@ type AgentStep = {
   index: number
   assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
   toolResults: ChatProviderToolResultPart[]
+  /** Model-only user prompt sent after this response to recover an output limit. */
+  continuationPrompt?: string
 }
 /**
  * The turn's parts in exact stream order across every model step. This is the
@@ -101,7 +101,7 @@ class ToolAgentRunner {
     let history = [...messages]
     let assistantText = ''
     let outputTokenRecoveries = 0
-    let toolRoundCount = 0
+    let responseCount = 0
     const displaySequence: AgentDisplayPart[] = []
     // Interactive tasks continue until the model finishes, the user cancels, or a
     // real failure occurs. Successful tool use must not silently remove capabilities.
@@ -214,6 +214,15 @@ class ToolAgentRunner {
       }
       const replayAssistant = continuation ? { ...assistant, replay: continuation } : assistant
       if (!calls.length) {
+        const shouldContinue =
+          finishReason === 'length' && outputTokenRecoveries < MAX_OUTPUT_TOKEN_RECOVERIES
+        const step: AgentStep = {
+          index: ++responseCount,
+          assistant: replayAssistant,
+          toolResults: []
+        }
+        if (shouldContinue) step.continuationPrompt = OUTPUT_TOKEN_RECOVERY_MESSAGE
+        onStep?.(step)
         const finalAssistant = replayAssistant
         if (finishReason !== 'length') return { assistantText, finalAssistant, displaySequence }
         if (outputTokenRecoveries >= MAX_OUTPUT_TOKEN_RECOVERIES)
@@ -233,7 +242,7 @@ class ToolAgentRunner {
         continue
       }
       if (!registry) throw new Error('The model requested a tool outside a project session.')
-      toolRoundCount += 1
+      responseCount += 1
       const executions = await registry.executeBatch(calls, signal, (delta) => {
         // The renderer reads message parts, so each delta must append there.
         // A shared id would replace earlier deltas; transient parts only reach
@@ -246,7 +255,7 @@ class ToolAgentRunner {
         })
       })
       const results = executions.map(({ result }) => boundToolResultForHistory(result))
-      onStep?.({ index: toolRoundCount, assistant: replayAssistant, toolResults: results })
+      onStep?.({ index: responseCount, assistant: replayAssistant, toolResults: results })
       for (const { result, trace } of executions) {
         onToolResult?.(trace)
         emitToolResult(result, emit)
@@ -311,5 +320,5 @@ function emitToolResult(
   })
 }
 
-export { ToolAgentRunner }
 export type { AgentDisplayPart, AgentStep }
+export { ToolAgentRunner }

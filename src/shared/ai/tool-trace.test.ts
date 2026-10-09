@@ -25,6 +25,30 @@ describe('tool trace interpretation', () => {
     })
   })
 
+  it.each([
+    { toolName: 'LoadSkill', input: { skill_id: 'review' }, path: 'review/SKILL.md' },
+    {
+      toolName: 'ReadSkillResource',
+      input: { skill_id: 'review', relative_path: 'references/guide.md' },
+      path: 'review/references/guide.md'
+    }
+  ])(
+    'user inspects $toolName when a skill is read, then the path and complete body are available',
+    ({ toolName, input, path }) => {
+      const body = '# Skill instructions\nRead the complete reference before continuing.'
+      const source = ToolTraceSourceInputSchema.parse(input)
+      const display = ToolTraceInputSchema.parse(input)
+
+      expect(source.path).toBe(path)
+      expect(display.path).toBe(path)
+      expect(getToolTracePresentation(toolName, display, body)).toEqual({
+        type: 'read',
+        content: body,
+        isTruncated: false
+      })
+    }
+  )
+
   it('user revisits a saved trace when a summary replaces output, then its saved preview wins', () => {
     const input = ToolTraceInputSchema.parse({
       content: 'draft',

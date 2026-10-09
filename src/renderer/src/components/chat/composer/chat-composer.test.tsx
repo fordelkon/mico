@@ -1,18 +1,49 @@
 import '@testing-library/jest-dom/vitest'
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import * as React from 'react'
-
-import { ChatComposer } from './chat-composer'
 import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
+import type { PermissionMode } from '@shared/ai/permissions'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import type { PermissionMode } from '@shared/ai/permissions'
+import type { ChatAPI } from '@shared/ipc/schemas/chat'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import * as React from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ChatComposer } from './chat-composer'
+
+const skillCatalog = {
+  skills: [
+    {
+      id: 'review',
+      name: 'review',
+      description: 'Review the changes.',
+      source: 'project-agents' as const,
+      userInvocable: true,
+      disableModelInvocation: false
+    },
+    {
+      id: 'manual',
+      name: 'manual',
+      description: 'Follow manual steps.',
+      source: 'user-claude' as const,
+      userInvocable: true,
+      disableModelInvocation: true
+    },
+    {
+      id: 'hidden',
+      name: 'hidden',
+      description: 'Internal helper.',
+      source: 'user-agents' as const,
+      userInvocable: false,
+      disableModelInvocation: false
+    }
+  ],
+  diagnostics: []
+}
 
 const props = {
   focusKey: 0,
+  projectId: 'project-1',
   mode: 'send' as const,
   onSend: async (): Promise<boolean> => true,
   onModelSelected: async (): Promise<void> => undefined,
@@ -44,6 +75,9 @@ beforeEach(() => {
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
+      chat: {
+        getSkillCatalog: vi.fn<ChatAPI['getSkillCatalog']>().mockResolvedValue(skillCatalog)
+      },
       attachments: {
         pickCodeDocuments: vi.fn<() => Promise<ChatDocumentPart[]>>().mockResolvedValue([])
       },
@@ -168,6 +202,147 @@ function renderWorkspaceComposer(
 }
 
 describe('ChatComposer', () => {
+  it('user has no workspace when opening slash commands, then workspace guidance appears', async () => {
+    const user = userEvent.setup()
+    renderWithLibrary(<ChatComposer {...props} projectId={null} />)
+    await user.type(screen.getByRole('textbox'), '/')
+    expect(await screen.findByText('Choose a workspace to use skills.')).toBeVisible()
+    expect(window.api.chat.getSkillCatalog).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox')).toHaveValue('/')
+  })
+  it('user switches projects when a catalog is pending, then old skills stay unavailable', async () => {
+    const user = userEvent.setup()
+    let resolveOld!: (catalog: typeof skillCatalog) => void
+    vi.mocked(window.api.chat.getSkillCatalog)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          })
+      )
+      .mockResolvedValueOnce({ ...skillCatalog, skills: [skillCatalog.skills[1]] })
+    const { rerender } = renderWithLibrary(<ChatComposer {...props} projectId="old" />)
+    await waitForModelButton('Qwen 3 8B')
+    await user.type(screen.getByRole('textbox'), '/')
+    rerenderWithLibrary(rerender, <ChatComposer {...props} projectId="new" />)
+    expect(await screen.findByRole('option', { name: /manual/ })).toBeVisible()
+    await act(async () => resolveOld(skillCatalog))
+    expect(screen.queryByRole('option', { name: /review/ })).toBeNull()
+    expect(screen.getByRole('textbox')).toHaveValue('/')
+  })
+
+  it('user retries a failed catalog when choosing skills, then the draft and choices return', async () => {
+    const user = userEvent.setup()
+    vi.mocked(window.api.chat.getSkillCatalog)
+      .mockRejectedValueOnce(new Error('Offline'))
+      .mockResolvedValue(skillCatalog)
+    renderWithLibrary(<ChatComposer {...props} />)
+    await user.type(screen.getByRole('textbox'), '/')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load skills')
+    await user.click(screen.getByRole('button', { name: 'Retry skills' }))
+    expect(await screen.findByRole('option', { name: /review/ })).toBeVisible()
+    expect(screen.getByRole('textbox')).toHaveValue('/')
+  })
+  it('user opens skills with warnings when discovery succeeds, then details expand and retry refreshes', async () => {
+    const user = userEvent.setup()
+    const diagnostics = Array.from({ length: 40 }, (_, index) => ({
+      path: `/projects/mico/.agents/skills/broken-${index}/SKILL.md`,
+      source: 'project-agents' as const,
+      message: `Invalid skill metadata ${index}.`
+    }))
+    vi.mocked(window.api.chat.getSkillCatalog)
+      .mockResolvedValueOnce({ ...skillCatalog, diagnostics })
+      .mockResolvedValueOnce({ ...skillCatalog, skills: [skillCatalog.skills[1]] })
+    renderWithLibrary(<ChatComposer {...props} />)
+    await user.type(screen.getByRole('textbox'), '/')
+
+    expect(await screen.findByRole('option', { name: /review/ })).toBeVisible()
+    const summary = screen.getByText('40 skill discovery warnings', { exact: true })
+    expect(summary).toBeVisible()
+    expect(screen.getByText(diagnostics[0].message)).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Retry skills' })).toBeVisible()
+
+    summary.focus()
+    await user.keyboard(' ')
+    expect(summary).toHaveFocus()
+    // jsdom does not implement native summary keyboard activation.
+    await user.click(summary)
+
+    expect(screen.getByText(diagnostics[0].path, { exact: true })).toBeVisible()
+    expect(screen.getByText(diagnostics[0].message, { exact: true })).toBeVisible()
+    expect(screen.getByText(diagnostics[39].path, { exact: true })).toBeVisible()
+    expect(screen.getByText(diagnostics[39].message, { exact: true })).toBeVisible()
+    await user.click(summary)
+    expect(screen.getByText(diagnostics[0].message)).not.toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Retry skills' }))
+
+    expect(await screen.findByRole('option', { name: /manual/ })).toBeVisible()
+    expect(screen.queryByRole('option', { name: /review/ })).toBeNull()
+    expect(screen.queryByText('40 skill discovery warnings', { exact: true })).toBeNull()
+    expect(screen.getByRole('textbox')).toHaveValue('/')
+  })
+
+  it('user chooses a slash skill when pressing Tab, then arguments send with its identity', async () => {
+    const user = userEvent.setup()
+    const onSend = vi
+      .fn<React.ComponentProps<typeof ChatComposer>['onSend']>()
+      .mockResolvedValue(true)
+    renderWithLibrary(<ChatComposer {...props} onSend={onSend} />)
+    await waitForModelButton('Qwen 3 8B')
+    await user.type(screen.getByRole('textbox'), '/')
+    expect(await screen.findByRole('option', { name: /review/ })).toBeVisible()
+    expect(screen.queryByRole('option', { name: /hidden/ })).toBeNull()
+    expect(screen.getByText('review', { exact: true })).toBeVisible()
+    expect(screen.getByText('Review the changes.', { exact: true })).toBeVisible()
+    expect(screen.getByText('manual', { exact: true })).toBeVisible()
+    expect(screen.queryByText('/skill:review', { exact: true })).toBeNull()
+    expect(screen.queryByText('Manual only')).toBeNull()
+    expect(screen.queryByText('Project · .agents')).toBeNull()
+    await user.keyboard('{ArrowDown}{Tab}')
+    expect(screen.getByRole('textbox')).toHaveValue('/skill:manual ')
+    expect(screen.getByRole('textbox')).toHaveFocus()
+    expect(onSend).not.toHaveBeenCalled()
+    await user.type(screen.getByRole('textbox'), 'check this')
+    await user.keyboard('{Enter}')
+    expect(onSend).toHaveBeenCalledWith({
+      text: '/skill:manual check this',
+      documents: [],
+      skillInvocation: { skillId: 'manual', name: 'manual', arguments: 'check this' }
+    })
+  })
+
+  it('user types an unknown slash skill when sending, then an error keeps the draft', async () => {
+    const user = userEvent.setup()
+    const onSend = vi
+      .fn<React.ComponentProps<typeof ChatComposer>['onSend']>()
+      .mockResolvedValue(true)
+    renderWithLibrary(<ChatComposer {...props} onSend={onSend} />)
+    await waitForModelButton('Qwen 3 8B')
+    await user.type(screen.getByRole('textbox'), '/skill:missing argument')
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unknown skill')
+    expect(screen.getByRole('textbox')).toHaveValue('/skill:missing argument')
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('user composes a slash command when Enter is composing, then selection and send wait', async () => {
+    const user = userEvent.setup()
+    const onSend = vi
+      .fn<React.ComponentProps<typeof ChatComposer>['onSend']>()
+      .mockResolvedValue(true)
+    renderWithLibrary(<ChatComposer {...props} onSend={onSend} />)
+    await waitForModelButton('Qwen 3 8B')
+    await user.type(screen.getByRole('textbox'), '/')
+    await screen.findByRole('option', { name: /review/ })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', isComposing: true })
+    expect(screen.getByRole('textbox')).toHaveValue('/')
+    expect(onSend).not.toHaveBeenCalled()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    await user.clear(screen.getByRole('textbox'))
+    await user.type(screen.getByRole('textbox'), '/')
+    expect(await screen.findByRole('option', { name: /review/ })).toBeVisible()
+  })
   it('user changes tool permissions when selecting an option, then the choice is shown', async () => {
     const user = userEvent.setup()
     function PermissionComposer(): React.JSX.Element {
@@ -537,6 +712,9 @@ describe('ChatComposer', () => {
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
+        chat: {
+          getSkillCatalog: vi.fn<ChatAPI['getSkillCatalog']>().mockResolvedValue(skillCatalog)
+        },
         providers: {
           getLibrary: vi
             .fn<() => Promise<typeof library>>()
@@ -571,6 +749,9 @@ describe('ChatComposer', () => {
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
+        chat: {
+          getSkillCatalog: vi.fn<ChatAPI['getSkillCatalog']>().mockResolvedValue(skillCatalog)
+        },
         providers: {
           // SAFETY: the provider library is served with the model unselected, then selected.
           getLibrary: vi

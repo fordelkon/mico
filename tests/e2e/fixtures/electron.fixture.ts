@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ElectronApplication, Page } from '@playwright/test'
-import { _electron as electron, expect, test as base } from '@playwright/test'
+import { test as base, _electron as electron, expect } from '@playwright/test'
 
 export type TestApp = {
   electronApp: ElectronApplication
@@ -23,6 +23,7 @@ export const test = base.extend<ElectronFixtures>({
   app: async ({}, use, testInfo) => {
     const directory = await mkdtemp(join(tmpdir(), 'mico-e2e-'))
     const workspaceDir = join(directory, 'project')
+    const homeDirectory = join(directory, 'home')
     const runtimeErrors: string[] = []
     const traces: string[] = []
     // Traces contain action arguments. Never record real-provider credential entry.
@@ -44,7 +45,13 @@ export const test = base.extend<ElectronFixtures>({
     const launch = async (): Promise<Page> => {
       electronApp = await electron.launch({
         args: ['.'],
-        env: { ...process.env, MICO_USER_DATA_DIR: join(directory, 'user-data') },
+        env: {
+          ...process.env,
+          ...(process.platform === 'win32'
+            ? { USERPROFILE: homeDirectory }
+            : { HOME: homeDirectory }),
+          MICO_USER_DATA_DIR: join(directory, 'user-data')
+        },
         timeout: 60_000
       })
       window = await electronApp.firstWindow()
@@ -58,7 +65,7 @@ export const test = base.extend<ElectronFixtures>({
       return window
     }
     try {
-      await mkdir(workspaceDir)
+      await Promise.all([mkdir(workspaceDir), mkdir(homeDirectory)])
       await launch()
       await use({
         get electronApp() {
