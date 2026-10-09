@@ -14,29 +14,18 @@ on:
 permissions:
   contents: read
 
-jobs:
-  quality:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:lint
-      - run: pnpm format:check
-      - run: pnpm test
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: true
 
+jobs:
   regression:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -63,6 +52,7 @@ jobs:
   real-provider:
     if: github.event_name == 'workflow_dispatch' && inputs.real_provider
     runs-on: windows-latest
+    timeout-minutes: 20
     environment: e2e
     steps:
       - uses: actions/checkout@v4

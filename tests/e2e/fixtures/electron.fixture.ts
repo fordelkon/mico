@@ -43,8 +43,13 @@ export const test = base.extend<ElectronFixtures>({
       traces.push(path)
     }
     const launch = async (): Promise<Page> => {
+      const executablePath = process.env['MICO_E2E_EXECUTABLE_PATH']
+      if (testInfo.project.name === 'packaged-smoke' && !executablePath)
+        throw new Error('Set MICO_E2E_EXECUTABLE_PATH to the packaged application executable.')
       electronApp = await electron.launch({
-        args: ['.'],
+        ...(testInfo.project.name === 'packaged-smoke'
+          ? { executablePath, args: [] }
+          : { args: ['.'] }),
         env: {
           ...process.env,
           ...(process.platform === 'win32'

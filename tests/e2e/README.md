@@ -14,7 +14,7 @@ application source changes: Electron loads `out/`, not the development server.
 # Deterministic local regression; no provider credentials or model charges
 pnpm test:e2e --project=electron
 
-# All projects; real-provider cases skip unless explicitly enabled
+# Source projects; real-provider cases skip unless explicitly enabled
 pnpm test:e2e
 
 # Run one scenario file
@@ -28,8 +28,45 @@ pnpm playwright show-report
 Runtime settings have one home in [playwright.config.ts](../../playwright.config.ts).
 Tests run sequentially within each platform. The [E2E workflow](../../.github/workflows/e2e.yml)
 runs local regression on Windows and macOS for pull requests and pushes to main.
-The same workflow runs non-mutating lint, formatting, and regular test checks in a separate quality job.
+The separate [CI workflow](../../.github/workflows/ci.yml) runs non-mutating formatting,
+lint, and type checks in one job and regular workspace tests in a parallel job.
 Paid endpoint checks run only on manual dispatch with `real_provider` enabled.
+
+## Packaged application smoke
+
+The manual [Packaging workflow](../../.github/workflows/packaging.yml) builds
+Windows x64 on `windows-2022` and macOS arm64 on `macos-15`, with publishing
+disabled. It launches the packaged executable, checks the application window,
+executes the bundled Grep against a real workspace, then restarts and verifies
+the SQLite-backed conversation and tool result. It uses the same isolated
+Electron and local-provider fixtures as source regression; no provider secrets
+are required. Source regression remains a separate project.
+
+After smoke succeeds, downloadable artifacts contain `Mico-windows-x64.zip`
+(the entire `win-unpacked` directory; extract it and run `Mico.exe`) or
+`Mico-macos-arm64.zip` (`Mico.app`; extract using Archive Utility or `ditto`).
+The macOS archive preserves executable permissions and framework symlinks.
+These are internal test builds: Windows is unsigned, and macOS is ad hoc signed
+without notarization. Only these internal macOS builds disable hardened runtime
+because ad hoc signing otherwise fails Electron framework library validation;
+the release configuration is unchanged. They do not establish installer behavior or Gatekeeper/
+SmartScreen acceptance for downloaded releases. Failed builds upload available
+Playwright evidence and builder diagnostics instead of verified applications.
+
+For a local macOS arm64 check:
+
+```sh
+pnpm build
+CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder --mac --arm64 --dir --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
+MICO_E2E_EXECUTABLE_PATH="$PWD/dist/mac-arm64/Mico.app/Contents/MacOS/Mico" pnpm test:e2e --project=packaged-smoke
+```
+
+For Windows x64, build with `pnpm exec electron-builder --win --x64 --dir
+--publish never`, then set `$env:MICO_E2E_EXECUTABLE_PATH` to the absolute path of
+`dist/win-unpacked/Mico.exe` before running the same smoke command. The packaged
+project is registered only when this variable is set; a plain `pnpm test:e2e`
+continues to run source scenarios. Missing executables fail launch, and the smoke
+asserts `app.isPackaged` to reject accidentally testing the development binary.
 
 ## Coverage and ownership
 

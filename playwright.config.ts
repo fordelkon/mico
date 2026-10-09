@@ -38,8 +38,11 @@ export default defineConfig({
     {
       name: 'electron',
       testMatch: '**/*.spec.ts',
-      testIgnore: '**/real-provider.spec.ts'
+      testIgnore: ['**/real-provider.spec.ts', '**/packaged-smoke.spec.ts']
     },
+    ...(process.env['MICO_E2E_EXECUTABLE_PATH']
+      ? [{ name: 'packaged-smoke', testMatch: '**/packaged-smoke.spec.ts' }]
+      : []),
     {
       name: 'real-provider',
       testMatch: '**/real-provider.spec.ts'
