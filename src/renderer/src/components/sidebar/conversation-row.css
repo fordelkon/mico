@@ -91,6 +91,7 @@
 
 .conversation-row__actions {
   position: absolute;
+  z-index: 1;
   top: 4px;
   right: 10px;
   opacity: 0;

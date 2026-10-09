@@ -27,8 +27,8 @@ type ChatResponseSlice = {
 
 type ChatWorkspace = {
   conversations: ReturnType<typeof useConversationList>['conversations']
-  renameConversation: (conversationId: string, title: string) => void
-  deleteConversation: (conversationId: string) => void
+  renameConversation: (conversationId: string, title: string) => Promise<void>
+  deleteConversation: (conversationId: string) => Promise<void>
   session: ChatActiveSessionSlice
   responses: ChatResponseSlice
 }
@@ -134,35 +134,43 @@ function useChatWorkspaceState(): ChatWorkspace {
   }, [activeSession, retrySessionResponse])
 
   const renameConversation = React.useCallback(
-    (conversationId: string, title: string): void => {
+    async (conversationId: string, title: string): Promise<void> => {
       const trimmedTitle = title.trim()
       if (!trimmedTitle) return
 
-      void window.api.sessions
-        .rename({ sessionId: conversationId, title: trimmedTitle })
-        .then((summary) => {
-          applyConversationTitle(conversationId, summary.title)
-
-          updateSession(conversationId, (instance) => {
-            instance.conversation = { ...instance.conversation, title: summary.title }
-          })
+      try {
+        const summary = await window.api.sessions.rename({
+          sessionId: conversationId,
+          title: trimmedTitle
         })
-        .catch(() => undefined)
+        applyConversationTitle(conversationId, summary.title)
+        updateSession(conversationId, (instance) => {
+          instance.conversation = { ...instance.conversation, title: summary.title }
+        })
+      } catch (error) {
+        throw new Error(
+          'Could not rename this conversation. Your title was not saved. Try renaming it again.',
+          { cause: error }
+        )
+      }
     },
     [applyConversationTitle, updateSession]
   )
 
   const deleteConversation = React.useCallback(
-    (conversationId: string): void => {
-      const deletePersistedSession = async (): Promise<void> => {
+    async (conversationId: string): Promise<void> => {
+      try {
         await prepareForDeletion(conversationId)
         await window.api.sessions.delete(conversationId)
         removeSession(conversationId)
         removeConversation(conversationId)
         closeSessionIfActive(conversationId)
+      } catch (error) {
+        throw new Error(
+          'Could not delete this conversation. It remains in your history. Try deleting it again.',
+          { cause: error }
+        )
       }
-
-      void deletePersistedSession()
     },
     [closeSessionIfActive, prepareForDeletion, removeConversation, removeSession]
   )

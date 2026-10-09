@@ -473,6 +473,89 @@ describe('useChatWorkspaceState', () => {
     expect(api.startedRequests).toEqual([])
   })
 
+  it('user retries a reopened skill turn when regenerating, then its invocation is preserved', async () => {
+    const invocation = {
+      type: 'data-skill-invocation' as const,
+      data: { skillId: 'project:review', name: 'review', arguments: 'src/chat.ts' }
+    }
+    const { api, result } = renderWorkspaceState((api) => {
+      const load = api.sessions.load
+      api.sessions.load = async (id) => ({
+        ...(await load(id)),
+        messages: [
+          { role: 'user', parts: [{ type: 'text', text: 'Review this file' }, invocation] },
+          { role: 'assistant', parts: [{ type: 'text', text: 'Saved review' }] }
+        ]
+      })
+    })
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
+
+    act(() => void result.current.session.activeChat?.regenerate())
+
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    expect(api.startedRequests[0].userMessage.parts).toEqual([
+      { type: 'text', text: 'Review this file' },
+      invocation
+    ])
+  })
+
+  it.each(['rename', 'delete'] as const)(
+    'user changes a saved chat when $0 fails, then history remains and retry is possible',
+    async (operation) => {
+      const { api, result } = renderWorkspaceState((api) => {
+        const load = api.sessions.load
+        api.sessions.list = async () => {
+          const { messages: _messages, ...summary } = await load('session-1')
+          return [summary]
+        }
+        if (operation === 'rename') {
+          api.sessions.rename = async () => {
+            throw new Error('Storage unavailable')
+          }
+        } else {
+          api.sessions.delete = async () => {
+            throw new Error('Storage unavailable')
+          }
+        }
+      })
+      await waitFor(() => expect(result.current.conversations).toHaveLength(1))
+      act(() => result.current.session.selectConversation('session-1'))
+      await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
+      const chat = result.current.session.activeChat
+
+      await act(async () => {
+        const change =
+          operation === 'rename'
+            ? result.current.renameConversation('session-1', 'New title')
+            : result.current.deleteConversation('session-1')
+        await expect(change).rejects.toThrow(
+          operation === 'rename'
+            ? 'Could not rename this conversation. Your title was not saved. Try renaming it again.'
+            : 'Could not delete this conversation. It remains in your history. Try deleting it again.'
+        )
+      })
+      expect(result.current.conversations).toMatchObject([{ id: 'session-1', title: 'Saved chat' }])
+      expect(result.current.session.activeChat).toBe(chat)
+
+      await act(async () => {
+        if (operation === 'rename') {
+          const { messages: _messages, ...summary } = await api.sessions.load('session-1')
+          api.sessions.rename = async () => ({ ...summary, title: 'New title' })
+          await result.current.renameConversation('session-1', 'New title')
+        } else {
+          api.sessions.delete = async () => {}
+          await result.current.deleteConversation('session-1')
+        }
+      })
+      const expectedHistory =
+        operation === 'rename' ? [{ id: 'session-1', title: 'New title' }] : []
+      expect(result.current.conversations.map(({ id, title }) => ({ id, title }))).toEqual(
+        expectedHistory
+      )
+    }
+  )
+
   it('user keeps documents when regenerating, then the retry sends the original', async () => {
     const { api, result } = renderWorkspaceState((api) => {
       const loadSession = api.sessions.load

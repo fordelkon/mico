@@ -1,19 +1,19 @@
-import { app } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-
+import { createChatProvider } from '@mico/ai-providers'
+import { app } from 'electron'
 import { createChatProviderResolver } from './ai/chat/chat-provider-resolver'
 import { SessionModelProfile } from './ai/chat/session-model-profile'
 import { TurnExecutor } from './ai/chat/turn-executor'
-import { createChatProvider } from '@mico/ai-providers'
-import { registerIpc } from './ipc'
-import { MainWindowService } from './services/main-window-service'
-import { PreferenceService } from './services/preference-service'
-import { registerProviderDraftFlush } from './services/provider-draft-flush'
 import { ProviderService } from './ai/providers/provider-service'
 import { SessionRuntimeService } from './ai/sessions/session-runtime-service'
 import { WorkspaceService } from './ai/workspaces/workspace-service'
 import { SessionDatabase } from './data/session-database'
+import { registerIpc } from './ipc'
+import { MainWindowService } from './services/main-window-service'
+import { PreferenceService } from './services/preference-service'
+import { registerProviderDraftFlush } from './services/provider-draft-flush'
 import { TrayService } from './services/tray-service'
+import { registerAppQuitHandler } from './services/window-lifecycle'
 
 type MainServices = {
   mainWindow: MainWindowService
@@ -165,11 +165,24 @@ if (gotTheLock) {
     void startup.then(() => services?.mainWindow.show())
   })
 
-  app.on('before-quit', () => {
-    services?.turnExecutor.dispose()
-    services?.sessionDatabase.close()
-    services?.tray.beginQuit()
-    services?.tray.dispose()
+  registerAppQuitHandler({
+    app,
+    prepareToQuit: async () => {
+      await startup
+      services?.tray.beginQuit()
+      await services?.mainWindow.prepareToQuit()
+    },
+    dispose: () => {
+      try {
+        services?.turnExecutor.dispose()
+      } finally {
+        try {
+          services?.sessionDatabase.close()
+        } finally {
+          services?.tray.dispose()
+        }
+      }
+    }
   })
 } else {
   app.quit()

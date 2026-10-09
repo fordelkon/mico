@@ -122,7 +122,7 @@ describe('Session runtime replay', () => {
       profile,
       retry: false
     })
-    expect(next.contextMessages).toEqual([])
+    expect(next.contextMessages).toBeUndefined()
     expect(next.replayMessages).toEqual([prompt, ...context, answer, prompt])
     expect(runtime.loadSession(session.id).messages).toEqual([prompt, answer, prompt])
     expect(
@@ -131,6 +131,21 @@ describe('Session runtime replay', () => {
         .pluck()
         .get()
     ).toBe(1)
+  })
+
+  it('user retries when context was never accepted, then the snapshot remains unaccepted', async () => {
+    const { begin } = await setup()
+    const first = begin('first')
+    expect(first.contextMessages).toBeUndefined()
+    first.fail({ code: 'provider_error', message: 'Offline' })
+
+    const retry = begin('retry', true)
+
+    expect(retry.contextMessages).toBeUndefined()
+    expect(retry.replayMessages).toEqual([prompt])
+    retry.recordContext([])
+    retry.fail({ code: 'provider_error', message: 'Offline' })
+    expect(begin('accepted-retry', true).contextMessages).toEqual([])
   })
 
   it('user accepts empty context when no skill is invoked, then retries cannot replace the snapshot', async () => {

@@ -1,19 +1,16 @@
 import type { PermissionResponse } from '@shared/ai/permissions'
 import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
-import { loadProjectInstructions } from '../context/project-instructions'
 import type { SessionRuntimeService, TurnRunHandle } from '../sessions/session-runtime-service'
-import { createSkillSnapshot } from '../skills'
 import { PermissionRequests } from '../tools/permission-requests'
-import { createProjectAgentInstructions } from '../tools/project-agent-instructions'
 import { ToolAgentRunner } from '../tools/tool-agent-runner'
-import type { ToolExecutionTrace } from '../tools/tool-contract'
 import type { ToolHooks } from '../tools/tool-hooks'
 import { ToolRegistry } from '../tools/tool-registry'
-import { getMessageText, toProviderContext } from './conversation-context'
+import { getMessageText } from './conversation-context'
 import { resolveEffectiveThinkingEffort, SessionModelProfile } from './session-model-profile'
 import { type SessionTitleUpdate, TitleGenerator } from './title-generator'
+import { prepareTurnContext } from './turn-context'
 import { TurnDisplayAssembler } from './turn-display-assembler'
-import { NoModelSelectedError, SkillInvocationError, toTurnFailure } from './turn-failure'
+import { NoModelSelectedError, toTurnFailure } from './turn-failure'
 
 type ActiveTurn = {
   assembler: TurnDisplayAssembler
@@ -177,38 +174,8 @@ class TurnExecutor {
         effectiveThinkingEffort = handle.profile.thinkingEffort
       }
 
-      const cwd = handle?.cwd
-      const skills = cwd ? await createSkillSnapshot(cwd) : undefined
-      const invocation = request.userMessage.parts.find(
-        (part) => part.type === 'data-skill-invocation'
-      )
-      const acceptedContext = handle?.contextMessages ?? []
-      const authorizedSkillIds: string[] = []
-      let skillContext: string | null = null
-      if (invocation) {
-        if (!skills)
-          throw new SkillInvocationError(
-            'Cannot invoke this skill without a project workspace. Open a project and select the skill again.'
-          )
-        if (acceptedContext.length === 0) {
-          try {
-            const body = await skills.loadForUser(invocation.data.skillId)
-            const metadata = skills.skills.find(({ id }) => id === invocation.data.skillId)
-            if (metadata?.name !== invocation.data.name)
-              throw new Error(
-                'The selected skill identity changed. Refresh the catalog and select it again.'
-              )
-            skillContext = `The user explicitly invoked this skill. Its complete instructions are already loaded; do not call LoadSkill again. Apply them within the user request and their scope.\nSkill arguments: ${invocation.data.arguments}\n\n${body}`
-          } catch (error) {
-            throw new SkillInvocationError(
-              error instanceof Error
-                ? error.message
-                : 'Cannot load the selected skill. Refresh the skill catalog and try again.'
-            )
-          }
-        }
-        authorizedSkillIds.push(invocation.data.skillId)
-      }
+      const context = await prepareTurnContext(request.userMessage, handle)
+      const { cwd, skills, authorizedSkillIds } = context
       if (handle?.shouldGenerateTitle)
         this.titleGenerator.maybeGenerate({
           sessionId: request.sessionId,
@@ -217,19 +184,6 @@ class TurnExecutor {
           signal: turn.controller.signal,
           onTitleUpdated
         })
-      const projectInstructions = cwd ? await loadProjectInstructions(cwd) : null
-      const contextMessages =
-        acceptedContext.length > 0
-          ? []
-          : skillContext
-            ? [
-                {
-                  role: 'user' as const,
-                  parts: [{ type: 'text' as const, text: skillContext }]
-                }
-              ]
-            : []
-      if (handle && acceptedContext.length === 0) handle.recordContext(contextMessages)
       const registry = cwd
         ? ToolRegistry.forWorkspace(cwd, {
             skills,
@@ -254,42 +208,11 @@ class TurnExecutor {
               )
           })
         : undefined
-      const systemInstructions = cwd
-        ? createProjectAgentInstructions(cwd, registry?.definitions, skills)
-        : null
-      const replayMessages = handle
-        ? handle.replayMessages
-        : [toProviderContext(request.userMessage)]
+      const messages = context.messages(registry?.definitions)
 
       for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
         try {
-          const messages = [
-            ...(systemInstructions
-              ? [
-                  {
-                    role: 'system' as const,
-                    parts: [{ type: 'text' as const, text: systemInstructions }]
-                  }
-                ]
-              : []),
-            ...replayMessages,
-            // Fresh project guidance remains ephemeral; only accepted skill context is durable.
-            ...(projectInstructions
-              ? [
-                  {
-                    role: 'user' as const,
-                    parts: [
-                      {
-                        type: 'text' as const,
-                        text: `Context for the current user request; does not replace that request.\n\n${projectInstructions}`
-                      }
-                    ]
-                  }
-                ]
-              : []),
-            ...contextMessages
-          ]
-          const runnerInput = {
+          const runnerInput: Parameters<ToolAgentRunner['run']>[0] = {
             provider,
             messages,
             thinkingEffort: effectiveThinkingEffort,
@@ -297,42 +220,25 @@ class TurnExecutor {
             emit: (chunk) => {
               if (turn.controller.signal.aborted) return
               receivedChunk = true
-              if (chunk.type === 'text-delta') {
-                // Chunks append in O(delta); the full string is only materialized when read.
-                const visibleDelta = turn.assembler.appendText(chunk.delta, chunk.id)
-                if (visibleDelta)
-                  emit({
-                    type: 'chunk',
-                    requestId: request.requestId,
-                    chunk: { ...chunk, delta: visibleDelta }
-                  })
-                return
-              }
-              emit({ type: 'chunk', requestId: request.requestId, chunk })
+              const visibleChunk = turn.assembler.observeChunk(chunk)
+              if (visibleChunk)
+                emit({ type: 'chunk', requestId: request.requestId, chunk: visibleChunk })
             }
           }
-          if (registry) Object.assign(runnerInput, { registry })
-          const toolTraces = new Map<string, ToolExecutionTrace>()
-          if (handle)
-            Object.assign(runnerInput, {
-              onStep: (step) => handle.recordStep(step),
-              onToolResult: (trace: ToolExecutionTrace) => {
-                toolTraces.set(trace.toolCallId, trace)
-                handle.recordTrace(trace)
-              }
-            })
-          const result = await new ToolAgentRunner().run(runnerInput)
+          if (registry) runnerInput.registry = registry
+          if (handle) {
+            runnerInput.onStep = (step) => handle.recordStep(step)
+            runnerInput.onToolResult = (trace) => {
+              turn.assembler.recordTrace(trace)
+              handle.recordTrace(trace)
+            }
+          }
+          await new ToolAgentRunner().run(runnerInput)
 
           if (!turn.controller.signal.aborted) {
             if (handle) {
-              // Persist the exact stream order (see session-transcript.ts for the invariant):
-              // reasoning, tool traces and interim texts keep their positions relative to the
-              // texts around them instead of collapsing into one trailing blob.
-              handle.complete({
-                role: 'assistant',
-                parts: turn.assembler.buildParts(result.displaySequence, toolTraces),
-                metadata: { completionState: 'complete' }
-              })
+              const assistant = turn.assembler.buildMessage('complete')
+              if (assistant) handle.complete(assistant)
             }
             // A completed turn is durable before its UI gains completion-only actions.
             emit({
@@ -389,17 +295,7 @@ class TurnExecutor {
   private cancelPersistedRun(turn: ActiveTurn): void {
     const handle = turn.handle
     if (!handle) return
-    const text = turn.assembler.text()
-    if (!text) {
-      handle.cancel()
-      return
-    }
-
-    handle.cancel({
-      role: 'assistant',
-      parts: [{ type: 'text', text }],
-      metadata: { completionState: 'stopped' }
-    })
+    handle.cancel(turn.assembler.buildMessage('stopped'))
   }
 
   private cancelTurn(turn: ActiveTurn): void {

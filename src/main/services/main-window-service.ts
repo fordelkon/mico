@@ -1,11 +1,10 @@
-import { BrowserWindow, shell, type BrowserWindowConstructorOptions } from 'electron'
+import { is } from '@electron-toolkit/utils'
+import { IpcChannel } from '@shared/IpcChannel'
+import { BrowserWindow, type BrowserWindowConstructorOptions, shell } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
-import { is } from '@electron-toolkit/utils'
-
 import icon from '../../../build/icons/512x512.png?asset'
 import windowsIcon from '../../../build/icons/icon.ico?asset'
-import { IpcChannel } from '@shared/IpcChannel'
 import { registerWindowClosingHandlers } from './window-lifecycle'
 
 class MainWindowService {
@@ -43,6 +42,19 @@ class MainWindowService {
     if (this.mainWindow.isMinimized()) this.mainWindow.restore()
     this.mainWindow.show()
     this.mainWindow.focus()
+  }
+
+  async prepareToQuit(): Promise<void> {
+    const window = this.mainWindow
+    if (!window || window.isDestroyed()) return
+
+    const windowId = window.webContents.id
+    try {
+      await this.flushProviderDraft(window)
+    } finally {
+      // Only the resumed Quit may bypass the already settled draft boundary.
+      if (!window.isDestroyed()) this.closingWindowIds.add(windowId)
+    }
   }
 
   private createWindow(): void {
