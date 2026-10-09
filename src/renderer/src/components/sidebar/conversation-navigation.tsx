@@ -5,12 +5,11 @@ import {
   SidebarMenuItem,
   Spinner
 } from '@mico/ui'
-import { ChevronRight, FolderOpen } from 'lucide-react'
-import * as React from 'react'
-
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import type { Conversation } from '@renderer/types/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
+import { ChevronRight, FolderOpen } from 'lucide-react'
+import * as React from 'react'
 import { ConversationRow } from './conversation-row'
 
 type ConversationNavigationProps = {
@@ -20,8 +19,8 @@ type ConversationNavigationProps = {
   respondingConversationIds: ReadonlySet<string>
   commandKeyPressed: boolean
   selectionRequest: { id: string; key: number } | null
-  onDeleteConversation: (id: string) => void
-  onRenameConversation: (id: string, title: string) => void
+  onDeleteConversation: (id: string) => Promise<void>
+  onRenameConversation: (id: string, title: string) => Promise<void>
   onSelectConversation: (id: string, options?: { focusComposer?: boolean }) => void
 }
 

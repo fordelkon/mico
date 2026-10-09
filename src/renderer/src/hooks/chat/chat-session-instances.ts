@@ -1,16 +1,15 @@
 import { Chat } from '@ai-sdk/react'
-import * as React from 'react'
-
 import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
 import {
-  isActiveChatResponse,
   type ChatResponseState,
   type Conversation,
+  isActiveChatResponse,
   type MicoUIMessage
 } from '@renderer/types/chat'
+import type { PermissionMode } from '@shared/ai/permissions'
 import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import type { PermissionMode } from '@shared/ai/permissions'
+import * as React from 'react'
 
 // A conversation's response in any state other than idle: the map only holds
 // conversations with something to show, and removal settles the response.
@@ -84,6 +83,7 @@ function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
     metadata: message.metadata,
     parts: message.parts.flatMap<MicoUIMessage['parts'][number]>((part) => {
       if (part.type === 'document') return [{ type: 'data-document', data: part }]
+      if (part.type === 'data-skill-invocation') return [{ type: part.type, data: part.data }]
       if (part.type === 'tool-trace') {
         if (part.state === 'output-error') {
           return [
@@ -342,4 +342,4 @@ function useChatSessions(): ChatSessionsStore {
   return { getSession, removeSession, createSession, updateSession, responseControl }
 }
 
-export { useChatSessions, type ChatSession, type ChatSessionsStore }
+export { type ChatSession, type ChatSessionsStore, useChatSessions }

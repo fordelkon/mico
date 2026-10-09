@@ -40,6 +40,7 @@ Paid endpoint checks run only on manual dispatch with `real_provider` enabled.
 | Chat | Two completed turns, partial stream versus completion, stop then send, provider failure then retry |
 | Persistence | Completed answer and conversation title survive restart |
 | Sessions | Rename and delete remain effective after restart |
+| Native Quit | Pending provider URL edit survives Quit and relaunch before debounce saves |
 | Workspaces | Add a real temporary directory through the settings flow |
 | Navigation | Search from workspace settings returns to the conversation with renamed workspace labels in sidebar and composer |
 | Tools | Real file creation, tool result replay, transcript and file after restart, failed file read |

@@ -136,17 +136,30 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
   const isLibraryLoaded = React.useRef(false)
 
   const refreshRevision = React.useRef(0)
-  const refresh = React.useCallback(async (): Promise<void> => {
-    const revision = ++refreshRevision.current
+  const structuralQueue = React.useRef<Promise<unknown>>(Promise.resolve())
+  const modelMutation = React.useRef<Promise<void> | null>(null)
+  const hasUnreconciledModels = React.useRef(false)
+  const modelReconciliation = React.useRef<Promise<void> | null>(null)
+  const reconcileModels = React.useCallback(async (): Promise<void> => {
+    if (!hasUnreconciledModels.current) return
+    if (!modelReconciliation.current) {
+      modelReconciliation.current = (async (): Promise<void> => {
+        const next = await window.api.providers.getLibrary()
+        // Model actions are serialized; only provider fields and provider
+        // selection can change locally while this authoritative catalog loads.
+        libraryRef.current = {
+          ...libraryRef.current,
+          models: next.models,
+          selectedModelId: next.selectedModelId
+        }
+        setLibrary(libraryRef.current)
+        hasUnreconciledModels.current = false
+      })()
+    }
     try {
-      const next = await window.api.providers.getLibrary()
-      if (revision === refreshRevision.current) {
-        setLibrary(next)
-        setIsLoaded(true)
-      }
-    } catch {
-      if (revision === refreshRevision.current)
-        setLoadError('Could not load models. Open Settings and try again.')
+      await modelReconciliation.current
+    } finally {
+      modelReconciliation.current = null
     }
   }, [])
 
@@ -154,10 +167,12 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     delayMs: configurationSaveDelay,
     save: async (atRevision) => {
       if (!isLibraryLoaded.current) return false
-      const snapshot = libraryRef.current
       let saved: PersistedProviderLibrary
       try {
-        saved = await window.api.providers.saveLibrary(snapshot)
+        // A failed catalog read leaves reconciliation pending for the next save.
+        await modelMutation.current
+        await reconcileModels()
+        saved = await window.api.providers.saveLibrary(libraryRef.current)
         setSaveError(null)
       } catch (error) {
         setSaveError(
@@ -189,8 +204,42 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     [autosave]
   )
   const commitProviderDrafts = React.useCallback(async (): Promise<void> => {
+    await structuralQueue.current.catch(() => undefined)
+    await reconcileModels()
     await autosave.settle()
-  }, [autosave])
+  }, [autosave, reconcileModels])
+  const mutateStructure = React.useCallback(
+    <T,>(mutate: () => T | Promise<T>): Promise<T> => {
+      const task = structuralQueue.current
+        .catch(() => undefined)
+        .then(async () => {
+          await reconcileModels()
+          await autosave.settle()
+          return mutate()
+        })
+      // Reserve the queue before yielding so concurrent actions cannot pass
+      // the same draft commit and then replace one another's catalog changes.
+      structuralQueue.current = task
+      return task
+    },
+    [autosave, reconcileModels]
+  )
+  const mutateModels = React.useCallback(
+    async (mutate: () => Promise<void>): Promise<void> => {
+      const task = (async (): Promise<void> => {
+        await mutate()
+        hasUnreconciledModels.current = true
+        await reconcileModels()
+      })()
+      modelMutation.current = task
+      try {
+        await task
+      } finally {
+        modelMutation.current = null
+      }
+    },
+    [reconcileModels]
+  )
   const flushLibrary = React.useCallback(async (): Promise<void> => {
     await autosave.flush()
   }, [autosave])
@@ -252,35 +301,35 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     [editLibrary]
   )
   const addCustomProvider = React.useCallback(
-    async (provider: Omit<CustomProvider, 'id'>) => {
-      await commitProviderDrafts()
-      const customProvider = { ...provider, id: crypto.randomUUID() }
-      editLibrary((current) => ({
-        ...current,
-        customProviders: [...current.customProviders, customProvider],
-        enabledProviderIds: customProvider.enabled
-          ? [...new Set([...current.enabledProviderIds, customProvider.id])]
-          : current.enabledProviderIds
-      }))
-      return customProvider
-    },
-    [commitProviderDrafts, editLibrary]
+    (provider: Omit<CustomProvider, 'id'>) =>
+      mutateStructure(() => {
+        const customProvider = { ...provider, id: crypto.randomUUID() }
+        editLibrary((current) => ({
+          ...current,
+          customProviders: [...current.customProviders, customProvider],
+          enabledProviderIds: customProvider.enabled
+            ? [...new Set([...current.enabledProviderIds, customProvider.id])]
+            : current.enabledProviderIds
+        }))
+        return customProvider
+      }),
+    [mutateStructure, editLibrary]
   )
   const addModel = React.useCallback(
-    async (model: { displayName?: string; modelId: string; provider: ProviderId }) => {
-      await commitProviderDrafts()
-      await window.api.providers.addModel(model)
-      await refresh()
-    },
-    [commitProviderDrafts, refresh]
+    (model: { displayName?: string; modelId: string; provider: ProviderId }) =>
+      mutateStructure(() =>
+        mutateModels(async () => {
+          await window.api.providers.addModel(model)
+        })
+      ),
+    [mutateStructure, mutateModels]
   )
   const syncModels = React.useCallback(
-    async (providerId: ProviderId, models: DiscoveredModel[]) => {
-      await commitProviderDrafts()
-      await window.api.providers.syncModels({ provider: providerId, models })
-      await refresh()
-    },
-    [commitProviderDrafts, refresh]
+    (providerId: ProviderId, models: DiscoveredModel[]) =>
+      mutateStructure(() =>
+        mutateModels(() => window.api.providers.syncModels({ provider: providerId, models }))
+      ),
+    [mutateStructure, mutateModels]
   )
   const updateCustomProvider = React.useCallback(
     (providerId: ProviderId, updates: Partial<Omit<CustomProvider, 'id'>>) => {
@@ -301,39 +350,39 @@ function ProviderLibraryProvider({ children }: React.PropsWithChildren): React.J
     [editLibrary]
   )
   const toggleModel = React.useCallback(
-    async (model: CatalogModel, enabled: boolean) => {
-      await commitProviderDrafts()
-      editLibrary((current) => ({
-        ...current,
-        models: current.models.map((item) => (item.id === model.id ? { ...item, enabled } : item))
-      }))
-    },
-    [commitProviderDrafts, editLibrary]
+    (model: CatalogModel, enabled: boolean) =>
+      mutateStructure(() => {
+        editLibrary((current) => ({
+          ...current,
+          models: current.models.map((item) => (item.id === model.id ? { ...item, enabled } : item))
+        }))
+      }),
+    [mutateStructure, editLibrary]
   )
   const removeCustomProvider = React.useCallback(
-    async (providerId: ProviderId) => {
-      await commitProviderDrafts()
-      // Selection cleanup is main's invariant: saveLibrary sanitizes a
-      // selection this removal invalidated, and the saved snapshot refreshes
-      // the local state.
-      editLibrary((current) => ({
-        ...current,
-        customProviders: current.customProviders.filter((provider) => provider.id !== providerId),
-        models: current.models.filter((model) => model.provider !== providerId)
-      }))
-    },
-    [commitProviderDrafts, editLibrary]
+    (providerId: ProviderId) =>
+      mutateStructure(() => {
+        // Selection cleanup is main's invariant: saveLibrary sanitizes a
+        // selection this removal invalidated, and the saved snapshot refreshes
+        // the local state.
+        editLibrary((current) => ({
+          ...current,
+          customProviders: current.customProviders.filter((provider) => provider.id !== providerId),
+          models: current.models.filter((model) => model.provider !== providerId)
+        }))
+      }),
+    [mutateStructure, editLibrary]
   )
   const selectModel = React.useCallback(
-    async (modelId: string) => {
-      await commitProviderDrafts()
-      editLibrary((current) => ({ ...current, selectedModelId: modelId }))
-      // Selecting a model is a committed action: the composer's send path
-      // resolves the selection in main, so a debounced save would let a fast
-      // send start a turn before the selection is persisted.
-      await autosave.flush()
-    },
-    [autosave, commitProviderDrafts, editLibrary]
+    (modelId: string) =>
+      mutateStructure(async () => {
+        editLibrary((current) => ({ ...current, selectedModelId: modelId }))
+        // Selecting a model is a committed action: the composer's send path
+        // resolves the selection in main, so a debounced save would let a fast
+        // send start a turn before the selection is persisted.
+        await autosave.flush()
+      }),
+    [autosave, mutateStructure, editLibrary]
   )
   const selectProvider = React.useCallback(
     async (providerId: ProviderId | null) => {
@@ -389,10 +438,10 @@ function useProviderLibraryState(): ProviderLibraryState {
 }
 
 export {
-  type ProviderConfiguration,
-  type ProviderCatalog,
-  ProviderLibraryProvider,
   type CatalogModel,
+  type ProviderCatalog,
+  type ProviderConfiguration,
+  ProviderLibraryProvider,
   useProviderLibraryActions,
   useProviderLibraryState
 }

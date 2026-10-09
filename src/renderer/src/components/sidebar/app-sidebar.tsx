@@ -6,8 +6,8 @@ import {
   CommandItem,
   CommandList,
   CommandShortcut,
-  IconTooltipButton,
   IconSwap,
+  IconTooltipButton,
   Kbd,
   Sidebar,
   SidebarContent,
@@ -19,7 +19,9 @@ import {
   SidebarResizeHandle,
   useSidebar
 } from '@mico/ui'
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import type { Conversation } from '@renderer/types/chat'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import {
   ArrowLeft,
   Bot,
@@ -32,11 +34,8 @@ import {
   SquarePen
 } from 'lucide-react'
 import * as React from 'react'
-
 import { useAppearance } from '../appearance-provider'
-import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import { ConversationNavigation } from './conversation-navigation'
-import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import './app-sidebar.css'
 
 type AppSidebarProps = {
@@ -44,11 +43,11 @@ type AppSidebarProps = {
   projects?: WorkspaceProject[]
   activeConversationId: string | null
   respondingConversationIds: ReadonlySet<string>
-  onDeleteConversation: (conversationId: string) => void
+  onDeleteConversation: (conversationId: string) => Promise<void>
   onBackFromSettings: () => void
   onNewChat: () => void
   onOpenSettings: () => void
-  onRenameConversation: (conversationId: string, title: string) => void
+  onRenameConversation: (conversationId: string, title: string) => Promise<void>
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
   onSelectSettingsPage?: (page: 'providers' | 'appearance' | 'workspaces') => void
   settingsPage?: 'providers' | 'appearance' | 'workspaces'

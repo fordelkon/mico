@@ -36,8 +36,8 @@ type ConversationRowProps = {
   conversation: Conversation
   isResponding: boolean
   selected: boolean
-  onDeleteConversation: (conversationId: string) => void
-  onRenameConversation: (conversationId: string, title: string) => void
+  onDeleteConversation: (conversationId: string) => Promise<void>
+  onRenameConversation: (conversationId: string, title: string) => Promise<void>
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
   shortcutNumber?: number
   glidingHighlightItemProps?: GlidingHighlightItemProps<HTMLLIElement>
@@ -77,6 +77,11 @@ function ConversationRowComponent({
   const [deleting, setDeleting] = React.useState(false)
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = React.useState(false)
   const [draft, setDraft] = React.useState(conversation.title)
+  const [savingTitle, setSavingTitle] = React.useState(false)
+  const [actionError, setActionError] = React.useState<string | null>(null)
+  const errorId = React.useId()
+  const renamePendingRef = React.useRef(false)
+  const deletePendingRef = React.useRef(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const titleViewportRef = React.useRef<HTMLSpanElement>(null)
   const cancelledRef = React.useRef(false)
@@ -113,6 +118,7 @@ function ConversationRowComponent({
 
   const beginRename = (): void => {
     cancelledRef.current = false
+    setActionError(null)
     setDraft(conversation.title)
     setEditing(true)
   }
@@ -128,22 +134,60 @@ function ConversationRowComponent({
     beginRename()
   }
 
-  const commitRename = (): void => {
-    if (!cancelledRef.current) onRenameConversation(conversation.id, draft.trim())
-    setEditing(false)
+  const commitRename = async (): Promise<void> => {
+    if (cancelledRef.current || renamePendingRef.current) return
+    const title = draft.trim()
+    if (!title || title === conversation.title) {
+      setActionError(null)
+      setEditing(false)
+      return
+    }
+    renamePendingRef.current = true
+    setSavingTitle(true)
+    setActionError(null)
+    try {
+      await onRenameConversation(conversation.id, title)
+      setEditing(false)
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : 'Could not rename this conversation. Try renaming it again.'
+      )
+      inputRef.current?.focus()
+    } finally {
+      renamePendingRef.current = false
+      setSavingTitle(false)
+    }
+  }
+
+  const deleteConversation = async (): Promise<void> => {
+    if (deletePendingRef.current) return
+    deletePendingRef.current = true
+    try {
+      await onDeleteConversation(conversation.id)
+    } catch (error) {
+      setDeleting(false)
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : 'Could not delete this conversation. Try deleting it again.'
+      )
+    } finally {
+      deletePendingRef.current = false
+    }
   }
 
   const confirmDelete = (): void => {
-    if (deleting) return
+    if (deleting || deletePendingRef.current) return
 
     setDeleteConfirmationOpen(false)
+    setActionError(null)
+    setDeleting(true)
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       // Do not delay deletion behind an animation the user asked to suppress.
-      onDeleteConversation(conversation.id)
-      return
+      void deleteConversation()
     }
-
-    setDeleting(true)
   }
 
   const handleDeleteAnimationEnd = (event: React.AnimationEvent<HTMLLIElement>): void => {
@@ -155,7 +199,7 @@ function ConversationRowComponent({
       return
     }
 
-    onDeleteConversation(conversation.id)
+    void deleteConversation()
   }
 
   const titleStyle: React.CSSProperties &
@@ -168,7 +212,7 @@ function ConversationRowComponent({
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={editing || deleting}>
         <SidebarMenuItem
-          aria-busy={deleting || undefined}
+          aria-busy={deleting || savingTitle || undefined}
           className="conversation-row mx-1.5 my-px"
           data-deleting={deleting || undefined}
           data-responding={isResponding || undefined}
@@ -181,8 +225,11 @@ function ConversationRowComponent({
                 className="border-border-subtle bg-sidebar-row-hover text-[13px]"
                 ref={inputRef}
                 aria-label="Conversation title"
+                aria-describedby={actionError ? errorId : undefined}
+                aria-invalid={actionError ? true : undefined}
+                readOnly={savingTitle}
                 value={draft}
-                onBlur={commitRename}
+                onBlur={() => void commitRename()}
                 onChange={(event) => setDraft(event.target.value)}
                 onClick={(event) => event.stopPropagation()}
                 onKeyDown={(event) => {
@@ -190,13 +237,14 @@ function ConversationRowComponent({
 
                   if (event.key === 'Enter') {
                     event.preventDefault()
-                    commitRename()
+                    void commitRename()
                   }
 
-                  if (event.key === 'Escape') {
+                  if (event.key === 'Escape' && !renamePendingRef.current) {
                     event.preventDefault()
                     cancelledRef.current = true
                     setDraft(conversation.title)
+                    setActionError(null)
                     setEditing(false)
                   }
                 }}
@@ -252,6 +300,11 @@ function ConversationRowComponent({
           )}
           {!editing && !deleting && shortcutNumber === undefined && isResponding && (
             <ConversationRowStatus />
+          )}
+          {actionError && (
+            <p className="px-2.5 py-1 text-xs text-destructive" id={errorId} role="alert">
+              {actionError}
+            </p>
           )}
           <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
             <AlertDialogContent>

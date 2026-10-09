@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
 import { type ChatSkillInvocationPart, ChatSkillInvocationPartSchema } from '@shared/ai/skills'
 import {
@@ -99,13 +98,6 @@ const AgentStepPayloadSchema: z.ZodType<{ step: AgentStep }> = z.object({
  * (`assembleTranscript` and `assembleReplayEvents`) read them back in the
  * same order; nothing may reorder, deduplicate, or rewrite persisted events.
  */
-function assertPayloadDigest(row: { payload_json: string; payload_digest: string }): void {
-  if (digest(row.payload_json) !== row.payload_digest)
-    throw new Error('Runtime event payload digest does not match its stored value.')
-}
-function digest(value: string): string {
-  return createHash('sha256').update(value).digest('hex')
-}
 function visibleMessage(message: ChatMessage): VisibleMessage {
   const parts: VisibleMessage['parts'] = []
   for (const part of message.parts) {
@@ -202,7 +194,6 @@ function assembleReplayEvents(
   const messages: ChatProviderMessage[] = []
   let lastStep: AgentStep | undefined
   for (const row of rows) {
-    assertPayloadDigest(row)
     const step = parseAgentStepPayload(row.payload_json).step
     messages.push(toReplayAssistant(step.assistant))
     if (step.toolResults.length) messages.push({ role: 'tool', parts: step.toolResults })
@@ -238,8 +229,6 @@ export type { AgentStep, LoadEventRow, ToolTraceSummary, VisibleMessage }
 export {
   assembleReplayEvents,
   assembleTranscript,
-  assertPayloadDigest,
-  digest,
   parseAgentStepPayload,
   parseMessagePayload,
   sanitizeAgentStep,

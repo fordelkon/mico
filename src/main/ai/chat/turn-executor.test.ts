@@ -1160,6 +1160,104 @@ describe('TurnExecutor', () => {
     })
   })
 
+  it('user stops between tool rounds when output interleaves, then settled parts keep their order', async () => {
+    const cwd = await createTemporaryWorkspace('mico-stopped-display-')
+    await writeFile(join(cwd, 'a.txt'), 'File contents\n')
+    const { database, runtime, session } = await createSession('Project chat', {
+      projectId: 'project-1',
+      cwd
+    })
+    const partialReceived = createDeferred()
+    const streamStopped = createDeferred()
+    const recorded = collectEvents()
+    let agentRequests = 0
+    const service = createConfiguredExecutor(async (input) => {
+      if (isTitleStream(input)) return streamFrom([])
+      const { signal } = input
+      agentRequests += 1
+      if (agentRequests === 1)
+        return streamFrom([
+          { type: 'reasoning-start', id: 'reasoning-1' },
+          { type: 'reasoning-delta', id: 'reasoning-1', delta: 'First thought.' },
+          { type: 'reasoning-end', id: 'reasoning-1' },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'call-1',
+            toolName: 'Read',
+            input: { file_path: 'a.txt', limit: 1 },
+            dynamic: true
+          }
+        ])
+      if (agentRequests === 2)
+        return streamFrom([
+          { type: 'text-delta', id: 'interim', delta: 'Found the entry point.' },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'call-2',
+            toolName: 'Read',
+            input: { file_path: 'a.txt', limit: 1 },
+            dynamic: true
+          }
+        ])
+      return {
+        async *[Symbol.asyncIterator](): AsyncIterator<UIMessageChunk> {
+          const aborted = new Promise<void>((resolve) =>
+            signal.addEventListener('abort', () => resolve(), { once: true })
+          )
+          yield { type: 'text-delta', id: 'partial', delta: 'Still investigating.' }
+          await aborted
+          streamStopped.resolve()
+        }
+      }
+    }, runtime)
+
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      (event) => {
+        recorded.emit(event)
+        if (
+          event.type === 'chunk' &&
+          event.chunk.type === 'text-delta' &&
+          event.chunk.id === 'partial'
+        )
+          partialReceived.resolve()
+      }
+    )
+    await partialReceived.promise
+    service.abortTurn({ ownerId: 'window-1', requestId: request.requestId })
+    await streamStopped.promise
+
+    expect(runtime.loadSession(session.id).messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'First thought.' },
+        {
+          type: 'tool-trace',
+          toolCallId: 'call-1',
+          toolName: 'Read',
+          state: 'output-available',
+          output: 'Read 1 line.'
+        },
+        { type: 'text', text: 'Found the entry point.' },
+        {
+          type: 'tool-trace',
+          toolCallId: 'call-2',
+          toolName: 'Read',
+          state: 'output-available',
+          output: 'Read 1 line.'
+        },
+        { type: 'text', text: 'Still investigating.' }
+      ],
+      metadata: { completionState: 'stopped' }
+    })
+    expect(database.connection.prepare('SELECT status FROM runs').all()).toEqual([
+      { status: 'cancelled' }
+    ])
+    expect(recorded.events.filter((event) => event.type !== 'chunk')).toEqual([
+      { type: 'cancelled', requestId: request.requestId }
+    ])
+  })
+
   it('user retries before output when project skills change, then one stable context drives the turn', async () => {
     const cwd = await createTemporaryWorkspace('mico-turn-skills-')
     const base = join(cwd, '.agents', 'skills', 'mico-turn-review')

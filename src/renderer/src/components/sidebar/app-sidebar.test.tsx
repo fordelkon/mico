@@ -1,11 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 
+import { SidebarProvider } from '@mico/ui'
+import type { Conversation } from '@renderer/types/chat'
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-import { SidebarProvider } from '@mico/ui'
-import type { Conversation } from '@renderer/types/chat'
 
 import { AppSidebar, type AppSidebarProps } from './app-sidebar'
 
@@ -16,10 +15,10 @@ const sidebarProps = {
     { id: 'conversation-2', title: 'Second conversation' }
   ],
   onBackFromSettings: vi.fn<() => void>(),
-  onDeleteConversation: vi.fn<(conversationId: string) => void>(),
+  onDeleteConversation: vi.fn<AppSidebarProps['onDeleteConversation']>(async () => {}),
   onNewChat: vi.fn<() => void>(),
   onOpenSettings: vi.fn<() => void>(),
-  onRenameConversation: vi.fn<(conversationId: string, title: string) => void>(),
+  onRenameConversation: vi.fn<AppSidebarProps['onRenameConversation']>(async () => {}),
   onSelectConversation:
     vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
   respondingConversationIds: new Set<string>(),

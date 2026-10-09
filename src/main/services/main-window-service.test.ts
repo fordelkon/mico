@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { registerWindowClosingHandlers } from './window-lifecycle'
 
-type Listener = (...args: never[]) => void
+type CloseEvent = { preventDefault: () => void }
 
 class TestWindow {
-  private readonly listeners = new Map<string, Listener[]>()
+  private closeListeners: ((event: CloseEvent) => void)[] = []
+  private closedListeners: (() => void)[] = []
 
   private destroyed = false
 
@@ -18,24 +19,100 @@ class TestWindow {
     return this.contents
   }
 
-  on(event: string, listener: Listener): void {
-    this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener])
+  on(event: 'close', listener: (event: CloseEvent) => void): void
+  on(event: 'closed', listener: () => void): void
+  on(event: 'close' | 'closed', listener: (event: CloseEvent) => void): void {
+    if (event === 'close') {
+      this.closeListeners = [...this.closeListeners, listener]
+    } else {
+      this.closedListeners = [
+        ...this.closedListeners,
+        () => listener({ preventDefault: () => undefined })
+      ]
+    }
   }
 
-  emit(event: string): void {
-    for (const listener of this.listeners.get(event) ?? []) listener()
+  emit(_event: 'closed'): void {
+    for (const listener of this.closedListeners) listener()
   }
 
   destroyForTest(): void {
     this.destroyed = true
   }
 
-  close(): void {}
+  isDestroyed(): boolean {
+    return this.destroyed
+  }
 
-  hide(): void {}
+  readonly close = vi.fn<() => void>()
+
+  readonly hide = vi.fn<() => void>()
+
+  requestClose() {
+    const event = { preventDefault: vi.fn<() => void>() }
+    for (const listener of this.closeListeners) listener(event)
+    return event
+  }
 }
 
 describe('registerWindowClosingHandlers', () => {
+  it('user closes with a tray when drafts exist, then the window hides without saving', () => {
+    const window = new TestWindow()
+    const flushProviderDraft = vi.fn<(window: TestWindow) => Promise<void>>()
+    registerWindowClosingHandlers({
+      closingWindowIds: new Set(),
+      flushProviderDraft,
+      shouldKeepWindowOpen: () => true,
+      window
+    })
+
+    const event = window.requestClose()
+
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+    expect(window.hide).toHaveBeenCalledOnce()
+    expect(flushProviderDraft).not.toHaveBeenCalled()
+  })
+
+  it('user closes twice when drafts are saving, then the renderer stays until the save settles', async () => {
+    const window = new TestWindow()
+    const drain = Promise.withResolvers<void>()
+    const flushProviderDraft = vi.fn<(window: TestWindow) => Promise<void>>(() => drain.promise)
+    registerWindowClosingHandlers({
+      closingWindowIds: new Set(),
+      flushProviderDraft,
+      shouldKeepWindowOpen: () => false,
+      window
+    })
+
+    window.requestClose()
+    const repeated = window.requestClose()
+    expect(repeated.preventDefault).toHaveBeenCalledOnce()
+    expect(window.close).not.toHaveBeenCalled()
+    expect(flushProviderDraft).toHaveBeenCalledOnce()
+
+    drain.resolve()
+    await drain.promise
+    expect(window.close).toHaveBeenCalledOnce()
+    expect(window.requestClose().preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('user closes when the renderer disappears during saving, then no destroyed window is closed', async () => {
+    const window = new TestWindow()
+    const drain = Promise.withResolvers<void>()
+    registerWindowClosingHandlers({
+      closingWindowIds: new Set(),
+      flushProviderDraft: () => drain.promise,
+      shouldKeepWindowOpen: () => false,
+      window
+    })
+    window.requestClose()
+    window.destroyForTest()
+    drain.resolve()
+    await drain.promise
+
+    expect(window.close).not.toHaveBeenCalled()
+  })
+
   it('user sees safe cleanup when the window is destroyed, then the closing set clears', () => {
     const window = new TestWindow()
     const closingWindowIds = new Set([1])

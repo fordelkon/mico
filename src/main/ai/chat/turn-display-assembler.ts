@@ -1,120 +1,105 @@
 import type { ChatMessage } from '@shared/data/schemas/chat'
-
-import type { AgentDisplayPart } from '../tools/tool-agent-runner'
-import type { ToolExecutionTrace } from '../tools/tool-contract'
+import type { UIMessageChunk } from 'ai'
 import { toDisplayToolTrace } from '../sessions/tool-trace-presentation'
+import type { ToolExecutionTrace } from '../tools/tool-contract'
+
+type Chain<T> = { readonly value: T; readonly previous: Chain<T> | undefined }
+type DisplayPart =
+  | { type: 'text' | 'reasoning'; key: string }
+  | { type: 'tool'; toolCallId: string }
 
 const TRUNCATION_MARKER = '…'
 
-/**
- * Owns the turn's visible display: text is capped once for both the live
- * stream and the persisted reply, attributed per stream segment, and the final
- * display parts are assembled from the agent's stream-order sequence and the
- * completed tool traces.
- */
+/** Owns live and persisted display, including partial output when a turn stops. */
 class TurnDisplayAssembler {
-  #chunks: string[] = []
+  #chunks: Chain<string> | undefined
   #length = 0
   #sealed = false
   readonly #maxLength: number
-  // Visible text attributed per stream segment (text part id) so persistence can
-  // rebuild part positions without re-deriving them from the joined string.
-  readonly #segments = new Map<string, string[]>()
+  #sequence: Chain<DisplayPart> | undefined
+  readonly #segments = new Map<string, Chain<string>>()
+  readonly #traces = new Map<string, ToolExecutionTrace>()
 
   constructor(maxLength: number) {
     this.#maxLength = maxLength
   }
 
-  /** The visible portion of one text delta, honoring the shared cap. */
-  appendText(delta: string, segmentId?: string): string {
-    const visible = this.#appendCapped(delta)
-    if (segmentId && visible) {
-      const segments = this.#segments.get(segmentId) ?? []
-      segments.push(visible)
-      this.#segments.set(segmentId, segments)
+  observeChunk(chunk: UIMessageChunk): UIMessageChunk | null {
+    if (chunk.type === 'text-delta') {
+      const visible = this.appendText(chunk.delta)
+      if (!visible) return null
+      this.#appendPart('text', chunk.id, visible)
+      return { ...chunk, delta: visible }
     }
+    if (chunk.type === 'reasoning-start') {
+      this.#appendPart('reasoning', chunk.id, '')
+    } else if (chunk.type === 'reasoning-delta') {
+      this.#appendPart('reasoning', chunk.id, chunk.delta)
+    } else if (chunk.type === 'tool-input-available') {
+      this.#sequence = {
+        value: { type: 'tool', toolCallId: chunk.toolCallId },
+        previous: this.#sequence
+      }
+    }
+    return chunk
+  }
+
+  recordTrace(trace: ToolExecutionTrace): void {
+    this.#traces.set(trace.toolCallId, trace)
+  }
+
+  buildMessage(completionState: 'complete' | 'stopped'): ChatMessage | undefined {
+    const parts = ordered(this.#sequence).flatMap<ChatMessage['parts'][number]>((part) => {
+      if (part.type === 'tool') {
+        const trace = this.#traces.get(part.toolCallId)
+        return trace ? [toDisplayToolTrace(trace)] : []
+      }
+      const text = ordered(this.#segments.get(part.key)).join('')
+      return text.trim() ? [{ type: part.type, text }] : []
+    })
+    if (!parts.length && completionState === 'stopped' && !this.text()) return undefined
+    return {
+      role: 'assistant',
+      parts: parts.length ? parts : [{ type: 'text', text: this.text() }],
+      metadata: { completionState }
+    }
+  }
+
+  /** Constant-time accumulation; previously emitted content is never changed. */
+  appendText(delta: string): string {
+    if (this.#sealed) return ''
+    const remaining = this.#maxLength - this.#length
+    if (remaining <= 0) {
+      this.#sealed = true
+      return ''
+    }
+    const visible =
+      delta.length <= remaining
+        ? delta
+        : delta.slice(0, Math.max(0, remaining - TRUNCATION_MARKER.length)) + TRUNCATION_MARKER
+    this.#chunks = { value: visible, previous: this.#chunks }
+    this.#length += visible.length
+    if (delta.length > remaining) this.#sealed = true
     return visible
   }
 
-  /**
-   * The turn's persisted display parts in exact stream order. An empty
-   * assembly falls back to the full visible text.
-   */
-  buildParts(
-    displaySequence: readonly AgentDisplayPart[],
-    toolTraces: ReadonlyMap<string, ToolExecutionTrace>
-  ): ChatMessage['parts'] {
-    const parts: ChatMessage['parts'] = []
-    for (const part of displaySequence) {
-      if (part.type === 'reasoning') {
-        if (part.text) parts.push({ type: 'reasoning', text: part.text })
-      } else if (part.type === 'text') {
-        const text = this.#visibleSegment(part.textId)
-        if (text.trim()) parts.push({ type: 'text', text })
-      } else {
-        const trace = toolTraces.get(part.toolCallId)
-        if (trace) parts.push(toDisplayToolTrace(trace))
-      }
-    }
-    if (!parts.length) parts.push({ type: 'text', text: this.text() })
-    return parts
-  }
-
-  /** The full visible text streamed so far. */
   text(): string {
-    return this.#chunks.join('')
+    return ordered(this.#chunks).join('')
   }
 
-  /** The visible text streamed under one text part id, honoring the shared cap. */
-  #visibleSegment(segmentId: string): string {
-    return this.#segments.get(segmentId)?.join('') ?? ''
+  #appendPart(type: 'text' | 'reasoning', id: string, text: string): void {
+    const key = `${type}:${id}`
+    const previous = this.#segments.get(key)
+    if (!previous) this.#sequence = { value: { type, key }, previous: this.#sequence }
+    this.#segments.set(key, { value: text, previous })
   }
+}
 
-  #appendCapped(delta: string): string {
-    if (this.#sealed) return ''
-
-    if (this.#length + delta.length <= this.#maxLength) {
-      this.#chunks.push(delta)
-      this.#length += delta.length
-      if (delta.endsWith(TRUNCATION_MARKER)) this.#sealed = true
-      return delta
-    }
-
-    const contentLength = Math.max(0, this.#maxLength - TRUNCATION_MARKER.length)
-    if (this.#length >= contentLength) {
-      const previousLength = this.#length
-      this.#truncate(contentLength)
-      this.#chunks.push(TRUNCATION_MARKER)
-      this.#length += TRUNCATION_MARKER.length
-      this.#sealed = true
-      return previousLength < this.#length
-        ? TRUNCATION_MARKER.slice(previousLength - contentLength)
-        : ''
-    }
-
-    const remaining = contentLength - this.#length
-    const visibleText = delta.slice(0, remaining)
-    this.#chunks.push(visibleText, TRUNCATION_MARKER)
-    this.#length += visibleText.length + TRUNCATION_MARKER.length
-    this.#sealed = true
-    return visibleText + TRUNCATION_MARKER
+function ordered<T>(head: Chain<T> | undefined): T[] {
+  function* values(): Generator<T> {
+    for (let node = head; node; node = node.previous) yield node.value
   }
-
-  #truncate(length: number): void {
-    while (this.#length > length) {
-      const chunk = this.#chunks.at(-1)
-      if (chunk === undefined) break
-
-      const excessLength = this.#length - length
-      if (chunk.length <= excessLength) {
-        this.#chunks.pop()
-        this.#length -= chunk.length
-      } else {
-        this.#chunks[this.#chunks.length - 1] = chunk.slice(0, chunk.length - excessLength)
-        this.#length = length
-      }
-    }
-  }
+  return Array.from(values()).reverse()
 }
 
 export { TurnDisplayAssembler }
