@@ -1,15 +1,17 @@
-import { act, renderHook, waitFor } from '@testing-library/react'
 import { useChat } from '@ai-sdk/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useChatWorkspaceState } from './use-chat-workspace-state'
 
 class FakeChatAPI implements ChatAPI {
+  async getSkillCatalog(): Promise<Awaited<ReturnType<ChatAPI['getSkillCatalog']>>> {
+    return { skills: [], diagnostics: [] }
+  }
   async respondToPermission(): Promise<void> {}
   readonly startedRequests: Parameters<ChatAPI['startTurn']>[0][] = []
   readonly listeners = new Set<Parameters<ChatAPI['onTurnEvent']>[0]>()

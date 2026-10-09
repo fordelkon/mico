@@ -13,7 +13,7 @@ import { getMessageText, toProviderContext } from './conversation-context'
 import { resolveEffectiveThinkingEffort, SessionModelProfile } from './session-model-profile'
 import { type SessionTitleUpdate, TitleGenerator } from './title-generator'
 import { TurnDisplayAssembler } from './turn-display-assembler'
-import { NoModelSelectedError, toTurnFailure } from './turn-failure'
+import { NoModelSelectedError, SkillInvocationError, toTurnFailure } from './turn-failure'
 
 type ActiveTurn = {
   assembler: TurnDisplayAssembler
@@ -175,22 +175,65 @@ class TurnExecutor {
         })
         turn.handle = handle
         effectiveThinkingEffort = handle.profile.thinkingEffort
-        if (handle.shouldGenerateTitle)
-          this.titleGenerator.maybeGenerate({
-            sessionId: request.sessionId,
-            provider,
-            sourceText: getMessageText(request.userMessage),
-            signal: turn.controller.signal,
-            onTitleUpdated
-          })
       }
 
       const cwd = handle?.cwd
       const skills = cwd ? await createSkillSnapshot(cwd) : undefined
+      const invocation = request.userMessage.parts.find(
+        (part) => part.type === 'data-skill-invocation'
+      )
+      const acceptedContext = handle?.contextMessages ?? []
+      const authorizedSkillIds: string[] = []
+      let skillContext: string | null = null
+      if (invocation) {
+        if (!skills)
+          throw new SkillInvocationError(
+            'Cannot invoke this skill without a project workspace. Open a project and select the skill again.'
+          )
+        if (acceptedContext.length === 0) {
+          try {
+            const body = await skills.loadForUser(invocation.data.skillId)
+            const metadata = skills.skills.find(({ id }) => id === invocation.data.skillId)
+            if (metadata?.name !== invocation.data.name)
+              throw new Error(
+                'The selected skill identity changed. Refresh the catalog and select it again.'
+              )
+            skillContext = `The user explicitly invoked this skill. Its complete instructions are already loaded; do not call LoadSkill again. Apply them within the user request and their scope.\nSkill arguments: ${invocation.data.arguments}\n\n${body}`
+          } catch (error) {
+            throw new SkillInvocationError(
+              error instanceof Error
+                ? error.message
+                : 'Cannot load the selected skill. Refresh the skill catalog and try again.'
+            )
+          }
+        }
+        authorizedSkillIds.push(invocation.data.skillId)
+      }
+      if (handle?.shouldGenerateTitle)
+        this.titleGenerator.maybeGenerate({
+          sessionId: request.sessionId,
+          provider,
+          sourceText: getMessageText(request.userMessage),
+          signal: turn.controller.signal,
+          onTitleUpdated
+        })
       const projectInstructions = cwd ? await loadProjectInstructions(cwd) : null
+      const contextMessages =
+        acceptedContext.length > 0
+          ? []
+          : skillContext
+            ? [
+                {
+                  role: 'user' as const,
+                  parts: [{ type: 'text' as const, text: skillContext }]
+                }
+              ]
+            : []
+      if (handle && acceptedContext.length === 0) handle.recordContext(contextMessages)
       const registry = cwd
         ? ToolRegistry.forWorkspace(cwd, {
             skills,
+            authorizedSkillIds,
             permissionMode: request.permissionMode ?? 'default',
             hooks: this.toolHooks,
             requestApproval: (call, signal) =>
@@ -230,7 +273,7 @@ class TurnExecutor {
                 ]
               : []),
             ...replayMessages,
-            // Fresh context follows replay so continuation adapters retain it.
+            // Fresh project guidance remains ephemeral; only accepted skill context is durable.
             ...(projectInstructions
               ? [
                   {
@@ -243,7 +286,8 @@ class TurnExecutor {
                     ]
                   }
                 ]
-              : [])
+              : []),
+            ...contextMessages
           ]
           const runnerInput = {
             provider,

@@ -1,19 +1,17 @@
 import '@testing-library/jest-dom/vitest'
 
-import { act, render, screen, waitFor, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { Chat } from '@ai-sdk/react'
-import type { MicoUIMessage } from '@renderer/types/chat'
-import type { ToolPermissionData } from '@shared/ai/permissions'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
+import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
 import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
 import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
+import type { MicoUIMessage } from '@renderer/types/chat'
+import type { ToolPermissionData } from '@shared/ai/permissions'
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-
+import { act, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatMain } from './chat-main'
-import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
 
 Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
   configurable: true,
@@ -122,6 +120,9 @@ describe('ChatMain', () => {
       configurable: true,
       value: {
         chat: {
+          getSkillCatalog: vi
+            .fn<typeof window.api.chat.getSkillCatalog>()
+            .mockResolvedValue({ skills: [], diagnostics: [] }),
           getCapabilities: vi
             .fn<() => Promise<ModelReasoningCapabilities | null>>()
             .mockResolvedValue(null)

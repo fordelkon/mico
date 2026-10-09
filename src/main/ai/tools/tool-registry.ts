@@ -19,7 +19,11 @@ import { authorizeTool, type ToolPermissionOptions } from './tool-permissions'
 import { createWriteTool } from './write-tool'
 
 type ToolCall = { toolCallId: string; toolName: string; input: ToolInput }
-type ToolRegistryOptions = ToolPermissionOptions & { hooks?: ToolHooks; skills?: SkillSnapshot }
+type ToolRegistryOptions = ToolPermissionOptions & {
+  hooks?: ToolHooks
+  skills?: SkillSnapshot
+  authorizedSkillIds?: readonly string[]
+}
 type ToolExecution = { result: ChatProviderToolResultPart; trace: ToolExecutionTrace }
 
 // A UTF-16 slice may encode to up to four bytes per code unit. Keep each IPC
@@ -50,8 +54,8 @@ class ToolRegistry {
         registerTool(createBashTool()),
         ...(options.skills
           ? [
-              registerTool(createLoadSkillTool(options.skills)),
-              registerTool(createReadSkillResourceTool(options.skills))
+              registerTool(createLoadSkillTool(options.skills, options.authorizedSkillIds)),
+              registerTool(createReadSkillResourceTool(options.skills, options.authorizedSkillIds))
             ]
           : [])
       ],

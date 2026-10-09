@@ -1,15 +1,15 @@
 import { createHash } from 'node:crypto'
-import * as z from 'zod'
-
 import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
+import { type ChatSkillInvocationPart, ChatSkillInvocationPartSchema } from '@shared/ai/skills'
 import {
   ChatDocumentPartSchema,
+  type ChatMessage,
   ChatMessageRoleSchema,
   ChatReasoningPartSchema,
-  ChatToolTracePartSchema,
-  type ChatMessage,
-  type ChatToolTracePart
+  type ChatToolTracePart,
+  ChatToolTracePartSchema
 } from '@shared/data/schemas/chat'
+import * as z from 'zod'
 
 import { parseToolTracePayload, toToolTracePart } from './tool-trace-presentation'
 
@@ -24,6 +24,7 @@ type VisibleMessage = {
     | { type: 'document'; name: string; text: string }
     | { type: 'reasoning'; text: string }
     | ChatToolTracePart
+    | ChatSkillInvocationPart
   >
   metadata?: { completionState?: 'complete' | 'stopped' }
 }
@@ -32,6 +33,7 @@ type AgentStep = {
   index: number
   assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
   toolResults: ChatProviderToolResultPart[]
+  continuationPrompt?: string
 }
 /** Run-level tool activity totals appended once when a run reaches a terminal state. */
 type ToolTraceSummary = {
@@ -66,7 +68,8 @@ const VisibleMessageSchema: z.ZodType<VisibleMessage> = z.object({
       z.object({ type: z.literal('text'), text: z.string() }),
       ChatDocumentPartSchema,
       ChatReasoningPartSchema,
-      ChatToolTracePartSchema
+      ChatToolTracePartSchema,
+      ChatSkillInvocationPartSchema
     ])
   ),
   metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional()
@@ -83,7 +86,8 @@ const AgentStepPayloadSchema: z.ZodType<{ step: AgentStep }> = z.object({
   step: z.object({
     index: z.number().int().positive(),
     assistant: z.custom<Extract<ChatProviderMessage, { role: 'assistant' }>>(),
-    toolResults: z.array(z.custom<ChatProviderToolResultPart>()).min(1)
+    toolResults: z.array(z.custom<ChatProviderToolResultPart>()),
+    continuationPrompt: z.string().min(1).optional()
   })
 })
 
@@ -108,7 +112,7 @@ function visibleMessage(message: ChatMessage): VisibleMessage {
     if (part.type === 'text') parts.push({ type: 'text', text: part.text })
     else if (part.type === 'document') parts.push(part)
     else if (part.type === 'reasoning') parts.push({ type: 'reasoning', text: part.text })
-    else if (part.type === 'tool-trace') parts.push(part)
+    else if (part.type === 'tool-trace' || part.type === 'data-skill-invocation') parts.push(part)
   }
   const visible: VisibleMessage = {
     role: message.role,
@@ -192,17 +196,45 @@ function assembleTranscript(rows: LoadEventRow[]): VisibleMessage[] {
 }
 /** Replay agent steps as alternating assistant/tool messages in recorded order. */
 function assembleReplayEvents(
-  rows: Array<{ payload_json: string; payload_digest: string }>
+  rows: Array<{ payload_json: string; payload_digest: string }>,
+  finalized?: VisibleMessage
 ): ChatProviderMessage[] {
   const messages: ChatProviderMessage[] = []
+  let lastStep: AgentStep | undefined
   for (const row of rows) {
     assertPayloadDigest(row)
     const step = parseAgentStepPayload(row.payload_json).step
-    messages.push(toReplayAssistant(step.assistant), { role: 'tool', parts: step.toolResults })
+    messages.push(toReplayAssistant(step.assistant))
+    if (step.toolResults.length) messages.push({ role: 'tool', parts: step.toolResults })
+    if (step.continuationPrompt)
+      messages.push({ role: 'user', parts: [{ type: 'text', text: step.continuationPrompt }] })
+    lastStep = step
+  }
+  // Empty observations identify a recorded terminal response. Older logs contain
+  // only tool rounds; cancelled streams can also have unrecorded visible text.
+  if (finalized && (!lastStep || lastStep.toolResults.length || lastStep.continuationPrompt)) {
+    const recordedText = messages
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => message.parts)
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('')
+    const visibleText = finalized.parts
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('')
+    // The display cap may shorten already-recorded text and append an ellipsis.
+    // Such a visible projection contributes no additional provider response.
+    const visibleContent = visibleText.endsWith('…') ? visibleText.slice(0, -1) : visibleText
+    if (recordedText && recordedText.startsWith(visibleContent)) return messages
+    const text =
+      recordedText && visibleText.startsWith(recordedText)
+        ? visibleText.slice(recordedText.length)
+        : visibleText
+    if (text) messages.push({ role: 'assistant', parts: [{ type: 'text', text }] })
   }
   return messages
 }
 
+export type { AgentStep, LoadEventRow, ToolTraceSummary, VisibleMessage }
 export {
   assembleReplayEvents,
   assembleTranscript,
@@ -213,4 +245,3 @@ export {
   sanitizeAgentStep,
   visibleMessage
 }
-export type { AgentStep, LoadEventRow, ToolTraceSummary, VisibleMessage }

@@ -16,7 +16,21 @@ const ResourceInputSchema = SkillInputSchema.extend({
 type SkillInput = z.infer<typeof SkillInputSchema>
 type ResourceInput = z.infer<typeof ResourceInputSchema>
 
-function createLoadSkillTool(snapshot: SkillSnapshot): AgentTool<SkillInput> {
+function assertModelAccess(
+  snapshot: SkillSnapshot,
+  idOrName: string,
+  authorizedIds: readonly string[]
+): void {
+  const skill = snapshot.skills.find(({ id, name }) => id === idOrName || name === idOrName)
+  if (skill?.disableModelInvocation && !authorizedIds.includes(skill.id)) {
+    throw new Error(`Skill "${skill.name}" requires an explicit user invocation in this turn.`)
+  }
+}
+
+function createLoadSkillTool(
+  snapshot: SkillSnapshot,
+  authorizedIds: readonly string[] = []
+): AgentTool<SkillInput> {
   return defineAgentTool({
     name: 'LoadSkill',
     description:
@@ -26,12 +40,16 @@ function createLoadSkillTool(snapshot: SkillSnapshot): AgentTool<SkillInput> {
     operation: () => ({ kind: 'read-only' }),
     async execute({ skill_id }, context) {
       context.signal.throwIfAborted()
+      assertModelAccess(snapshot, skill_id, authorizedIds)
       return { output: await snapshot.load(skill_id) }
     }
   })
 }
 
-function createReadSkillResourceTool(snapshot: SkillSnapshot): AgentTool<ResourceInput> {
+function createReadSkillResourceTool(
+  snapshot: SkillSnapshot,
+  authorizedIds: readonly string[] = []
+): AgentTool<ResourceInput> {
   return defineAgentTool({
     name: 'ReadSkillResource',
     description:
@@ -41,6 +59,7 @@ function createReadSkillResourceTool(snapshot: SkillSnapshot): AgentTool<Resourc
     operation: () => ({ kind: 'read-only' }),
     async execute({ skill_id, relative_path }, context) {
       context.signal.throwIfAborted()
+      assertModelAccess(snapshot, skill_id, authorizedIds)
       return { output: await snapshot.readResource(skill_id, relative_path) }
     }
   })

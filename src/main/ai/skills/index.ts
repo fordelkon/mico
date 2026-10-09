@@ -1,7 +1,7 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-
+import type { SkillCatalog, SkillSource } from '@shared/ai/skills'
 import { parseSkillDocument } from './skill-document'
 import {
   assertContained,
@@ -11,8 +11,6 @@ import {
   resolveResourcePath
 } from './skill-files'
 
-type SkillSource = 'project-agents' | 'project-claude' | 'user-agents' | 'user-claude'
-
 interface SkillMetadata {
   readonly id: string
   readonly name: string
@@ -20,6 +18,7 @@ interface SkillMetadata {
   readonly source: SkillSource
   readonly baseDirectory: string
   readonly disableModelInvocation: boolean
+  readonly userInvocable: boolean
 }
 
 interface SkillDiagnostic {
@@ -32,6 +31,7 @@ interface SkillSnapshot {
   readonly skills: readonly SkillMetadata[]
   readonly diagnostics: readonly SkillDiagnostic[]
   load(idOrName: string): Promise<string>
+  loadForUser(id: string): Promise<string>
   readResource(idOrName: string, relativePath: string): Promise<string>
 }
 
@@ -83,7 +83,8 @@ async function discoverEntry(
       description: parsed.description,
       source: root.source,
       baseDirectory,
-      disableModelInvocation: parsed.disableModelInvocation
+      disableModelInvocation: parsed.disableModelInvocation,
+      userInvocable: parsed.userInvocable
     })
     const skill = { metadata, lexicalDirectory, body: parsed.body, document: text }
     formatSkill(skill, 'SKILL.md', text)
@@ -233,6 +234,17 @@ async function createSkillSnapshot(
       const skill = resolveSkill(registered, idOrName)
       return formatSkill(skill, 'SKILL.md', skill.body)
     },
+    async loadForUser(id: string): Promise<string> {
+      const skill = registered.find(({ metadata }) => metadata.id === id)
+      if (!skill)
+        throw new Error(`Unknown skill "${id}". Refresh the skill catalog and select it again.`)
+      if (!skill.metadata.userInvocable) {
+        throw new Error(
+          `Skill "${skill.metadata.name}" cannot be invoked by users. Select another skill.`
+        )
+      }
+      return formatSkill(skill, 'SKILL.md', skill.body)
+    },
     async readResource(idOrName: string, relativePath: string): Promise<string> {
       return readResource(resolveSkill(registered, idOrName), relativePath)
     }
@@ -240,4 +252,26 @@ async function createSkillSnapshot(
 }
 
 export type { SkillDiagnostic, SkillMetadata, SkillSnapshot, SkillSource }
-export { createSkillSnapshot }
+
+/** Renderer catalog deliberately omits native base directories and hidden skills. */
+function skillCatalog(snapshot: SkillSnapshot): SkillCatalog {
+  return {
+    skills: snapshot.skills
+      .filter(({ userInvocable }) => userInvocable)
+      .map(({ id, name, description, source, userInvocable, disableModelInvocation }) => ({
+        id,
+        name,
+        description,
+        source,
+        userInvocable,
+        disableModelInvocation
+      })),
+    diagnostics: snapshot.diagnostics.map(({ path, source, message }) => ({
+      path,
+      source,
+      message: `Skill discovery could not fully use this entry: ${message} Check its SKILL.md and folder permissions, then refresh the catalog.`
+    }))
+  }
+}
+
+export { createSkillSnapshot, skillCatalog }

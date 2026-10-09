@@ -27,7 +27,7 @@ function toProviderContext(message: ChatMessage): ChatProviderMessage {
     ...message,
     // Tool traces are renderer-only persistence projections, never provider conversation context.
     parts: message.parts
-      .filter((part) => part.type !== 'tool-trace')
+      .filter((part) => part.type !== 'tool-trace' && part.type !== 'data-skill-invocation')
       .map((part) =>
         part.type === 'document' ? { type: 'text', text: formatDocument(part) } : part
       )

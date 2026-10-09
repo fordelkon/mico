@@ -1,7 +1,6 @@
-import * as z from 'zod'
-
 import type { ProviderMetadata } from 'ai'
-
+import * as z from 'zod'
+import { type ChatSkillInvocationPart, ChatSkillInvocationPartSchema } from '../../ai/skills'
 import { defineSchema } from '../define'
 
 type ChatTextPart = { type: 'text'; text: string }
@@ -45,7 +44,13 @@ type ChatToolTracePart =
 type ChatMessageMetadata = { completionState?: 'complete' | 'stopped' }
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant'
-  parts: Array<ChatTextPart | ChatDocumentPart | ChatReasoningPart | ChatToolTracePart>
+  parts: Array<
+    | ChatTextPart
+    | ChatDocumentPart
+    | ChatReasoningPart
+    | ChatToolTracePart
+    | ChatSkillInvocationPart
+  >
   metadata?: ChatMessageMetadata
   providerMetadata?: ProviderMetadata
 }
@@ -184,10 +189,14 @@ const ChatMessagePartsSchema = defineSchema(
         ChatTextPartSchema,
         ChatDocumentPartSchema,
         ChatReasoningPartSchema,
-        ChatToolTracePartSchema
+        ChatToolTracePartSchema,
+        ChatSkillInvocationPartSchema
       ])
     )
     .min(1)
+    .refine((parts) => parts.filter((part) => part.type === 'data-skill-invocation').length <= 1, {
+      message: 'A user message may invoke only one skill.'
+    })
     .refine(
       (parts) =>
         parts.reduce(
@@ -204,7 +213,14 @@ const ChatMessageObjectSchema = z.object({
   metadata: z.object({ completionState: z.enum(['complete', 'stopped']).optional() }).optional(),
   providerMetadata: z.custom<ProviderMetadata>().optional()
 })
-const ChatMessageSchema: z.ZodType<ChatMessage> = defineSchema(ChatMessageObjectSchema)
+const ChatMessageSchema: z.ZodType<ChatMessage> = defineSchema(
+  ChatMessageObjectSchema.refine(
+    (message) =>
+      message.role === 'user' ||
+      message.parts.every((part) => part.type !== 'data-skill-invocation'),
+    { message: 'Only user messages may invoke skills.' }
+  )
+)
 const ChatUserMessageSchema: z.ZodType<ChatUserMessage> = defineSchema(
   ChatMessageObjectSchema.extend({ role: z.literal('user') })
 )
@@ -216,31 +232,32 @@ const chatDataSchemas = {
 type ModelReasoningCapabilities = z.infer<typeof ModelReasoningCapabilitiesSchema>
 type ThinkingSelection = z.infer<typeof ThinkingSelectionSchema>
 
+export type {
+  ChatDocumentPart,
+  ChatMessage,
+  ChatSkillInvocationPart,
+  ChatToolTraceInput,
+  ChatToolTracePart,
+  ChatToolTracePresentation,
+  ChatUserMessage,
+  ModelReasoningCapabilities,
+  ThinkingSelection
+}
 export {
+  ChatDocumentPartSchema,
   ChatMessageRoleSchema,
   ChatMessageSchema,
-  ChatTextPartSchema,
-  ChatDocumentPartSchema,
   ChatReasoningPartSchema,
+  ChatTextPartSchema,
   ChatToolTraceInputSchema,
-  ChatToolTracePresentationSchema,
   ChatToolTracePartSchema,
+  ChatToolTracePresentationSchema,
   ChatUserMessageSchema,
-  ModelReasoningCapabilitiesSchema,
-  ThinkingSelectionSchema,
   CodeDocumentExtensions,
   CodeDocumentMaxNameLength,
   CodeDocumentMaxTextBytes,
   CodeDocumentsMaxTextBytes,
-  chatDataSchemas
-}
-export type {
-  ChatDocumentPart,
-  ChatMessage,
-  ChatUserMessage,
-  ChatToolTraceInput,
-  ChatToolTracePresentation,
-  ChatToolTracePart,
-  ModelReasoningCapabilities,
-  ThinkingSelection
+  chatDataSchemas,
+  ModelReasoningCapabilitiesSchema,
+  ThinkingSelectionSchema
 }

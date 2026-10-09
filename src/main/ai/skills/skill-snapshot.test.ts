@@ -16,7 +16,7 @@ import { promisify } from 'node:util'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createSkillSnapshot } from './index'
+import { createSkillSnapshot, skillCatalog } from './index'
 
 const temporaryDirectories: string[] = []
 
@@ -122,6 +122,33 @@ describe('skill snapshots', () => {
     expect(snapshot.skills[0]?.description).toBe('Multiline YAML description')
     expect(snapshot.diagnostics).toHaveLength(5)
     expect(snapshot.diagnostics.map(({ message }) => message).join('\n')).toContain('context')
+  })
+
+  it('user lists skills when invocation flags differ, then user and model permissions stay independent', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    await skill(root, 'review', validMetadata)
+    await skill(root, 'hidden', 'name: hidden\ndescription: Model only\nuser-invocable: false')
+    await skill(root, 'invalid', 'name: invalid\ndescription: Invalid\nuser-invocable: "false"')
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.find(({ name }) => name === 'review')).toMatchObject({
+      userInvocable: true
+    })
+    expect(snapshot.skills.find(({ name }) => name === 'hidden')).toMatchObject({
+      userInvocable: false,
+      disableModelInvocation: false
+    })
+    await expect(snapshot.loadForUser('project-agents:hidden')).rejects.toThrow(
+      'cannot be invoked by users'
+    )
+    await expect(snapshot.loadForUser('review')).rejects.toThrow('Unknown skill')
+    expect(await snapshot.loadForUser('project-agents:review')).toContain('Original instructions')
+    expect(snapshot.diagnostics).toHaveLength(1)
+    const catalog = skillCatalog(snapshot)
+    expect(catalog.skills.map(({ name }) => name)).toEqual(['review'])
+    expect(catalog.skills[0]).not.toHaveProperty('baseDirectory')
+    expect(catalog.diagnostics[0]?.message).toContain('refresh the catalog')
   })
 
   it('user names a manual skill when loading, then its hidden instructions remain available', async () => {

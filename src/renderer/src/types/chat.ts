@@ -1,7 +1,8 @@
-import type { ProviderMetadata, UIMessage } from 'ai'
+import type { ToolPermissionData } from '@shared/ai/permissions'
+import type { ChatSkillInvocationPart } from '@shared/ai/skills'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
-import type { ToolPermissionData } from '@shared/ai/permissions'
+import type { ProviderMetadata, UIMessage } from 'ai'
 
 type AssistantCompletionState = 'complete' | 'streaming' | 'stopped'
 
@@ -14,6 +15,7 @@ type MicoUIMessage = UIMessage<
   MicoMessageMetadata,
   {
     document: ChatDocumentPart
+    'skill-invocation': ChatSkillInvocationPart['data']
     'tool-output-delta': ToolOutputDeltaData
     'tool-permission': ToolPermissionData
   }
@@ -55,13 +57,13 @@ function isActiveChatResponse(response: ChatResponseState): response is ActiveCh
 const IDLE_CHAT_RESPONSE = { status: 'idle' } as const satisfies ChatResponseState
 
 export {
-  IDLE_CHAT_RESPONSE,
-  isActiveChatResponse,
   type ActiveChatResponse,
   type AssistantCompletionState,
   type ChatResponseState,
   type ChatRetryState,
   type Conversation,
+  IDLE_CHAT_RESPONSE,
+  isActiveChatResponse,
   type MicoMessageMetadata,
   type MicoUIMessage
 }

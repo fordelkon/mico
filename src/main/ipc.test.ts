@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from 'vitest'
-
-import { IpcChannel } from '@shared/IpcChannel'
+import type { ReadOptions } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
+import { IpcChannel } from '@shared/IpcChannel'
 import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
-import type { ReadOptions } from 'node:fs'
-import type { TurnExecutor } from './ai/chat/turn-executor'
+import { describe, expect, it, vi } from 'vitest'
 import type { SessionModelProfile } from './ai/chat/session-model-profile'
+import type { TurnExecutor } from './ai/chat/turn-executor'
 import type { ProviderService } from './ai/providers/provider-service'
 import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
 import type { WorkspaceService } from './ai/workspaces/workspace-service'
@@ -196,6 +198,75 @@ const startTurnRequest = {
   requestId: 'request-1',
   userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
 }
+
+describe('registerIpc skill catalog', () => {
+  it('user selects a project when requesting skills, then its registered directory supplies the catalog', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mico-ipc-skill-'))
+    try {
+      const base = join(root, '.agents/skills/mico-ipc-catalog')
+      await mkdir(base, { recursive: true })
+      await writeFile(
+        join(base, 'SKILL.md'),
+        '---\nname: mico-ipc-catalog\ndescription: Project catalog\ndisable-model-invocation: true\n---\nCatalog instructions'
+      )
+      const { handlers, event, workspace } = createHarness()
+      workspace.getProjectContext.mockReturnValue({
+        kind: 'project',
+        projectId: 'registered',
+        rootPath: root
+      })
+      const catalog: unknown = await handlers.get(IpcChannel.Chat_GetSkillCatalog)?.(event, {
+        projectId: 'registered'
+      })
+      expect(catalog).toMatchObject({
+        skills: expect.arrayContaining([
+          {
+            id: 'project-agents:mico-ipc-catalog',
+            name: 'mico-ipc-catalog',
+            description: 'Project catalog',
+            source: 'project-agents',
+            userInvocable: true,
+            disableModelInvocation: true
+          }
+        ])
+      })
+      expect(workspace.getProjectContext).toHaveBeenCalledWith('registered')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('user has no project when opening the catalog, then no filesystem skills are exposed', async () => {
+    const { handlers, event, workspace } = createHarness()
+    await expect(handlers.get(IpcChannel.Chat_GetSkillCatalog)?.(event, {})).resolves.toEqual({
+      skills: [],
+      diagnostics: []
+    })
+    expect(workspace.getProjectContext).not.toHaveBeenCalled()
+  })
+
+  it('user submits a path when requesting skills, then the catalog rejects it', () => {
+    const { handlers, event, workspace } = createHarness()
+    expect(() =>
+      handlers.get(IpcChannel.Chat_GetSkillCatalog)?.(event, {
+        projectId: 'project',
+        cwd: '/private'
+      })
+    ).toThrow('Invalid skill catalog request')
+    expect(workspace.getProjectContext).not.toHaveBeenCalled()
+  })
+
+  it('user selects an unknown project when requesting skills, then project ownership rejects it', async () => {
+    const { handlers, event, workspace } = createHarness()
+    workspace.getProjectContext.mockImplementation(() => {
+      throw new Error('Project does not exist.')
+    })
+    await expect(
+      handlers.get(IpcChannel.Chat_GetSkillCatalog)?.(event, { projectId: '/private' })
+    ).rejects.toThrow('Project does not exist.')
+    expect(workspace.getProjectContext).toHaveBeenCalledWith('/private')
+  })
+})
 
 describe('registerIpc window control handlers', () => {
   it('user gets the focus state when the renderer asks, then it reflects that window', () => {

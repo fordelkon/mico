@@ -2,17 +2,16 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import {
-  providerFinish,
   type ChatProvider,
   type ChatProviderStreamInput,
-  type ProviderStreamPart
+  type ProviderStreamPart,
+  providerFinish
 } from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
-import { ToolAgentRunner } from './tool-agent-runner'
-import { ToolRegistry, type ToolCall } from './tool-registry'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
+import { ToolAgentRunner } from './tool-agent-runner'
+import { type ToolCall, ToolRegistry } from './tool-registry'
 
 type RunnerInput = Parameters<ToolAgentRunner['run']>[0]
 
@@ -88,7 +87,11 @@ describe('ToolAgentRunner', () => {
         replay: { provider: 'openai-responses', responseId: 'resp-1' }
       }
     })
-    expect(onStep).not.toHaveBeenCalled()
+    expect(onStep).toHaveBeenCalledExactlyOnceWith({
+      index: 1,
+      assistant: result.finalAssistant,
+      toolResults: []
+    })
   })
 
   it('user sees reasoning, tools and text interleave when a turn spans tool steps, then stream positions are kept', async () => {
@@ -213,7 +216,8 @@ describe('ToolAgentRunner', () => {
         index: 1,
         assistant: expect.objectContaining({ role: 'assistant' }),
         toolResults: [expect.objectContaining({ toolCallId: 'call-1', output: 'contents' })]
-      })
+      }),
+      { index: 2, assistant: result.finalAssistant, toolResults: [] }
     ])
     expect(calls[1].messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Read a.txt' }] },
@@ -425,7 +429,7 @@ describe('ToolAgentRunner', () => {
     )
 
     expect(result.assistantText).toBe('done')
-    expect(events).toEqual(['stream-complete', 'step', 'tool'])
+    expect(events).toEqual(['stream-complete', 'step', 'tool', 'step'])
   })
 
   it('user gets a completed answer when the output limit is hit, then the run resumes', async () => {

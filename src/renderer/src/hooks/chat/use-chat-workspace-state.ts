@@ -1,17 +1,20 @@
-import * as React from 'react'
-
 import {
-  IDLE_CHAT_RESPONSE,
   type ChatResponseState,
+  IDLE_CHAT_RESPONSE,
   type MicoUIMessage
 } from '@renderer/types/chat'
+import type { ChatSkillInvocationPart } from '@shared/ai/skills'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
-
-import { useActiveSession, type ChatActiveSessionSlice } from './use-active-session'
+import * as React from 'react'
 import { useChatSessions } from './chat-session-instances'
+import { type ChatActiveSessionSlice, useActiveSession } from './use-active-session'
 import { useConversationList } from './use-conversation-list'
 
-type ChatSendInput = { text: string; documents: ChatDocumentPart[] }
+type ChatSendInput = {
+  text: string
+  documents: ChatDocumentPart[]
+  skillInvocation?: ChatSkillInvocationPart['data']
+}
 
 /** Response control for the workspace: state, and the actions that drive it. */
 type ChatResponseSlice = {
@@ -84,13 +87,14 @@ function useChatWorkspaceState(): ChatWorkspace {
   )
 
   const sendMessage = React.useCallback(
-    async ({ text, documents }: ChatSendInput): Promise<boolean> => {
+    async ({ text, documents, skillInvocation }: ChatSendInput): Promise<boolean> => {
       if (!text.trim() && !documents.length) return false
 
       const existingSession = activeSession ? getSession(activeSession.conversationId) : undefined
       const parts: MicoUIMessage['parts'] = []
       if (text.trim()) parts.push({ type: 'text', text })
       for (const document of documents) parts.push({ type: 'data-document', data: document })
+      if (skillInvocation) parts.push({ type: 'data-skill-invocation', data: skillInvocation })
 
       if (existingSession) {
         const sent = sendSessionMessage(existingSession.conversation.id, parts)
@@ -186,4 +190,4 @@ function useChatWorkspaceState(): ChatWorkspace {
   }
 }
 
-export { useChatWorkspaceState, type ChatWorkspace, type ChatResponseSlice }
+export { type ChatResponseSlice, type ChatWorkspace, useChatWorkspaceState }

@@ -8,13 +8,15 @@ const skillMetadataSchema = z.object({
     .max(64)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   description: z.string().trim().min(1).max(1024),
-  'disable-model-invocation': z.boolean().optional().default(false)
+  'disable-model-invocation': z.boolean().optional().default(false),
+  'user-invocable': z.boolean().optional().default(true)
 })
 
 interface ParsedSkillDocument {
   name: string
   description: string
   disableModelInvocation: boolean
+  userInvocable: boolean
   body: string
   warnings: readonly string[]
 }
@@ -39,6 +41,7 @@ function parseSkillDocument(text: string): ParsedSkillDocument {
     name: parsed.data.name,
     description: parsed.data.description,
     disableModelInvocation: parsed.data['disable-model-invocation'],
+    userInvocable: parsed.data['user-invocable'],
     body: text.slice(match[0].length),
     warnings
   }

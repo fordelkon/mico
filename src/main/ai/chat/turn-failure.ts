@@ -19,6 +19,8 @@ class NoModelSelectedError extends Error {
   }
 }
 
+class SkillInvocationError extends Error {}
+
 type TurnFailureClassification = { failure: TurnFailure; retryable: boolean }
 
 /**
@@ -27,6 +29,9 @@ type TurnFailureClassification = { failure: TurnFailure; retryable: boolean }
  * The returned message is user-facing copy; `retryable` drives the retry loop.
  */
 function toTurnFailure(error: Error): TurnFailureClassification {
+  if (error instanceof SkillInvocationError)
+    return { failure: { code: 'provider_error', message: error.message }, retryable: false }
+
   if (error instanceof NoModelSelectedError)
     return { failure: { code: 'no_model', message: error.message }, retryable: false }
 
@@ -100,5 +105,5 @@ function toTurnFailure(error: Error): TurnFailureClassification {
   }
 }
 
-export { AgentBudgetError, NoModelSelectedError, toTurnFailure }
 export type { TurnFailureClassification }
+export { AgentBudgetError, NoModelSelectedError, SkillInvocationError, toTurnFailure }

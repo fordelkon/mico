@@ -1,12 +1,14 @@
-import type { ChatTransport } from 'ai'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
+import type { MicoUIMessage } from '@renderer/types/chat'
 import type { ThinkingSelection } from '@shared/data/schemas/chat'
 import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
-import type { MicoUIMessage } from '@renderer/types/chat'
+import type { ChatTransport } from 'ai'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ElectronChatTransport } from './electron-chat-transport'
 
 class FakeChatAPI implements ChatAPI {
+  async getSkillCatalog(): Promise<Awaited<ReturnType<ChatAPI['getSkillCatalog']>>> {
+    return { skills: [], diagnostics: [] }
+  }
   async respondToPermission(): Promise<void> {}
   readonly abortedRequestIds: string[] = []
   readonly startedRequests: Parameters<ChatAPI['startTurn']>[0][] = []
@@ -84,6 +86,32 @@ describe('ElectronChatTransport', () => {
     expect(api.startedRequests[0]?.permissionMode).toBe('acceptEdits')
     await stream.cancel()
   })
+  it.each(['submit-message', 'regenerate-message'] as const)(
+    'user invokes a skill when %s, then its identity and arguments reach the turn',
+    async (trigger) => {
+      const { api, transport } = createTransport()
+      const invocation = {
+        type: 'data-skill-invocation' as const,
+        data: { skillId: 'review', name: 'review', arguments: 'check this' }
+      }
+      const stream = await transport.sendMessages({
+        ...sendOptions,
+        trigger,
+        messages: [
+          {
+            id: 'user-1',
+            role: 'user',
+            parts: [{ type: 'text', text: '/skill:review check this' }, invocation]
+          }
+        ]
+      })
+      expect(api.startedRequests[0]?.userMessage.parts).toEqual([
+        { type: 'text', text: '/skill:review check this' },
+        invocation
+      ])
+      await stream.cancel()
+    }
+  )
   it.each(['submit-message', 'regenerate-message'] as const)(
     'user keeps attached documents when sending %s, then the request carries them',
     async (trigger) => {

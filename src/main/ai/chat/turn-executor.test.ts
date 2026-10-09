@@ -176,6 +176,147 @@ function partialPendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk
 }
 
 describe('TurnExecutor', () => {
+  it('user invokes a manual skill when retrying after reload, then accepted instructions stay durable', async () => {
+    const cwd = await createTemporaryWorkspace('mico-explicit-skill-')
+    const base = join(cwd, '.agents/skills/manual')
+    await mkdir(base, { recursive: true })
+    const skillPath = join(base, 'SKILL.md')
+    await writeFile(
+      skillPath,
+      '---\nname: manual\ndescription: Manual\ndisable-model-invocation: true\n---\nOriginal manual instructions'
+    )
+    await writeFile(join(base, 'reference.md'), 'Current manual reference')
+    const { runtime, database, session } = await createSession('Manual chat', {
+      projectId: 'p',
+      cwd
+    })
+    const calls: Parameters<ChatProvider['stream']>[0][] = []
+    const userMessage: TurnStartRequest['userMessage'] = {
+      role: 'user',
+      parts: [
+        { type: 'text', text: '/skill:manual Unicode 文件 😀' },
+        {
+          type: 'data-skill-invocation',
+          data: { skillId: 'project-agents:manual', name: 'manual', arguments: 'Unicode 文件 😀' }
+        }
+      ]
+    }
+    const first = collectEvents()
+    const executor = createConfiguredExecutor(
+      async (input) => {
+        if (isTitleStream(input)) return streamFrom([])
+        calls.push(input)
+        throw new Error('Stop after accepting context')
+      },
+      runtime,
+      { maxAttempts: 1 }
+    )
+    executor.startTurn(
+      { ownerId: 'w', request: { ...request, sessionId: session.id, userMessage } },
+      first.emit
+    )
+    await first.terminal
+    expect(first.events.at(-1)?.type).toBe('error')
+    expect(JSON.stringify(calls[0]?.messages)).toContain('Original manual instructions')
+    expect(calls[0]?.messages.at(-1)).toMatchObject({ role: 'user' })
+    expect(JSON.stringify(calls[0]?.messages)).toContain('Unicode 文件 😀')
+    expect(runtime.loadSession(session.id).messages[0]?.parts).toEqual(userMessage.parts)
+    await writeFile(
+      skillPath,
+      '---\nname: manual\ndescription: Manual\ndisable-model-invocation: true\n---\nChanged manual instructions'
+    )
+    const reloaded = new SessionRuntimeService({ database })
+    const second = collectEvents()
+    const retried = createConfiguredExecutor(
+      async (input) => {
+        calls.push(input)
+        if (calls.length === 2)
+          return streamFrom([
+            // SAFETY: fixture matches the provider's completed tool-input chunk contract.
+            {
+              type: 'tool-input-available',
+              toolCallId: 'resource',
+              toolName: 'ReadSkillResource',
+              input: { skill_id: 'manual', relative_path: 'reference.md' }
+            } as UIMessageChunk
+          ])
+        return streamFrom([textChunk])
+      },
+      reloaded,
+      { getChatConfigurationForModelEntry: () => configuration }
+    )
+    retried.startTurn(
+      {
+        ownerId: 'w',
+        request: {
+          ...request,
+          requestId: 'retry-manual',
+          sessionId: session.id,
+          userMessage,
+          retry: true
+        }
+      },
+      second.emit
+    )
+    await second.terminal
+    expect(second.events.at(-1)?.type).toBe('finish')
+    expect(JSON.stringify(calls[1]?.messages)).toContain('Original manual instructions')
+    expect(JSON.stringify(calls[1]?.messages)).not.toContain('Changed manual instructions')
+    expect(
+      calls[1]?.messages.filter((message) =>
+        JSON.stringify(message).includes('Original manual instructions')
+      )
+    ).toHaveLength(1)
+    expect(JSON.stringify(calls[2]?.messages)).toContain('Current manual reference')
+  })
+
+  it.each(['missing', 'hidden', 'no-workspace'])(
+    'user invokes %s when starting a turn, then no provider request is made',
+    async (scenario) => {
+      const cwd = await createTemporaryWorkspace('mico-invalid-skill-')
+      const base = join(cwd, '.agents/skills/hidden')
+      await mkdir(base, { recursive: true })
+      await writeFile(
+        join(base, 'SKILL.md'),
+        '---\nname: hidden\ndescription: Hidden\nuser-invocable: false\n---\nHidden body'
+      )
+      const { runtime, session } = await createSession(
+        'Invalid skill',
+        scenario === 'no-workspace' ? {} : { projectId: 'p', cwd }
+      )
+      const stream = vi.fn<ChatProvider['stream']>(async () => streamFrom([]))
+      const executor = createConfiguredExecutor(stream, runtime)
+      const recorded = collectEvents()
+      executor.startTurn(
+        {
+          ownerId: 'w',
+          request: {
+            ...request,
+            sessionId: session.id,
+            userMessage: {
+              role: 'user',
+              parts: [
+                {
+                  type: 'data-skill-invocation',
+                  data: { skillId: `project-agents:${scenario}`, name: scenario, arguments: '' }
+                }
+              ]
+            }
+          }
+        },
+        recorded.emit
+      )
+      await recorded.terminal
+      expect(stream).not.toHaveBeenCalled()
+      expect(recorded.events).toEqual([
+        expect.objectContaining({
+          type: 'error',
+          message: expect.stringMatching(/skill|workspace/i)
+        })
+      ])
+    }
+  )
+
   it('user sends a document-only message when starting a turn, then it is sent as named text', async () => {
     const { runtime, session } = await createSession('New chat')
     const calls: Parameters<ChatProvider['stream']>[0][] = []

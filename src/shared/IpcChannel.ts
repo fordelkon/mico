@@ -17,6 +17,8 @@ export enum IpcChannel {
   Chat_TurnEvent = 'chat:turn-event',
   /** Returns the session model's reasoning capabilities, or the global selection when no session is specified. */
   Chat_GetCapabilities = 'chat:get-capabilities',
+  /** Returns user-invocable skills in a registered workspace project. */
+  Chat_GetSkillCatalog = 'chat:get-skill-catalog',
   /** Starts a turn owned by the invoking renderer. */
   Chat_StartTurn = 'chat:start-turn',
   /** Answers a pending tool approval owned by the invoking renderer. */

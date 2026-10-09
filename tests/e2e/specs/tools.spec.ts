@@ -243,17 +243,17 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   expect(await readFile(join(app.workspaceDir, 'result.txt'), 'utf8')).toBe('MICO_EDITED_RESULT')
 })
 
-test('user loads a workspace skill when following its reference, then readable details survive restart', async ({
+test('user invokes a manual slash skill when following its reference, then details survive restart', async ({
   app,
   provider
-}) => {
+}, testInfo) => {
   const skillDirectory = join(app.workspaceDir, '.agents', 'skills', 'mico-e2e-skill')
   const skillBody = 'Follow MICO_SKILL_BODY and read references/guide.md before replying.'
   const resourceBody = '# Reference guide\nUse MICO_SKILL_RESOURCE when completing the request.'
   await mkdir(join(skillDirectory, 'references'), { recursive: true })
   await writeFile(
     join(skillDirectory, 'SKILL.md'),
-    `---\nname: mico-e2e-skill\ndescription: Follow the Mico E2E reference guide.\n---\n${skillBody}\n`
+    `---\nname: mico-e2e-skill\ndescription: Follow the Mico E2E reference guide.\ndisable-model-invocation: true\n---\n${skillBody}\n`
   )
   await writeFile(join(skillDirectory, 'references', 'guide.md'), resourceBody)
   // Replace only the native folder chooser; workspace selection and discovery remain real.
@@ -264,12 +264,6 @@ test('user loads a workspace skill when following its reference, then readable d
   await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
   await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
 
-  const load = provider.enqueue({
-    type: 'tool',
-    name: 'LoadSkill',
-    id: 'load-skill',
-    input: { skill_id: 'mico-e2e-skill' }
-  })
   const resource = provider.enqueue({
     type: 'tool',
     name: 'ReadSkillResource',
@@ -277,21 +271,36 @@ test('user loads a workspace skill when following its reference, then readable d
     input: { skill_id: 'mico-e2e-skill', relative_path: 'references/guide.md' }
   })
   const answer = provider.enqueue({ type: 'text', text: 'Followed the skill and its reference.' })
-  await sendUserMessage(app.window, 'Use mico-e2e-skill and follow its reference guide.')
-  const firstRequest = await load.received
-  expect(firstRequest.messages).toContainEqual(
-    expect.objectContaining({
-      role: 'system',
-      content: expect.stringContaining('Follow the Mico E2E reference guide.')
-    })
+  const draft = composer(app.window)
+  await draft.fill('/')
+  await expect(app.window.getByRole('option', { name: /\/skill:mico-e2e-skill/ })).toBeVisible()
+  await expect(app.window.getByText('Manual only', { exact: true })).toBeVisible()
+  await app.window.screenshot({ path: testInfo.outputPath('skill-menu-light.png') })
+  await draft.press('Escape')
+  await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
+  await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
+  await app.window.getByRole('radio', { name: 'Dark', exact: true }).click()
+  await app.window.getByRole('button', { name: 'Back', exact: true }).click()
+  await app.electronApp.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setSize(768, 850)
   )
+  await expect(app.window.locator('html')).toHaveClass(/dark/)
+  await draft.fill('')
+  await draft.fill('/')
+  await expect(app.window.getByRole('option', { name: /\/skill:mico-e2e-skill/ })).toBeVisible()
+  await draft.focus()
+  await expect(draft).toBeFocused()
+  expect(
+    await app.window.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true)
+  await app.window.screenshot({ path: testInfo.outputPath('skill-menu-dark-narrow.png') })
+  await draft.press('Tab')
+  await expect(draft).toHaveValue('/skill:mico-e2e-skill ')
+  await expect(draft).toBeFocused()
+  await sendUserMessage(app.window, '/skill:mico-e2e-skill follow its reference guide.')
   const resourceRequest = await resource.received
   expect(resourceRequest.messages).toContainEqual(
-    expect.objectContaining({
-      role: 'tool',
-      tool_call_id: 'load-skill',
-      content: expect.stringContaining(skillBody)
-    })
+    expect.objectContaining({ role: 'user', content: expect.stringContaining(skillBody) })
   )
   const answerRequest = await answer.received
   expect(answerRequest.messages).toContainEqual(
@@ -301,12 +310,6 @@ test('user loads a workspace skill when following its reference, then readable d
       content: expect.stringContaining(resourceBody)
     })
   )
-  const loadDetails = app.window.getByRole('button', {
-    name: /^Load skill mico-e2e-skill\/SKILL\.md/
-  })
-  await loadDetails.click()
-  await expect(app.window.getByRole('log', { name: 'File content' })).toContainText(skillBody)
-  await loadDetails.click()
   await app.window
     .getByRole('button', {
       name: /^Read skill resource mico-e2e-skill\/references\/guide\.md/
@@ -316,17 +319,24 @@ test('user loads a workspace skill when following its reference, then readable d
     await expect(app.window.getByRole('log', { name: 'File content' })).toContainText(line)
   await expect(app.window.locator('.conversation-row__title')).toHaveText('E2E conversation')
 
+  const followUp = provider.enqueue({ type: 'text', text: 'Completed the follow-up.' })
+  await sendUserMessage(app.window, 'Continue without invoking a skill.')
+  const followUpRequest = await followUp.received
+  expect(followUpRequest.messages.findLast(({ role }) => role === 'user')?.content).toBe(
+    'Continue without invoking a skill.'
+  )
+  expect(
+    followUpRequest.messages
+      .filter(({ role }) => role === 'system')
+      .map(({ content }) => content)
+      .join('\n')
+  ).not.toContain(skillBody)
+
   await app.relaunch()
   const sidebar = app.window.getByLabel('Sidebar', { exact: true })
   const projectToggle = sidebar.getByRole('button', { name: 'Toggle project conversations' })
   if ((await projectToggle.getAttribute('aria-expanded')) === 'false') await projectToggle.click()
   await sidebar.getByRole('button', { name: 'E2E conversation', exact: true }).click()
-  const restoredLoadDetails = app.window.getByRole('button', {
-    name: /^Load skill mico-e2e-skill\/SKILL\.md/
-  })
-  await restoredLoadDetails.click()
-  await expect(app.window.getByRole('log', { name: 'File content' })).toContainText(skillBody)
-  await restoredLoadDetails.click()
   await app.window
     .getByRole('button', {
       name: /^Read skill resource mico-e2e-skill\/references\/guide\.md/
@@ -335,7 +345,7 @@ test('user loads a workspace skill when following its reference, then readable d
   for (const line of resourceBody.split('\n'))
     await expect(app.window.getByRole('log', { name: 'File content' })).toContainText(line)
   await expect(assistantMessages(app.window).last().getByTestId('answer-content')).toHaveText(
-    'Followed the skill and its reference.'
+    'Completed the follow-up.'
   )
 })
 

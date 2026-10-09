@@ -1,28 +1,28 @@
+import { open, stat as statFile } from 'node:fs/promises'
+import { IpcChannel } from '@shared/IpcChannel'
+import type { InvokeChannel } from '@shared/ipc/contracts'
 import {
   BrowserWindow,
   dialog,
-  ipcMain,
-  shell,
   type IpcMain,
-  type IpcMainInvokeEvent
+  type IpcMainInvokeEvent,
+  ipcMain,
+  shell
 } from 'electron'
-import { open, stat as statFile } from 'node:fs/promises'
-import type { InvokeChannel } from '@shared/ipc/contracts'
-
-import { IpcChannel } from '@shared/IpcChannel'
-import {
-  pickCodeDocuments,
-  type CodeDocumentPickerDependencies
-} from './attachments/code-document-picker'
-import { TurnSenderGate } from './ai/chat/turn-sender-gate'
-import type { TurnExecutor } from './ai/chat/turn-executor'
 import type { SessionModelProfile } from './ai/chat/session-model-profile'
-import { registerChannel, type ChannelDefinition } from './ipc/define-channel'
-import type { MainWindowService } from './services/main-window-service'
-import type { PreferenceService } from './services/preference-service'
+import type { TurnExecutor } from './ai/chat/turn-executor'
+import { TurnSenderGate } from './ai/chat/turn-sender-gate'
 import type { ProviderService } from './ai/providers/provider-service'
 import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
+import { createSkillSnapshot, skillCatalog } from './ai/skills'
 import type { WorkspaceService } from './ai/workspaces/workspace-service'
+import {
+  type CodeDocumentPickerDependencies,
+  pickCodeDocuments
+} from './attachments/code-document-picker'
+import { type ChannelDefinition, registerChannel } from './ipc/define-channel'
+import type { MainWindowService } from './services/main-window-service'
+import type { PreferenceService } from './services/preference-service'
 
 type IpcMainRegistrar = Pick<IpcMain, 'handle'>
 type IpcDependencies = CodeDocumentPickerDependencies & {
@@ -165,6 +165,15 @@ function registerIpc(
         turnExecutor.abortAllTurns(owner)
       )
       turnExecutor.startTurn({ ownerId, request }, emitTurnEvent, emitTitleUpdate)
+    }
+  })
+  register({
+    channel: IpcChannel.Chat_GetSkillCatalog,
+    invalidMessage: 'Invalid skill catalog request',
+    handle: async ({ projectId }) => {
+      if (!projectId) return { skills: [], diagnostics: [] }
+      const context = workspace.getProjectContext(projectId)
+      return skillCatalog(await createSkillSnapshot(context.rootPath))
     }
   })
   register({
