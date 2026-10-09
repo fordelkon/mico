@@ -61,7 +61,7 @@ const OpenAIEventSchema = z.object({
 })
 type OpenAIInputItem =
   | {
-      role: 'assistant' | 'system' | 'user'
+      role: 'assistant' | 'user'
       content: Array<{ type: 'input_text'; text: string }>
     }
   | { type: 'function_call'; call_id: string; name: string; arguments: string }
@@ -69,6 +69,7 @@ type OpenAIInputItem =
 type OpenAIResponsesRequest = {
   model: string
   previous_response_id?: string
+  instructions?: string
   stream: true
   input: OpenAIInputItem[]
   tools?: ReturnType<typeof toTools>
@@ -77,6 +78,7 @@ type OpenAIResponsesRequest = {
 function toOpenAIInput(messages: ChatProviderMessage[]): OpenAIInputItem[] {
   const input: OpenAIInputItem[] = []
   for (const message of messages) {
+    if (message.role === 'system') continue
     if (message.role === 'tool') {
       for (const part of message.parts)
         if (part.type === 'tool-result')
@@ -112,11 +114,7 @@ function toOpenAIInput(messages: ChatProviderMessage[]): OpenAIInputItem[] {
     const content = message.parts.flatMap((part) =>
       'text' in part ? [{ type: 'input_text' as const, text: part.text }] : []
     )
-    if (
-      content.length > 0 &&
-      (message.role === 'assistant' || message.role === 'system' || message.role === 'user')
-    )
-      input.push({ role: message.role, content })
+    if (content.length > 0) input.push({ role: message.role, content })
   }
   return input
 }
@@ -152,6 +150,12 @@ function createOpenAIResponsesProvider(
     getModelCapabilities: async () => getOptimisticThinkingCapabilities(),
     stream: async ({ messages, tools, thinkingEffort, signal, onPerformanceMetrics }) => {
       const previousResponse = getPreviousResponse(messages)
+      // Responses does not inherit instructions through previous_response_id.
+      // Read the current system text before trimming provider-owned history.
+      const instructions = messages
+        .filter((message) => message.role === 'system')
+        .flatMap((message) => message.parts.flatMap((part) => ('text' in part ? [part.text] : [])))
+        .join('\n\n')
       const request: OpenAIResponsesRequest = {
         model: configuration.modelId,
         stream: true,
@@ -161,6 +165,7 @@ function createOpenAIResponsesProvider(
           previousResponse ? messages.slice(previousResponse.historyStart) : messages
         )
       }
+      if (instructions) request.instructions = instructions
       if (previousResponse) request.previous_response_id = previousResponse.responseId
       if (tools?.length) request.tools = toTools(tools)
       // Responses uses a different stream vocabulary from Chat Completions, so

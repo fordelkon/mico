@@ -1,14 +1,19 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createTemporaryWorkspace, removeTemporaryPaths } from '../tools/test-helpers'
 
-import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+afterEach(removeTemporaryPaths)
+
 import type { ChatProvider } from '@mico/ai-providers'
+import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { UIMessageChunk } from 'ai'
-import {
-  SessionRuntimeService,
-  type ExecutionProfileSnapshot
-} from '../sessions/session-runtime-service'
 import { SessionDatabase } from '../../data/session-database'
-import { createChatProviderResolver, type ChatProviderResolver } from './chat-provider-resolver'
+import {
+  type ExecutionProfileSnapshot,
+  SessionRuntimeService
+} from '../sessions/session-runtime-service'
+import { type ChatProviderResolver, createChatProviderResolver } from './chat-provider-resolver'
 import { SessionModelProfile } from './session-model-profile'
 import { SESSION_TITLE_INSTRUCTIONS } from './title-generator'
 import { TurnExecutor } from './turn-executor'
@@ -1012,6 +1017,101 @@ describe('TurnExecutor', () => {
       ],
       metadata: { completionState: 'complete' }
     })
+  })
+
+  it('user retries before output when project skills change, then one stable context drives the turn', async () => {
+    const cwd = await createTemporaryWorkspace('mico-turn-skills-')
+    const base = join(cwd, '.agents', 'skills', 'mico-turn-review')
+    await mkdir(base, { recursive: true })
+    const skillPath = join(base, 'SKILL.md')
+    await writeFile(
+      skillPath,
+      '---\nname: mico-turn-review\ndescription: Review project\n---\nOriginal skill body'
+    )
+    await writeFile(join(cwd, 'AGENTS.md'), 'Original project guidance')
+    const { runtime, session } = await createSession('Project chat', {
+      projectId: 'project-1',
+      cwd
+    })
+    const calls: Parameters<ChatProvider['stream']>[0][] = []
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(
+      async (input) => {
+        if (isTitleStream(input)) return streamFrom([])
+        calls.push(input)
+        if (calls.length === 1) {
+          await writeFile(
+            skillPath,
+            '---\nname: mico-turn-review\ndescription: Review project\n---\nChanged skill body'
+          )
+          await writeFile(join(cwd, 'AGENTS.md'), 'Changed project guidance')
+          throw new TypeError('fetch failed')
+        }
+        if (calls.length === 2)
+          return streamFrom([
+            // SAFETY: this fixture conforms to the provider completed tool-call chunk.
+            {
+              type: 'tool-input-available',
+              toolCallId: 'skill-call',
+              toolName: 'LoadSkill',
+              input: { skill_id: 'mico-turn-review' }
+            } as UIMessageChunk
+          ])
+        return streamFrom([{ type: 'text-delta', id: 'answer', delta: 'Done.' }])
+      },
+      runtime,
+      {
+        maxAttempts: 2,
+        retryDelayMs: 0,
+        getChatConfigurationForModelEntry: () => configuration
+      }
+    )
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+    expect(recorded.events.at(-1)?.type).toBe('finish')
+    for (const call of calls) {
+      expect(call.messages.filter((message) => message.role === 'system')).toHaveLength(1)
+      const context = JSON.stringify(call.messages)
+      expect(context).toContain('Original project guidance')
+      expect(context).not.toContain('Changed project guidance')
+    }
+    expect(calls[1]?.messages.slice(1, 2)).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
+    ])
+    expect(calls[1]?.messages.at(-1)).toMatchObject({
+      role: 'user',
+      parts: [
+        {
+          type: 'text',
+          text: expect.stringContaining(
+            'Context for the current user request; does not replace that request.'
+          )
+        }
+      ]
+    })
+    expect(calls[1]?.tools?.some((tool) => tool.name === 'LoadSkill')).toBe(true)
+    expect(JSON.stringify(calls[2]?.messages)).toContain('Original skill body')
+    expect(JSON.stringify(calls[2]?.messages)).not.toContain('Changed skill body')
+    const persisted = JSON.stringify(runtime.loadSession(session.id).messages)
+    expect(persisted).not.toContain('Original project guidance')
+    expect(persisted).toContain('Original skill body')
+    const next = collectEvents()
+    service.startTurn(
+      {
+        ownerId: 'window-1',
+        request: { ...request, requestId: 'request-2', sessionId: session.id }
+      },
+      next.emit
+    )
+    await next.terminal
+    expect(next.events.at(-1)?.type).toBe('finish')
+    expect(JSON.stringify(calls.at(-1)?.messages)).toContain('Changed project guidance')
+    expect(JSON.stringify(runtime.loadSession(session.id).messages)).toContain(
+      'Original skill body'
+    )
   })
 
   it('user gets workspace instructions prepended when in a project session, then they lead the request', async () => {

@@ -1,5 +1,14 @@
 import { Button } from '@mico/ui'
+import type { ToolPermissionData } from '@shared/ai/permissions'
+import { toolLabel } from '@shared/ai/tool-presentation'
 import {
+  getToolTracePresentation,
+  type ToolTraceInput,
+  ToolTraceInputSchema
+} from '@shared/ai/tool-trace'
+import type { DynamicToolUIPart } from 'ai'
+import {
+  BookOpenIcon,
   ChevronDownIcon,
   FilePenLineIcon,
   FilePlus2Icon,
@@ -8,13 +17,8 @@ import {
   TerminalIcon,
   WrenchIcon
 } from 'lucide-react'
-import type { DynamicToolUIPart } from 'ai'
 import * as React from 'react'
 import * as z from 'zod'
-
-import { toolLabel } from '@shared/ai/tool-presentation'
-import type { ToolPermissionData } from '@shared/ai/permissions'
-import { ToolPermissionCard } from './tool-permission-card'
 import { editPreview } from './edit-preview'
 import {
   formatGenericToolPayload,
@@ -22,12 +26,7 @@ import {
   GenericToolTrace
 } from './generic-tool-trace'
 import { stripTerminalControlSequences } from './terminal-output'
-
-import {
-  getToolTracePresentation,
-  ToolTraceInputSchema,
-  type ToolTraceInput
-} from '@shared/ai/tool-trace'
+import { ToolPermissionCard } from './tool-permission-card'
 import { ToolTracePresentationView } from './tool-trace-renderers'
 
 type ToolDescription = {
@@ -54,7 +53,16 @@ type ToolActivityState =
 const MAX_SUMMARY_CHARACTERS = 2_000
 const MAX_COMMAND_CHARACTERS = 120
 const COMPACT_OUTPUT_LINES = 5
-const KNOWN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'])
+const KNOWN_TOOL_NAMES = new Set([
+  'Bash',
+  'Edit',
+  'Glob',
+  'Grep',
+  'Read',
+  'Write',
+  'LoadSkill',
+  'ReadSkillResource'
+])
 const ToolOutputSchema = z.union([
   z.string(),
   z.object({ output: z.string() }).transform(({ output }) => output),
@@ -166,6 +174,8 @@ function getRunningSummary(toolName: string, elapsedSeconds: number): string {
       Glob: 'Searching…',
       Grep: 'Searching…',
       Read: 'Reading file…',
+      LoadSkill: 'Loading skill…',
+      ReadSkillResource: 'Reading skill resource…',
       Write: 'Writing file…'
     }[toolName] ?? 'Running…'
   )
@@ -215,6 +225,8 @@ function getToolSummary(
           'Search completed.'
       }
     case 'Read':
+    case 'LoadSkill':
+    case 'ReadSkillResource':
       return {
         kind: 'message',
         isError: false,
@@ -274,6 +286,8 @@ function describeTool(toolName: string, input: ToolTraceInput): ToolDescription 
     case 'Edit':
     case 'Read':
     case 'Write':
+    case 'LoadSkill':
+    case 'ReadSkillResource':
       return input.path
         ? {
             title: toolLabel(toolName),
@@ -307,6 +321,8 @@ function ToolIcon({ toolName }: { toolName: string }): React.JSX.Element {
       Glob: SearchIcon,
       Grep: SearchIcon,
       Read: FileSearchIcon,
+      LoadSkill: BookOpenIcon,
+      ReadSkillResource: FileSearchIcon,
       Write: FilePlus2Icon
     }[toolName] ?? WrenchIcon
   return <Icon aria-hidden="true" className="size-3.5" />
@@ -380,6 +396,8 @@ function getToolActivityLabel(part: ToolActivityPart): string {
   const input = ToolTraceInputSchema.safeParse(part.input)
   const action = {
     Read: 'Reading',
+    LoadSkill: 'Loading skill',
+    ReadSkillResource: 'Reading skill resource',
     Write: 'Writing',
     Edit: 'Updating',
 
@@ -442,7 +460,9 @@ function ToolTrace({
           elapsedSeconds
         )
   // Failed mutations must not render their proposed edits as successfully applied.
-  const isFileTool = ['Read', 'Edit', 'Write'].includes(part.toolName)
+  const isFileTool = ['Read', 'Edit', 'Write', 'LoadSkill', 'ReadSkillResource'].includes(
+    part.toolName
+  )
   const hasPanel =
     showDetails &&
     ((presentation != null &&
@@ -565,12 +585,12 @@ function ToolTrace({
 }
 
 export {
-  ToolNode,
-  ToolTrace,
   firstErrorLine,
   getToolActivityLabel,
   getToolActivityState,
   type ToolActivityPart,
+  ToolNode,
   type ToolNodeState,
-  type ToolOutputDelta
+  type ToolOutputDelta,
+  ToolTrace
 }

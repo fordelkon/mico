@@ -1,8 +1,8 @@
 import * as z from 'zod'
 
 import {
-  ChatToolTracePresentationSchema,
-  type ChatToolTracePresentation
+  type ChatToolTracePresentation,
+  ChatToolTracePresentationSchema
 } from '../data/schemas/chat'
 
 const SourceInputSchema = z.object({
@@ -15,13 +15,18 @@ const SourceInputSchema = z.object({
   pattern: z.string().optional(),
   old_string: z.string().optional(),
   new_string: z.string().optional(),
-  path: z.string().optional()
+  path: z.string().optional(),
+  skill_id: z.string().optional(),
+  relative_path: z.string().optional()
 })
 
 function normalizeInput<T extends z.infer<typeof SourceInputSchema>>(input: T) {
   return {
     ...input,
-    path: input.file_path ?? input.path,
+    path:
+      input.file_path ??
+      input.path ??
+      (input.skill_id ? `${input.skill_id}/${input.relative_path ?? 'SKILL.md'}` : undefined),
     query: input.pattern ?? input.query,
     edits:
       input.old_string !== undefined || input.new_string !== undefined
@@ -58,7 +63,7 @@ function getToolTracePresentation(
   if (!input) return undefined
   if ((toolName === 'Glob' || toolName === 'Grep') && output !== undefined)
     return { content: output, isTruncated: false, type: 'search' }
-  if (toolName === 'Read' && output !== undefined)
+  if (['Read', 'LoadSkill', 'ReadSkillResource'].includes(toolName) && output !== undefined)
     return { content: output, isTruncated: false, type: 'read' }
   if (toolName === 'Bash' && (input.command || output !== undefined))
     return { content: output ?? '', isTruncated: false, type: 'bash' }
@@ -77,7 +82,7 @@ function getToolTracePresentation(
 export {
   getToolTracePresentation,
   getWriteOperation,
+  type ToolTraceInput,
   ToolTraceInputSchema,
-  ToolTraceSourceInputSchema,
-  type ToolTraceInput
+  ToolTraceSourceInputSchema
 }

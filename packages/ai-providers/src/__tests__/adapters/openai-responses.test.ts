@@ -88,6 +88,89 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
+  it('user changes skills when continuing a response, then the latest instructions apply', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () =>
+        sseResponse('event: response.completed\ndata: {"response":{"id":"resp_previous"}}\n\n')
+      )
+    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
+    const userMessage = {
+      role: 'user' as const,
+      parts: [{ type: 'text' as const, text: 'Read the file.' }]
+    }
+
+    await collect(
+      await provider.stream(
+        streamInput('Read the file.', {
+          messages: [
+            {
+              role: 'system',
+              parts: [
+                { type: 'text', text: 'Follow workspace rules.' },
+                { type: 'text', text: 'Available skills: read.' }
+              ]
+            },
+            userMessage
+          ]
+        })
+      )
+    )
+    await collect(
+      await provider.stream(
+        streamInput('Continue.', {
+          messages: [
+            { role: 'system', parts: [{ type: 'text', text: 'Follow workspace rules.' }] },
+            { role: 'system', parts: [{ type: 'text', text: 'Available skills: read, edit.' }] },
+            userMessage,
+            {
+              role: 'assistant',
+              replay: { provider: 'openai-responses', responseId: 'resp_previous' },
+              parts: [
+                { type: 'reasoning', text: 'Inspect the file first.' },
+                { type: 'text', text: 'Reading.' },
+                {
+                  type: 'tool-call',
+                  toolCallId: 'call_read',
+                  toolName: 'read',
+                  argumentsJson: '{"path":"a.ts"}'
+                }
+              ]
+            },
+            {
+              role: 'tool',
+              parts: [
+                {
+                  type: 'tool-result',
+                  toolCallId: 'call_read',
+                  toolName: 'read',
+                  output: 'export {}',
+                  isError: false
+                }
+              ]
+            }
+          ]
+        })
+      )
+    )
+
+    expect(await fetchCallRequestBody(fetchMock, 0)).toEqual({
+      model: 'gpt-5.2',
+      stream: true,
+      instructions: 'Follow workspace rules.\n\nAvailable skills: read.',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'Read the file.' }] }],
+      reasoning: { effort: 'none', summary: 'auto' }
+    })
+    expect(await fetchCallRequestBody(fetchMock, 1)).toEqual({
+      model: 'gpt-5.2',
+      stream: true,
+      instructions: 'Follow workspace rules.\n\nAvailable skills: read, edit.',
+      previous_response_id: 'resp_previous',
+      input: [{ type: 'function_call_output', call_id: 'call_read', output: 'export {}' }],
+      reasoning: { effort: 'none', summary: 'auto' }
+    })
+  })
+
   it('user sees a resumable finish when tokens run out, then continuation survives', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
