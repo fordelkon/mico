@@ -1,4 +1,4 @@
-import { readdir, realpath } from 'node:fs/promises'
+import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -45,6 +45,7 @@ interface RegisteredSkill {
 interface SkillRoot {
   readonly source: SkillSource
   readonly path: string
+  readonly owner: string
 }
 
 interface RootDiscovery {
@@ -73,11 +74,8 @@ async function discoverEntry(
   try {
     const baseDirectory = await realpath(lexicalDirectory)
     assertContained(canonicalRoot, baseDirectory)
-    const text = await readSkillFile(
-      baseDirectory,
-      join(baseDirectory, 'SKILL.md'),
-      MAX_SKILL_OUTPUT_BYTES
-    )
+    assertContained(baseDirectory, await realpath(path))
+    const text = await readSkillFile(baseDirectory, path, MAX_SKILL_OUTPUT_BYTES)
     const parsed = parseSkillDocument(text)
     const metadata = Object.freeze({
       id: `${root.source}:${parsed.name}`,
@@ -109,7 +107,11 @@ async function discoverEntry(
 
 async function discoverRoot(root: SkillRoot): Promise<RootDiscovery> {
   try {
+    const canonicalOwner = await realpath(root.owner)
     const canonicalRoot = await realpath(root.path)
+    assertContained(canonicalOwner, canonicalRoot)
+    const rootIdentity = await stat(canonicalRoot, { bigint: true })
+    const ownerIdentity = await stat(canonicalOwner, { bigint: true })
     const entries = await readdir(root.path, { withFileTypes: true })
     const candidates = entries
       .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
@@ -117,6 +119,17 @@ async function discoverRoot(root: SkillRoot): Promise<RootDiscovery> {
     const results = await Promise.all(
       candidates.map((entry) => discoverEntry(root, canonicalRoot, entry.name))
     )
+    const currentRoot = await stat(canonicalRoot, { bigint: true })
+    const currentOwner = await stat(canonicalOwner, { bigint: true })
+    if (
+      (await realpath(root.path)) !== canonicalRoot ||
+      (await realpath(root.owner)) !== canonicalOwner ||
+      rootIdentity.dev !== currentRoot.dev ||
+      rootIdentity.ino !== currentRoot.ino ||
+      ownerIdentity.dev !== currentOwner.dev ||
+      ownerIdentity.ino !== currentOwner.ino
+    )
+      throw new Error('Skill root changed while discovering. Retry in a new turn.')
     return {
       skills: results.flatMap((result) => result.skills),
       diagnostics: results.flatMap((result) => result.diagnostics)
@@ -175,10 +188,26 @@ async function createSkillSnapshot(
   userHome: string = homedir()
 ): Promise<SkillSnapshot> {
   const roots: readonly SkillRoot[] = [
-    { source: 'project-agents', path: join(resolve(cwd), '.agents', 'skills') },
-    { source: 'project-claude', path: join(resolve(cwd), '.claude', 'skills') },
-    { source: 'user-agents', path: join(resolve(userHome), '.agents', 'skills') },
-    { source: 'user-claude', path: join(resolve(userHome), '.claude', 'skills') }
+    {
+      source: 'project-agents',
+      path: join(resolve(cwd), '.agents', 'skills'),
+      owner: resolve(cwd)
+    },
+    {
+      source: 'project-claude',
+      path: join(resolve(cwd), '.claude', 'skills'),
+      owner: resolve(cwd)
+    },
+    {
+      source: 'user-agents',
+      path: join(resolve(userHome), '.agents', 'skills'),
+      owner: resolve(userHome)
+    },
+    {
+      source: 'user-claude',
+      path: join(resolve(userHome), '.claude', 'skills'),
+      owner: resolve(userHome)
+    }
   ]
   const discoveries = await Promise.all(roots.map(discoverRoot))
   const allSkills = discoveries.flatMap(({ skills }) => skills)

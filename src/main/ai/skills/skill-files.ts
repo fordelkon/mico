@@ -1,6 +1,6 @@
-import { constants } from 'node:fs'
-import { open, realpath } from 'node:fs/promises'
-import { isAbsolute, relative, resolve, sep, win32 } from 'node:path'
+import { type BigIntStats, constants } from 'node:fs'
+import { type FileHandle, lstat, open, realpath } from 'node:fs/promises'
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from 'node:path'
 
 const MAX_SKILL_OUTPUT_BYTES = 48 * 1024
 
@@ -27,19 +27,55 @@ function resolveResourcePath(base: string, path: string): string {
   return target
 }
 
+interface PathIdentity {
+  readonly path: string
+  readonly stat: BigIntStats
+}
+
+function assertIdentity(expected: BigIntStats, actual: BigIntStats): void {
+  if (expected.dev !== actual.dev || expected.ino !== actual.ino) {
+    throw new Error('Skill resource path changed while reading. Retry in a new turn.')
+  }
+}
+
+async function capturePath(path: string): Promise<readonly PathIdentity[]> {
+  const parent = dirname(path)
+  const ancestors = parent === path ? [] : await capturePath(parent)
+  return [...ancestors, { path, stat: await lstat(path, { bigint: true }) }]
+}
+
+async function verifyPath(
+  target: string,
+  canonical: string,
+  identities: readonly PathIdentity[],
+  lexicalIdentities: readonly PathIdentity[],
+  handle: FileHandle
+): Promise<void> {
+  if ((await realpath(target)) !== canonical) {
+    throw new Error('Skill resource path changed while reading. Retry in a new turn.')
+  }
+  for (const identity of [...lexicalIdentities, ...identities]) {
+    assertIdentity(identity.stat, await lstat(identity.path, { bigint: true }))
+  }
+  assertIdentity(identities[identities.length - 1]!.stat, await handle.stat({ bigint: true }))
+}
+
 async function readSkillFile(root: string, target: string, maxBytes: number): Promise<string> {
-  assertContained(root, target)
   const canonical = await realpath(target)
   assertContained(root, canonical)
+  // Capture both lexical links and canonical ancestors: O_NOFOLLOW protects only the leaf.
+  const lexicalIdentities = await capturePath(target)
+  const identities = await capturePath(canonical)
   // Nonblocking open lets us reject FIFOs without waiting for a writer before stat.
   const handle = await open(
     canonical,
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
   )
   try {
-    const stat = await handle.stat()
+    await verifyPath(target, canonical, identities, lexicalIdentities, handle)
+    const stat = await handle.stat({ bigint: true })
     if (!stat.isFile()) throw new Error('Skill resources must be a regular file.')
-    if (stat.size > maxBytes) throw new Error('Skill text exceeds the 48 KiB output limit.')
+    if (stat.size > BigInt(maxBytes)) throw new Error('Skill text exceeds the 48 KiB output limit.')
     const buffer = Buffer.alloc(maxBytes + 1)
     let bytesRead = 0
     while (bytesRead < buffer.length) {
@@ -47,6 +83,7 @@ async function readSkillFile(root: string, target: string, maxBytes: number): Pr
       if (result.bytesRead === 0) break
       bytesRead += result.bytesRead
     }
+    await verifyPath(target, canonical, identities, lexicalIdentities, handle)
     if (bytesRead > maxBytes) throw new Error('Skill text exceeds the 48 KiB output limit.')
     let text: string
     try {

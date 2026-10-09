@@ -1,16 +1,27 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  type FileHandle,
+  mkdir,
+  mkdtemp,
+  open,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createSkillSnapshot } from './index'
 
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(
     temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true }))
   )
@@ -212,6 +223,96 @@ describe('skill snapshots', () => {
     )
     expect(await snapshot.load('review')).toContain('Original instructions')
   })
+
+  it.each([
+    ['project', '.agents', 'skills'],
+    ['project', '.claude', 'skills'],
+    ['home', '.agents', 'skills'],
+    ['home', '.claude', 'skills'],
+    ['project', '.agents', 'parent'],
+    ['home', '.agents', 'parent']
+  ])(
+    'user links %s %s %s outside when discovering, then skills are excluded',
+    async (owner, config, link) => {
+      const { cwd, home } = await workspace()
+      const owned = owner === 'project' ? cwd : home
+      const outside = join(owner === 'project' ? home : cwd, 'outside')
+      await skill(join(outside, 'skills'), 'review', validMetadata)
+      if (link === 'parent') {
+        await symlink(outside, join(owned, config))
+      } else {
+        await mkdir(join(owned, config))
+        await symlink(join(outside, 'skills'), join(owned, config, 'skills'))
+      }
+
+      const snapshot = await createSkillSnapshot(cwd, home)
+
+      expect(snapshot.skills).toEqual([])
+      expect(snapshot.diagnostics.map(({ message }) => message).join('\n')).toContain(
+        'inside the skill directory'
+      )
+    }
+  )
+
+  it('user opens linked owners when discovering, then contained linked skills stay usable', async () => {
+    const { cwd, home } = await workspace()
+    const base = await skill(join(cwd, '.agents/skills'), 'review', validMetadata)
+    await writeFile(join(base, 'reference.md'), 'Contained reference')
+    await symlink(join(base, 'reference.md'), join(base, 'linked.md'))
+    const linkedCwd = `${cwd}-link`
+    const linkedHome = `${home}-link`
+    await Promise.all([symlink(cwd, linkedCwd), symlink(home, linkedHome)])
+
+    const snapshot = await createSkillSnapshot(linkedCwd, linkedHome)
+
+    expect(snapshot.skills).toHaveLength(1)
+    expect(await snapshot.readResource('review', 'linked.md')).toContain('Contained reference')
+  })
+
+  it.each(['file', 'ancestor', 'root'])(
+    'user reads during %s replacement when paths change, then resource access fails',
+    async (replacement) => {
+      const { cwd, home } = await workspace()
+      const base = await skill(join(cwd, '.agents/skills'), 'review', validMetadata)
+      const directory = join(base, 'references')
+      await mkdir(directory)
+      const resource = join(directory, 'reference.md')
+      await writeFile(resource, 'Original reference')
+      const outside = join(home, 'outside')
+      await mkdir(join(outside, 'references'), { recursive: true })
+      await writeFile(join(outside, 'references/reference.md'), 'Private reference')
+      const snapshot = await createSkillSnapshot(cwd, home)
+      const probe = await open(resource, 'r')
+      const prototype: FileHandle = Object.getPrototypeOf(probe)
+      // The saved method is explicitly rebound with apply to the real handle below.
+      // oxlint-disable-next-line typescript/unbound-method
+      const originalRead = prototype.read
+      const resourceIdentity = await probe.stat()
+      await probe.close()
+      let replaced = false
+      // Keep real I/O; intercept its public handle seam only to schedule the filesystem race.
+      vi.spyOn(prototype, 'read').mockImplementation(async function (this: FileHandle, ...args) {
+        const identity = await this.stat()
+        if (
+          !replaced &&
+          identity.ino === resourceIdentity.ino &&
+          identity.dev === resourceIdentity.dev
+        ) {
+          replaced = true
+          const target =
+            replacement === 'file' ? resource : replacement === 'root' ? base : directory
+          await rename(target, `${target}-old`)
+          if (replacement === 'file') await writeFile(target, 'Replacement reference')
+          else await symlink(replacement === 'root' ? outside : join(outside, 'references'), target)
+        }
+        return originalRead.apply(this, args)
+      })
+
+      await expect(snapshot.readResource('review', 'references/reference.md')).rejects.toThrow(
+        'changed'
+      )
+    }
+  )
 
   it('user links an external skill when discovering, then it is diagnosed and excluded', async () => {
     const { cwd, home } = await workspace()
