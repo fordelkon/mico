@@ -243,6 +243,45 @@ describe('ChatComposer', () => {
     expect(await screen.findByRole('option', { name: /review/ })).toBeVisible()
     expect(screen.getByRole('textbox')).toHaveValue('/')
   })
+  it('user opens skills with warnings when discovery succeeds, then details expand and retry refreshes', async () => {
+    const user = userEvent.setup()
+    const diagnostics = Array.from({ length: 40 }, (_, index) => ({
+      path: `/projects/mico/.agents/skills/broken-${index}/SKILL.md`,
+      source: 'project-agents' as const,
+      message: `Invalid skill metadata ${index}.`
+    }))
+    vi.mocked(window.api.chat.getSkillCatalog)
+      .mockResolvedValueOnce({ ...skillCatalog, diagnostics })
+      .mockResolvedValueOnce({ ...skillCatalog, skills: [skillCatalog.skills[1]] })
+    renderWithLibrary(<ChatComposer {...props} />)
+    await user.type(screen.getByRole('textbox'), '/')
+
+    expect(await screen.findByRole('option', { name: /review/ })).toBeVisible()
+    const summary = screen.getByText('40 skill discovery warnings', { exact: true })
+    expect(summary).toBeVisible()
+    expect(screen.getByText(diagnostics[0].message)).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Retry skills' })).toBeVisible()
+
+    summary.focus()
+    await user.keyboard(' ')
+    expect(summary).toHaveFocus()
+    // jsdom does not implement native summary keyboard activation.
+    await user.click(summary)
+
+    expect(screen.getByText(diagnostics[0].path, { exact: true })).toBeVisible()
+    expect(screen.getByText(diagnostics[0].message, { exact: true })).toBeVisible()
+    expect(screen.getByText(diagnostics[39].path, { exact: true })).toBeVisible()
+    expect(screen.getByText(diagnostics[39].message, { exact: true })).toBeVisible()
+    await user.click(summary)
+    expect(screen.getByText(diagnostics[0].message)).not.toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Retry skills' }))
+
+    expect(await screen.findByRole('option', { name: /manual/ })).toBeVisible()
+    expect(screen.queryByRole('option', { name: /review/ })).toBeNull()
+    expect(screen.queryByText('40 skill discovery warnings', { exact: true })).toBeNull()
+    expect(screen.getByRole('textbox')).toHaveValue('/')
+  })
+
   it('user chooses a slash skill when pressing Tab, then arguments send with its identity', async () => {
     const user = userEvent.setup()
     const onSend = vi
@@ -253,7 +292,12 @@ describe('ChatComposer', () => {
     await user.type(screen.getByRole('textbox'), '/')
     expect(await screen.findByRole('option', { name: /review/ })).toBeVisible()
     expect(screen.queryByRole('option', { name: /hidden/ })).toBeNull()
-    expect(screen.getByText('Manual only')).toBeVisible()
+    expect(screen.getByText('review', { exact: true })).toBeVisible()
+    expect(screen.getByText('Review the changes.', { exact: true })).toBeVisible()
+    expect(screen.getByText('manual', { exact: true })).toBeVisible()
+    expect(screen.queryByText('/skill:review', { exact: true })).toBeNull()
+    expect(screen.queryByText('Manual only')).toBeNull()
+    expect(screen.queryByText('Project · .agents')).toBeNull()
     await user.keyboard('{ArrowDown}{Tab}')
     expect(screen.getByRole('textbox')).toHaveValue('/skill:manual ')
     expect(screen.getByRole('textbox')).toHaveFocus()

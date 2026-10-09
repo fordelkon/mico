@@ -125,6 +125,10 @@ function ChatComposer({
       const isEditableTarget =
         target instanceof HTMLElement &&
         (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
+      const isActivatingControl =
+        event.key === ' ' &&
+        target instanceof HTMLElement &&
+        Boolean(target.closest('button, summary, a[href], [role="button"]'))
 
       if (
         mode !== 'send' ||
@@ -135,7 +139,8 @@ function ChatComposer({
         event.ctrlKey ||
         event.metaKey ||
         event.key.length !== 1 ||
-        isEditableTarget
+        isEditableTarget ||
+        isActivatingControl
       )
         return
 
@@ -283,22 +288,16 @@ function ChatComposer({
                     role="option"
                     aria-selected={index === skills.selectedIndex}
                     tabIndex={-1}
-                    className="flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-accent aria-selected:bg-accent aria-selected:text-accent-foreground"
+                    className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-accent aria-selected:bg-accent aria-selected:text-accent-foreground"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => selectSkill(skill.name)}
                   >
-                    <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                      <span>/skill:{skill.name}</span>
-                      {skill.disableModelInvocation ? (
-                        <span className="text-xs font-normal text-muted-foreground">
-                          Manual only
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{skill.description}</span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {skill.source.startsWith('project-') ? 'Project' : 'Personal'} ·{' '}
-                      {skill.source.endsWith('agents') ? '.agents' : '.claude'}
+                    <span className="w-full truncate text-sm font-medium">{skill.name}</span>
+                    <span
+                      className="w-full truncate text-xs text-muted-foreground"
+                      title={skill.description}
+                    >
+                      {skill.description.replace(/\s+/g, ' ').trim()}
                     </span>
                   </button>
                 ))}
@@ -309,10 +308,32 @@ function ChatComposer({
                 </p>
               ) : null}
               {skills.diagnostics.length ? (
-                <p role="status" className="px-2 py-2 text-xs text-muted-foreground">
-                  Some skills could not be loaded.{' '}
-                  {skills.diagnostics.map(({ message }) => message).join(' ')}
-                </p>
+                <div className="mt-1 border-t border-border px-2 pt-2 text-xs text-muted-foreground">
+                  <details>
+                    <summary className="cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                      {skills.diagnostics.length} skill discovery{' '}
+                      {skills.diagnostics.length === 1 ? 'warning' : 'warnings'}
+                    </summary>
+                    <ul
+                      aria-label="Skill discovery warnings"
+                      className="mt-2 max-h-32 space-y-3 overflow-y-auto overscroll-contain break-words pr-2 [overflow-wrap:anywhere]"
+                    >
+                      {skills.diagnostics.map(({ path, message, source }, index) => (
+                        <li key={`${source}:${path}:${index}`}>
+                          <p className="font-medium text-popover-foreground">{path}</p>
+                          <p>{message}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                  <button
+                    type="button"
+                    className="mt-1 rounded-md px-2 py-1 text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                    onClick={skills.retry}
+                  >
+                    Retry skills
+                  </button>
+                </div>
               ) : null}
             </section>
           ) : null}

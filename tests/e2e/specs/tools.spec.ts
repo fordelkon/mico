@@ -250,10 +250,23 @@ test('user invokes a manual slash skill when following its reference, then detai
   const skillDirectory = join(app.workspaceDir, '.agents', 'skills', 'mico-e2e-skill')
   const skillBody = 'Follow MICO_SKILL_BODY and read references/guide.md before replying.'
   const resourceBody = '# Reference guide\nUse MICO_SKILL_RESOURCE when completing the request.'
+  const description = `Follow the Mico E2E reference guide. ${'Read the guide before responding. '.repeat(16).trim()}`
   await mkdir(join(skillDirectory, 'references'), { recursive: true })
+  const invalidSkillPaths = await Promise.all(
+    Array.from({ length: 12 }, async (_, index) => {
+      const directory = join(app.workspaceDir, '.agents', 'skills', `invalid-${index}`)
+      await mkdir(directory, { recursive: true })
+      const path = join(directory, 'SKILL.md')
+      await writeFile(
+        path,
+        '---\nname: INVALID\ndescription: Invalid metadata.\n---\nBroken skill.'
+      )
+      return path
+    })
+  )
   await writeFile(
     join(skillDirectory, 'SKILL.md'),
-    `---\nname: mico-e2e-skill\ndescription: Follow the Mico E2E reference guide.\ndisable-model-invocation: true\n---\n${skillBody}\n`
+    `---\nname: mico-e2e-skill\ndescription: ${description}\ndisable-model-invocation: true\n---\n${skillBody}\n`
   )
   await writeFile(join(skillDirectory, 'references', 'guide.md'), resourceBody)
   // Replace only the native folder chooser; workspace selection and discovery remain real.
@@ -273,9 +286,32 @@ test('user invokes a manual slash skill when following its reference, then detai
   const answer = provider.enqueue({ type: 'text', text: 'Followed the skill and its reference.' })
   const draft = composer(app.window)
   await draft.fill('/')
-  await expect(app.window.getByRole('option', { name: /\/skill:mico-e2e-skill/ })).toBeVisible()
-  await expect(app.window.getByText('Manual only', { exact: true })).toBeVisible()
+  await expect(app.window.getByRole('option', { name: /^mico-e2e-skill / })).toBeVisible()
+  await expect(app.window.getByText('mico-e2e-skill', { exact: true })).toBeVisible()
+  const skillDescription = app.window.getByText(description, { exact: true })
+  await expect(skillDescription).toBeVisible()
+  await expect(skillDescription).toHaveCSS('white-space', 'nowrap')
+  await expect(skillDescription).toHaveCSS('text-overflow', 'ellipsis')
+  await expect(app.window.getByText('Manual only', { exact: true })).toHaveCount(0)
+  const skillMenu = app.window.getByRole('region', { name: 'Skill commands' })
+  const warnings = skillMenu.getByText('12 skill discovery warnings', { exact: true })
+  await expect(warnings).toBeVisible()
+  await expect(skillMenu.getByText(invalidSkillPaths[0], { exact: true })).toBeHidden()
   await app.window.screenshot({ path: testInfo.outputPath('skill-menu-light.png') })
+  await warnings.focus()
+  await warnings.press('Space')
+  await expect(warnings).toBeFocused()
+  const warningList = skillMenu.getByRole('list', { name: 'Skill discovery warnings' })
+  await expect(warningList).toBeVisible()
+  await expect(warningList.getByRole('listitem')).toHaveCount(12)
+  await warningList.getByRole('listitem').last().scrollIntoViewIfNeeded()
+  await expect(warningList.getByRole('listitem').last()).toBeInViewport()
+  await app.window.screenshot({ path: testInfo.outputPath('skill-warnings-expanded-light.png') })
+  await warnings.press('Space')
+  await skillMenu.getByRole('button', { name: 'Retry skills', exact: true }).click()
+  await expect(warnings).toBeVisible()
+  await expect(draft).toHaveValue('/')
+  await draft.focus()
   await draft.press('Escape')
   await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
   await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
@@ -287,7 +323,7 @@ test('user invokes a manual slash skill when following its reference, then detai
   await expect(app.window.locator('html')).toHaveClass(/dark/)
   await draft.fill('')
   await draft.fill('/')
-  await expect(app.window.getByRole('option', { name: /\/skill:mico-e2e-skill/ })).toBeVisible()
+  await expect(app.window.getByRole('option', { name: /^mico-e2e-skill / })).toBeVisible()
   await draft.focus()
   await expect(draft).toBeFocused()
   expect(
