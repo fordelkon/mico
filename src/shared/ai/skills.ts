@@ -20,6 +20,11 @@ const ChatSkillInvocationPartSchema = z.strictObject({
   })
 })
 const SkillCatalogRequestSchema = z.strictObject({ projectId: z.string().trim().min(1).optional() })
+const SkillDocumentRequestSchema = z.strictObject({
+  projectId: z.string().trim().min(1),
+  skillId: SkillIdSchema
+})
+const SkillDocumentSchema = z.strictObject({ content: z.string(), body: z.string() })
 const SkillCatalogSchema = z.object({
   skills: z.array(
     z.object({
@@ -43,6 +48,13 @@ const SkillCatalogSchema = z.object({
 type ChatSkillInvocationPart = z.infer<typeof ChatSkillInvocationPartSchema>
 type SkillCatalog = z.infer<typeof SkillCatalogSchema>
 type SkillSource = z.infer<typeof SkillSourceSchema>
+type SkillDocument = z.infer<typeof SkillDocumentSchema>
 
-export type { ChatSkillInvocationPart, SkillCatalog, SkillSource }
-export { ChatSkillInvocationPartSchema, SkillCatalogRequestSchema, SkillCatalogSchema }
+export type { ChatSkillInvocationPart, SkillCatalog, SkillDocument, SkillSource }
+export {
+  ChatSkillInvocationPartSchema,
+  SkillCatalogRequestSchema,
+  SkillCatalogSchema,
+  SkillDocumentRequestSchema,
+  SkillDocumentSchema
+}

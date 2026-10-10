@@ -1,9 +1,10 @@
 import { cjk } from '@streamdown/cjk'
-import { Streamdown, type Components } from 'streamdown'
 import * as React from 'react'
+import { type Components, Streamdown } from 'streamdown'
 
 import 'katex/dist/katex.min.css'
 import 'streamdown/styles.css'
+import './markdown.css'
 
 import { ChatCodeBlock } from './chat-code-block'
 import {
@@ -13,13 +14,15 @@ import {
   renderMarkdownMath
 } from './markdown-math-parser'
 
-type ChatMarkdownProps = {
+type MarkdownProps = {
   isStreaming: boolean
   text: string
 }
 
-type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & { node?: unknown }
-type ChatMarkdownCodeProps = MarkdownCodeProps & { isStreaming: boolean }
+type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & {
+  node?: unknown
+  isStreaming: boolean
+}
 
 const FencedCodeContext = React.createContext(false)
 
@@ -31,13 +34,13 @@ const plugins = {
   cjk
 }
 
-function ChatMarkdownCode({
+function MarkdownCode({
   children,
   className,
   isStreaming,
   node: _node,
   ...props
-}: ChatMarkdownCodeProps): React.JSX.Element {
+}: MarkdownCodeProps): React.JSX.Element {
   const isFencedCode = React.useContext(FencedCodeContext)
 
   if (!isFencedCode) {
@@ -59,7 +62,7 @@ function ChatMarkdownCode({
   )
 }
 
-function ChatMarkdown({ isStreaming, text }: ChatMarkdownProps): React.JSX.Element {
+function Markdown({ isStreaming, text }: MarkdownProps): React.JSX.Element {
   const [cache] = React.useState(createMarkdownMathParserCache)
   const source = React.useMemo(() => prepareMarkdownMath(text, cache), [cache, text])
   const components = React.useMemo<Partial<Components>>(
@@ -78,13 +81,13 @@ function ChatMarkdown({ isStreaming, text }: ChatMarkdownProps): React.JSX.Eleme
           />
         )
       },
-      code: (props) => <ChatMarkdownCode {...props} isStreaming={isStreaming} />
+      code: (props) => <MarkdownCode {...props} isStreaming={isStreaming} />
     }),
     [isStreaming]
   )
 
   return (
-    <div className="chat-markdown" data-testid="answer-content">
+    <div className="mico-markdown">
       {/* Per-word animation retains a wrapper for every streamed word and can exhaust renderer memory. */}
       <Streamdown
         caret="circle"
@@ -100,4 +103,4 @@ function ChatMarkdown({ isStreaming, text }: ChatMarkdownProps): React.JSX.Eleme
   )
 }
 
-export { ChatMarkdown }
+export { Markdown }

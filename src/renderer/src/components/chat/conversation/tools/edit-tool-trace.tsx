@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { ThemedToken } from 'shiki'
-import { useStreamingCodeHighlight } from '../../markdown/use-streaming-code-highlight'
+import { useStreamingCodeHighlight } from '../../../markdown/use-streaming-code-highlight'
 import { editPreview } from './edit-preview'
 
 type EditTrace = { newText: string; oldText: string }

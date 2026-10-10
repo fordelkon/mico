@@ -60,8 +60,16 @@ async function verifyPath(
   assertIdentity(identities[identities.length - 1]!.stat, await handle.stat({ bigint: true }))
 }
 
-async function readSkillFile(root: string, target: string, maxBytes: number): Promise<string> {
+async function readSkillFile(
+  root: string,
+  target: string,
+  maxBytes: number,
+  expectedCanonical?: string
+): Promise<string> {
   const canonical = await realpath(target)
+  if (expectedCanonical !== undefined && canonical !== expectedCanonical) {
+    throw new Error('Skill resource path changed while reading. Retry in a new turn.')
+  }
   assertContained(root, canonical)
   // Capture both lexical links and canonical ancestors: O_NOFOLLOW protects only the leaf.
   const lexicalIdentities = await capturePath(target)

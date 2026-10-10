@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-import { ChatCodeBlock } from '../../markdown/chat-code-block'
+import { ChatCodeBlock } from '../../../markdown/chat-code-block'
 
 function WriteToolTrace({
   content,

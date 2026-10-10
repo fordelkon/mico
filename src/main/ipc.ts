@@ -14,7 +14,7 @@ import type { TurnExecutor } from './ai/chat/turn-executor'
 import { TurnSenderGate } from './ai/chat/turn-sender-gate'
 import type { ProviderService } from './ai/providers/provider-service'
 import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
-import { createSkillSnapshot, skillCatalog } from './ai/skills'
+import { createSkillSnapshot, skillCatalog, skillSettingsCatalog } from './ai/skills'
 import type { WorkspaceService } from './ai/workspaces/workspace-service'
 import {
   type CodeDocumentPickerDependencies,
@@ -102,6 +102,24 @@ function registerIpc(
   const senderGate = new TurnSenderGate()
   const register = <C extends InvokeChannel>(definition: ChannelDefinition<C>): void =>
     registerChannel(dependencies.ipcMain, getCallingWindow, definition)
+
+  register({
+    channel: IpcChannel.Skills_List,
+    invalidMessage: 'Invalid skill catalog request',
+    handle: async ({ projectId }) => {
+      if (!projectId) return { skills: [], diagnostics: [] }
+      const context = workspace.getProjectContext(projectId)
+      return skillSettingsCatalog(await createSkillSnapshot(context.rootPath))
+    }
+  })
+  register({
+    channel: IpcChannel.Skills_ReadDocument,
+    invalidMessage: 'Invalid skill document request',
+    handle: async ({ projectId, skillId }) => {
+      const context = workspace.getProjectContext(projectId)
+      return (await createSkillSnapshot(context.rootPath)).readDocument(skillId)
+    }
+  })
 
   register({
     channel: IpcChannel.WindowControls_Close,

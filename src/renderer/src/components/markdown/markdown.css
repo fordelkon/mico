@@ -1,0 +1,83 @@
+.mico-markdown {
+  min-width: 0;
+}
+
+.mico-markdown > * + * {
+  margin-top: 1rem;
+}
+
+/* Let Streamdown's existing scroll viewport shrink below a wide table's intrinsic width. */
+.mico-markdown [data-streamdown="table-wrapper"],
+.mico-markdown [data-streamdown="table-wrapper"] > div:last-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mico-markdown :is(h1, h2, h3, h4) {
+  margin-top: 1.5rem;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.mico-markdown h1 {
+  font-size: 1.5rem;
+}
+
+.mico-markdown h2 {
+  font-size: 1.25rem;
+}
+
+.mico-markdown :is(ul, ol) {
+  padding-left: 0;
+  list-style-position: inside;
+}
+
+.mico-markdown :is(ul, ol) > li {
+  padding-left: 1.5rem;
+}
+
+.mico-markdown ul {
+  list-style-type: disc;
+}
+
+.mico-markdown ol {
+  list-style-type: decimal;
+}
+
+.mico-markdown blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+  color: var(--text-secondary);
+}
+
+.mico-markdown a {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.mico-markdown :is(p, li, blockquote, th, td, h1, h2, h3, h4, h5, h6) > code {
+  border-radius: 0.25rem;
+  background: var(--surface-secondary);
+  padding: 0.1em 0.3em;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+.mico-math {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+}
+
+.mico-math--display {
+  display: block;
+  margin-block: 1rem;
+}
+
+.dark [data-slot="code-block"] [data-code-token] {
+  color: var(--shiki-dark) !important;
+}

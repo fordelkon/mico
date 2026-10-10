@@ -30,6 +30,7 @@ import {
   Palette,
   PanelLeft,
   Search,
+  ScrollText,
   Settings,
   SquarePen
 } from 'lucide-react'
@@ -49,8 +50,8 @@ type AppSidebarProps = {
   onOpenSettings: () => void
   onRenameConversation: (conversationId: string, title: string) => Promise<void>
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
-  onSelectSettingsPage?: (page: 'providers' | 'appearance' | 'workspaces') => void
-  settingsPage?: 'providers' | 'appearance' | 'workspaces'
+  onSelectSettingsPage?: (page: 'providers' | 'appearance' | 'workspaces' | 'skills') => void
+  settingsPage?: 'providers' | 'appearance' | 'workspaces' | 'skills'
   settingsActive: boolean
 }
 
@@ -205,6 +206,21 @@ function AppSidebar({
                   >
                     <Palette aria-hidden="true" />
                     <span>Appearance</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem
+                  {...settingsHighlight.getItemProps(3)}
+                  className="relative z-10 mx-1.5 my-px"
+                >
+                  <SidebarMenuButton
+                    aria-current={settingsPage === 'skills' ? 'page' : undefined}
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    isActive={settingsPage === 'skills'}
+                    onClick={() => onSelectSettingsPage?.('skills')}
+                    tooltip="Skills"
+                  >
+                    <ScrollText aria-hidden="true" />
+                    <span>Skills</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>

@@ -1,0 +1,13 @@
+/* Native titlebar drag regions ignore DOM stacking; the modal stays interactive
+   when long documents place its close control inside the titlebar band. */
+.skills-settings__dialog {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.skills-settings__preview {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  line-height: 1.75;
+}

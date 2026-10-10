@@ -18,9 +18,9 @@ function AppContent(): React.JSX.Element {
   const workspace = useChatWorkspaceState()
   const { commitProviderDrafts } = useProviderLibraryActions()
   const [activePage, setActivePage] = React.useState<'chat' | 'settings'>('chat')
-  const [settingsPage, setSettingsPage] = React.useState<'providers' | 'appearance' | 'workspaces'>(
-    'providers'
-  )
+  const [settingsPage, setSettingsPage] = React.useState<
+    'providers' | 'appearance' | 'workspaces' | 'skills'
+  >('providers')
 
   const { startNewChat, selectConversation, activeConversation, refreshProjects } =
     workspace.session
@@ -55,7 +55,7 @@ function AppContent(): React.JSX.Element {
   }, [activePage, leaveSettings, startNewChat])
 
   const handleSelectSettingsPage = React.useCallback(
-    (page: 'providers' | 'appearance' | 'workspaces'): void => {
+    (page: 'providers' | 'appearance' | 'workspaces' | 'skills'): void => {
       if (page === settingsPage) return
 
       transitionSettingsPage(() => setSettingsPage(page))
@@ -123,7 +123,10 @@ function AppContent(): React.JSX.Element {
               </div>
             }
           >
-            <SettingsMain page={settingsPage} />
+            <SettingsMain
+              page={settingsPage}
+              initialProjectId={workspace.session.activeProject?.id}
+            />
           </React.Suspense>
         ) : (
           <ChatMain session={workspace.session} responses={workspace.responses} />

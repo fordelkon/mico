@@ -1,4 +1,8 @@
 export enum IpcChannel {
+  /** Returns all effective skills in a registered workspace for browsing. */
+  Skills_List = 'skills:list',
+  /** Reads the current SKILL.md for an exact skill ID in a registered workspace. */
+  Skills_ReadDocument = 'skills:read-document',
   /** Persists a new appearance preference. */
   Appearance_SetPreference = 'appearance:set-preference',
   /** Returns the complete persisted and resolved theme state. */

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import * as z from 'zod'
 
-import { ChatCodeBlock } from '../../markdown/chat-code-block'
+import { ChatCodeBlock } from '../../../markdown/chat-code-block'
 
 type FormattedToolPayload = { language: 'json' | 'text'; text: string }
 const GenericToolPayloadValueSchema = z.union([z.json(), z.undefined()])

@@ -1,6 +1,11 @@
 import * as z from 'zod'
 import { PermissionResponseSchema } from '../ai/permissions'
-import { SkillCatalogRequestSchema, SkillCatalogSchema } from '../ai/skills'
+import {
+  SkillCatalogRequestSchema,
+  SkillCatalogSchema,
+  SkillDocumentRequestSchema,
+  SkillDocumentSchema
+} from '../ai/skills'
 import { ModelReasoningCapabilitiesSchema, ThinkingSelectionSchema } from '../data/schemas/chat'
 import { AppearancePreferenceSchema } from '../data/schemas/preference'
 import {
@@ -34,6 +39,11 @@ const completion = z.void()
 
 /** One canonical request and result contract for each renderer invoke task. */
 const taskSchemas = {
+  [IpcChannel.Skills_List]: { input: SkillCatalogRequestSchema, output: SkillCatalogSchema },
+  [IpcChannel.Skills_ReadDocument]: {
+    input: SkillDocumentRequestSchema,
+    output: SkillDocumentSchema
+  },
   [IpcChannel.WindowControls_Close]: { input: empty, output: completion },
   [IpcChannel.WindowControls_IsFocused]: { input: empty, output: z.boolean() },
   [IpcChannel.WindowControls_IsFullscreen]: { input: empty, output: z.boolean() },

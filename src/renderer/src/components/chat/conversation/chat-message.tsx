@@ -17,7 +17,7 @@ import type { MicoUIMessage } from '@renderer/types/chat'
 import { CheckIcon, CopyIcon, FileTextIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { ChatMarkdown } from '../markdown/chat-markdown'
+import { Markdown } from '../../markdown/markdown'
 import {
   AgentLoadingIndicator,
   AgentActivityTimeline,
@@ -180,9 +180,11 @@ function ChatMessageComponent({ message, isStreaming }: ChatMessageProps): React
                     parts={block.parts}
                   />
                 ) : (
-                  <Bubble align="start" variant="ghost">
+                  <Bubble align="start" variant="ghost" className="w-full">
                     <BubbleContent className="w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7">
-                      <ChatMarkdown isStreaming={isStreaming} text={block.text} />
+                      <div data-testid="answer-content">
+                        <Markdown isStreaming={isStreaming} text={block.text} />
+                      </div>
                     </BubbleContent>
                   </Bubble>
                 )}
@@ -207,7 +209,9 @@ function ChatMessageComponent({ message, isStreaming }: ChatMessageProps): React
                   : 'w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7'
               }
             >
-              <ChatMarkdown isStreaming={isStreaming} text={text} />
+              <div data-testid="answer-content">
+                <Markdown isStreaming={isStreaming} text={text} />
+              </div>
             </BubbleContent>
           </Bubble>
         ) : null}

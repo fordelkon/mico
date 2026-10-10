@@ -11,6 +11,7 @@ import type { AttachmentsAPI } from '@shared/ipc/schemas/attachments'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
+import type { SkillsAPI } from '@shared/ipc/schemas/skills'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
 import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { type IpcRendererEvent, ipcRenderer } from 'electron'
@@ -152,7 +153,21 @@ const workspaces: WorkspacesAPI = {
   setDefault: (projectId) => invoke(IpcChannel.Workspaces_SetDefault, projectId)
 }
 
-const api = { appearance, attachments, chat, providers, sessions, windowControls, workspaces }
+const skills: SkillsAPI = {
+  list: (request) => invoke(IpcChannel.Skills_List, request),
+  readDocument: (request) => invoke(IpcChannel.Skills_ReadDocument, request)
+}
+
+const api = {
+  appearance,
+  attachments,
+  chat,
+  providers,
+  sessions,
+  skills,
+  windowControls,
+  workspaces
+}
 
 export { api, type WindowApiType }
 

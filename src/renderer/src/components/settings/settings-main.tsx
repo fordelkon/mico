@@ -14,6 +14,7 @@ import { useProviderLibraryActions, useProviderLibraryState } from './providers/
 import { ProvidersSection } from './providers/providers-section'
 import { AppearanceSettings } from './appearances/appearance-settings'
 import { WorkspaceSettings } from './workspaces/workspace-settings'
+import { SkillsSettings } from './skills/skills-settings'
 
 function SettingsContent(): React.JSX.Element {
   const initialProviderId = builtInProviderIds[0] ?? 'ollama'
@@ -96,12 +97,15 @@ function SettingsContent(): React.JSX.Element {
 }
 
 function SettingsMain({
-  page = 'providers'
+  page = 'providers',
+  initialProjectId
 }: {
-  page?: 'providers' | 'appearance' | 'workspaces'
+  page?: 'providers' | 'appearance' | 'workspaces' | 'skills'
+  initialProjectId?: string
 }): React.JSX.Element {
   if (page === 'appearance') return <AppearanceSettings />
   if (page === 'workspaces') return <WorkspaceSettings />
+  if (page === 'skills') return <SkillsSettings initialProjectId={initialProjectId} />
   return <SettingsContent />
 }
 

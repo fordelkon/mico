@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import {
+import filesystem, {
   type FileHandle,
   mkdir,
   mkdtemp,
@@ -10,6 +10,7 @@ import {
   symlink,
   writeFile
 } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -22,6 +23,7 @@ const temporaryDirectories: string[] = []
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  syncBuiltinESMExports()
   await Promise.all(
     temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true }))
   )
@@ -80,6 +82,114 @@ describe('skill snapshots', () => {
       2
     )
     expect(await snapshot.load('project-agents:review')).toContain('Project canonical')
+  })
+
+  it('user has cross-root skill aliases when discovering, then only canonical notices remain', async () => {
+    const { cwd, home } = await workspace()
+    const canonicalRoot = join(home, '.agents/skills')
+    const compatibilityRoot = join(home, '.claude/skills')
+    const review = await skill(canonicalRoot, 'review', `${validMetadata}\ncontext: fork`)
+    const malformed = await skill(
+      canonicalRoot,
+      'malformed',
+      'name: malformed\ndescription: [broken'
+    )
+    await mkdir(compatibilityRoot, { recursive: true })
+    await symlink(review, join(compatibilityRoot, 'review'))
+    await symlink(malformed, join(compatibilityRoot, 'malformed'))
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
+    expect(await snapshot.load('review')).toContain('Original instructions')
+    expect(snapshot.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: join(review, 'SKILL.md'),
+          message: expect.stringContaining('context')
+        }),
+        expect.objectContaining({
+          path: join(malformed, 'SKILL.md'),
+          message: expect.stringContaining('Invalid skill YAML')
+        }),
+        expect.objectContaining({
+          path: join(compatibilityRoot, 'malformed', 'SKILL.md'),
+          message: expect.stringContaining('inside the skill directory')
+        })
+      ])
+    )
+    expect(snapshot.diagnostics).toHaveLength(3)
+  })
+
+  it('user changes a document when discovering, then replacement and alias stay rejected', async () => {
+    const { cwd, home } = await workspace()
+    const base = await skill(join(home, '.agents/skills'), 'review', validMetadata)
+    const document = join(base, 'SKILL.md')
+    const original = join(base, 'original.md')
+    const replacement = join(base, 'replacement.md')
+    await rename(document, original)
+    await writeFile(replacement, `---\n${validMetadata}\n---\nReplacement instructions`)
+    await symlink(original, document)
+    const outside = join(home, 'outside')
+    const alias = join(home, '.claude/skills/review')
+    await mkdir(outside)
+    await mkdir(join(home, '.claude/skills'), { recursive: true })
+    await symlink(original, join(outside, 'SKILL.md'))
+    await symlink(outside, alias)
+    const originalRealpath = filesystem.realpath
+    let replaced = false
+    // Keep real path resolution; change the document after its first identity capture.
+    vi.spyOn(filesystem, 'realpath').mockImplementation(async (...args) => {
+      const canonical = await originalRealpath(...args)
+      if (!replaced && args[0] === document) {
+        replaced = true
+        await rm(document)
+        await symlink(replacement, document)
+      }
+      return canonical
+    })
+    syncBuiltinESMExports()
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills).toEqual([])
+    expect(snapshot.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: document, message: expect.stringContaining('changed') }),
+        expect.objectContaining({
+          path: join(alias, 'SKILL.md'),
+          message: expect.stringContaining('inside the skill directory')
+        })
+      ])
+    )
+  })
+
+  it('user has contained aliases when discovering, then the same skill appears once without notices', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    const base = await skill(root, 'review', validMetadata)
+    await symlink(base, join(root, 'review-alias'))
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['project-agents:review'])
+    expect(snapshot.diagnostics).toEqual([])
+    expect(await snapshot.load('review')).toContain('Original instructions')
+  })
+
+  it('user has missing skill entries when discovering, then absent documents are skipped', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    await skill(root, 'review', validMetadata)
+    await mkdir(join(root, 'ordinary-directory'))
+    await mkdir(join(root, 'missing-document'))
+    await symlink(join(home, 'absent-directory'), join(root, 'dangling-directory'))
+    await symlink(join(home, 'absent-document'), join(root, 'missing-document', 'SKILL.md'))
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['project-agents:review'])
+    expect(snapshot.diagnostics).toEqual([])
   })
 
   it('user edits a skill when a turn exists, then that turn retains its original body', async () => {

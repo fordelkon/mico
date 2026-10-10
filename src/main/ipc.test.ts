@@ -200,6 +200,67 @@ const startTurnRequest = {
 }
 
 describe('registerIpc skill catalog', () => {
+  it('user browses a model-only skill when opening settings, then its source document is readable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mico-settings-skill-'))
+    try {
+      const base = join(root, '.agents/skills/mico-settings-hidden')
+      const content =
+        '---\nname: mico-settings-hidden\ndescription: Model guidance\nuser-invocable: false\n---\n# Private guidance\nRead carefully.'
+      await mkdir(base, { recursive: true })
+      await writeFile(join(base, 'SKILL.md'), content)
+      const { handlers, event, workspace } = createHarness()
+      workspace.getProjectContext.mockReturnValue({
+        kind: 'project',
+        projectId: 'registered',
+        rootPath: root
+      })
+      const catalog: unknown = await handlers.get('skills:list')?.(event, {
+        projectId: 'registered'
+      })
+      expect(catalog).toMatchObject({
+        skills: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'project-agents:mico-settings-hidden',
+            userInvocable: false
+          })
+        ])
+      })
+      const document: unknown = await handlers.get('skills:read-document')?.(event, {
+        projectId: 'registered',
+        skillId: 'project-agents:mico-settings-hidden'
+      })
+      expect(document).toEqual({ content, body: '# Private guidance\nRead carefully.' })
+      await expect(
+        handlers.get('skills:read-document')?.(event, {
+          projectId: 'registered',
+          skillId: 'mico-settings-hidden'
+        })
+      ).rejects.toThrow('Unknown skill')
+      await expect(
+        handlers.get('skills:read-document')?.(event, {
+          projectId: 'registered',
+          skillId: '../../private'
+        })
+      ).rejects.toThrow('Unknown skill')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each(['skills:list', 'skills:read-document'])(
+    'user supplies a filesystem root when calling %s, then settings rejects it',
+    (channel) => {
+      const { handlers, event } = createHarness()
+      expect(() =>
+        handlers.get(channel)?.(event, {
+          projectId: 'registered',
+          skillId: 'project-agents:review',
+          cwd: '/private'
+        })
+      ).toThrow('Invalid skill')
+    }
+  )
+
   it('user selects a project when requesting skills, then its registered directory supplies the catalog', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mico-ipc-skill-'))
     try {

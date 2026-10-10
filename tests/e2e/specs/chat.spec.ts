@@ -32,6 +32,63 @@ test('user sees an unfinished reply when the stream pauses, then completion cont
   await expect(reply.getByTestId('answer-content')).toHaveText('Partial answer is now complete.')
 })
 
+test('user reads fenced code when a reply streams, then blocks fill the message and scroll long lines', async ({
+  app,
+  provider
+}) => {
+  const response = provider.enqueue({
+    type: 'text',
+    text: '```ts\nconst ready = true\n',
+    hold: true
+  })
+  await composer(app.window).fill('Show a code example')
+  await app.window.getByRole('button', { name: 'Send message' }).click()
+  const reply = assistantMessages(app.window).last()
+  const codeBlock = reply.getByTestId('code-block')
+  await expect(codeBlock).toHaveAttribute('data-state', 'streaming')
+  const geometry = async () =>
+    reply.evaluate((element) => {
+      const message = element.querySelector('[data-slot="message-content"]')
+      const bubble = element.querySelector('[data-slot="bubble-content"]')
+      const markdown = element.querySelector('[data-testid="answer-content"]')
+      const block = element.querySelector('[data-slot="code-block"]')
+      if (!message || !bubble || !markdown || !block)
+        throw new Error('The answer code block is missing.')
+      const availableWidth = Math.min(message.getBoundingClientRect().width, 42 * 16)
+      const bubbleStyle = getComputedStyle(bubble)
+      const contentWidth =
+        bubble.clientWidth -
+        Number.parseFloat(bubbleStyle.paddingLeft) -
+        Number.parseFloat(bubbleStyle.paddingRight)
+      return {
+        messageGap: Math.abs(availableWidth - bubble.getBoundingClientRect().width),
+        contentGap: Math.abs(contentWidth - markdown.getBoundingClientRect().width),
+        blockGap: Math.abs(
+          markdown.getBoundingClientRect().width - block.getBoundingClientRect().width
+        ),
+        pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+      }
+    })
+  await expect
+    .poll(geometry)
+    .toEqual({ messageGap: 0, contentGap: 0, blockGap: 0, pageOverflow: false })
+  response.finish(`${'// A long source line '.repeat(40)}\n\`\`\``)
+  await waitForReply(app.window, reply)
+  await expect(codeBlock).toHaveAttribute('data-state', 'complete')
+  await expect
+    .poll(geometry)
+    .toEqual({ messageGap: 0, contentGap: 0, blockGap: 0, pageOverflow: false })
+  // The code's own viewport owns horizontal scrolling, not the message or page.
+  expect(
+    await codeBlock.locator('pre').evaluate((element) => {
+      const viewport = element.parentElement
+      if (!viewport) throw new Error('The code scroll viewport is missing.')
+      viewport.scrollLeft = viewport.scrollWidth
+      return viewport.scrollWidth > viewport.clientWidth && viewport.scrollLeft > 0
+    })
+  ).toBe(true)
+})
+
 test('user stops a streamed reply when reading partial output, then another message can be sent', async ({
   app,
   provider

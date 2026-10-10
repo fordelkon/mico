@@ -1,7 +1,7 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { SkillCatalog, SkillSource } from '@shared/ai/skills'
+import type { SkillCatalog, SkillDocument, SkillSource } from '@shared/ai/skills'
 import { parseSkillDocument } from './skill-document'
 import {
   assertContained,
@@ -33,9 +33,15 @@ interface SkillSnapshot {
   load(idOrName: string): Promise<string>
   loadForUser(id: string): Promise<string>
   readResource(idOrName: string, relativePath: string): Promise<string>
+  readDocument(id: string): SkillDocument
+}
+
+interface DiscoveryDiagnostic extends SkillDiagnostic {
+  readonly rejectedCanonicalDocument?: string
 }
 
 interface RegisteredSkill {
+  readonly canonicalDocument: string
   readonly metadata: SkillMetadata
   readonly lexicalDirectory: string
   readonly body: string
@@ -50,7 +56,7 @@ interface SkillRoot {
 
 interface RootDiscovery {
   readonly skills: readonly RegisteredSkill[]
-  readonly diagnostics: readonly SkillDiagnostic[]
+  readonly diagnostics: readonly DiscoveryDiagnostic[]
 }
 
 function isMissing(error: Error): boolean {
@@ -71,11 +77,16 @@ async function discoverEntry(
 ): Promise<RootDiscovery> {
   const lexicalDirectory = join(root.path, directory)
   const path = join(lexicalDirectory, 'SKILL.md')
+  let canonicalDocument: string | undefined
+  let hasValidatedRootContainment = false
   try {
     const baseDirectory = await realpath(lexicalDirectory)
+    // Identity is only used to reconcile rejected aliases after another root validates the skill.
+    canonicalDocument = await realpath(path)
     assertContained(canonicalRoot, baseDirectory)
-    assertContained(baseDirectory, await realpath(path))
-    const text = await readSkillFile(baseDirectory, path, MAX_SKILL_OUTPUT_BYTES)
+    hasValidatedRootContainment = true
+    assertContained(baseDirectory, canonicalDocument)
+    const text = await readSkillFile(baseDirectory, path, MAX_SKILL_OUTPUT_BYTES, canonicalDocument)
     const parsed = parseSkillDocument(text)
     const metadata = Object.freeze({
       id: `${root.source}:${parsed.name}`,
@@ -86,7 +97,13 @@ async function discoverEntry(
       disableModelInvocation: parsed.disableModelInvocation,
       userInvocable: parsed.userInvocable
     })
-    const skill = { metadata, lexicalDirectory, body: parsed.body, document: text }
+    const skill = {
+      canonicalDocument,
+      metadata,
+      lexicalDirectory,
+      body: parsed.body,
+      document: text
+    }
     formatSkill(skill, 'SKILL.md', text)
     return {
       skills: [skill],
@@ -95,13 +112,19 @@ async function discoverEntry(
   } catch (error) {
     return {
       skills: [],
-      diagnostics: [
-        {
-          source: root.source,
-          path,
-          message: error instanceof Error ? error.message : 'Unknown filesystem error'
-        }
-      ]
+      diagnostics:
+        error instanceof Error && isMissing(error)
+          ? []
+          : [
+              {
+                source: root.source,
+                path,
+                message: error instanceof Error ? error.message : 'Unknown filesystem error',
+                rejectedCanonicalDocument: hasValidatedRootContainment
+                  ? undefined
+                  : canonicalDocument
+              }
+            ]
     }
   }
 }
@@ -211,7 +234,20 @@ async function createSkillSnapshot(
     }
   ]
   const discoveries = await Promise.all(roots.map(discoverRoot))
-  const allSkills = discoveries.flatMap(({ skills }) => skills)
+  const discoveredSkills = discoveries.flatMap(({ skills }) => skills)
+  const allSkills = discoveredSkills.filter(
+    (skill, index) =>
+      discoveredSkills.findIndex(
+        ({ canonicalDocument }) => canonicalDocument === skill.canonicalDocument
+      ) === index
+  )
+  const validatedDocuments = new Set(allSkills.map(({ canonicalDocument }) => canonicalDocument))
+  const diagnostics = discoveries
+    .flatMap(({ diagnostics }) => diagnostics)
+    .filter(
+      ({ rejectedCanonicalDocument }) =>
+        !rejectedCanonicalDocument || !validatedDocuments.has(rejectedCanonicalDocument)
+    )
   const registered = allSkills.filter(
     (skill, index) =>
       allSkills.findIndex(({ metadata }) => metadata.name === skill.metadata.name) === index
@@ -226,8 +262,8 @@ async function createSkillSnapshot(
   return Object.freeze({
     skills: Object.freeze(registered.map(({ metadata }) => metadata)),
     diagnostics: Object.freeze(
-      [...discoveries.flatMap(({ diagnostics }) => diagnostics), ...shadowed].map((diagnostic) =>
-        Object.freeze(diagnostic)
+      [...diagnostics, ...shadowed].map(({ source, path, message }) =>
+        Object.freeze({ source, path, message })
       )
     ),
     async load(idOrName: string): Promise<string> {
@@ -247,6 +283,11 @@ async function createSkillSnapshot(
     },
     async readResource(idOrName: string, relativePath: string): Promise<string> {
       return readResource(resolveSkill(registered, idOrName), relativePath)
+    },
+    readDocument(id: string): SkillDocument {
+      const skill = registered.find(({ metadata }) => metadata.id === id)
+      if (!skill) throw new Error('Unknown skill. Refresh the catalog and select it again.')
+      return { content: skill.document, body: skill.body }
     }
   })
 }
@@ -255,23 +296,29 @@ export type { SkillDiagnostic, SkillMetadata, SkillSnapshot, SkillSource }
 
 /** Renderer catalog deliberately omits native base directories and hidden skills. */
 function skillCatalog(snapshot: SkillSnapshot): SkillCatalog {
+  const catalog = skillSettingsCatalog(snapshot)
+  return { ...catalog, skills: catalog.skills.filter(({ userInvocable }) => userInvocable) }
+}
+
+/** Browsing includes model-only skills without exposing filesystem access. */
+function skillSettingsCatalog(snapshot: SkillSnapshot): SkillCatalog {
   return {
-    skills: snapshot.skills
-      .filter(({ userInvocable }) => userInvocable)
-      .map(({ id, name, description, source, userInvocable, disableModelInvocation }) => ({
+    skills: snapshot.skills.map(
+      ({ id, name, description, source, userInvocable, disableModelInvocation }) => ({
         id,
         name,
         description,
         source,
         userInvocable,
         disableModelInvocation
-      })),
+      })
+    ),
     diagnostics: snapshot.diagnostics.map(({ path, source, message }) => ({
       path,
       source,
-      message: `Skill discovery could not fully use this entry: ${message} Check its SKILL.md and folder permissions, then refresh the catalog.`
+      message: `Skill discovery notice for this entry: ${message} Review the reported issue, then refresh the catalog.`
     }))
   }
 }
 
-export { createSkillSnapshot, skillCatalog }
+export { createSkillSnapshot, skillCatalog, skillSettingsCatalog }
