@@ -4,6 +4,9 @@
     "editorconfig.editorconfig",
     "bradlc.vscode-tailwindcss",
     "vitest.explorer",
+    "ms-playwright.playwright",
+    "GitHub.vscode-github-actions",
+    "redhat.vscode-yaml",
     "oxc.oxc-vscode",
     "biomejs.biome"
   ]
