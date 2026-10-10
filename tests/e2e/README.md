@@ -29,12 +29,19 @@ Runtime settings have one home in [playwright.config.ts](../../playwright.config
 Tests run sequentially within each platform. The [E2E workflow](../../.github/workflows/e2e.yml)
 runs local regression on Windows and macOS for pull requests and pushes to main.
 The separate [CI workflow](../../.github/workflows/ci.yml) runs non-mutating formatting,
-lint, and type checks in one job and regular workspace tests in a parallel job.
+lint, and type checks in one job and workspace coverage tests in a parallel job.
+Available coverage reports are uploaded after unsuccessful runs as well. The
+coverage script stops at the first failed project; later projects do not produce
+reports for that run. Thresholds and source scopes live in each project's Vitest
+configuration. A separate workflow-checks job validates GitHub Actions with
+`actionlint`; pinned Action revisions receive grouped weekly Dependabot updates.
 Paid endpoint checks run only on manual dispatch with `real_provider` enabled.
 
 ## Packaged application smoke
 
-The manual [Packaging workflow](../../.github/workflows/packaging.yml) builds
+The [Packaging workflow](../../.github/workflows/packaging.yml) runs on pushes to
+`main` and manual dispatch. New pushes cancel older automatic runs; manual runs
+remain independent. It builds
 Windows x64 on `windows-2022` and macOS arm64 on `macos-15`, with publishing
 disabled. It launches the packaged executable, checks the application window,
 executes the bundled Grep against a real workspace, then restarts and verifies

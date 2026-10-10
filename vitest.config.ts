@@ -17,7 +17,10 @@ export default defineConfig({
     // including packages/* that only their own vitest projects test — and
     // reports them as 0% in the root report.
     coverage: {
-      include: ['src/main/**', 'src/renderer/**', 'src/shared/**']
+      include: ['src/main/**/*.{ts,tsx}', 'src/renderer/**/*.{ts,tsx}', 'src/shared/**/*.ts'],
+      reporter: ['text', 'html', 'json-summary'],
+      reportOnFailure: true,
+      thresholds: { statements: 80, branches: 77, functions: 80, lines: 85 }
     },
     projects: [
       {

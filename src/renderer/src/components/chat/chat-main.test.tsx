@@ -98,7 +98,9 @@ function approvalMessage(permissions: ToolPermissionData[]): MicoUIMessage {
 }
 
 describe('ChatMain', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // These scenarios verify layout and approvals after the lazy transcript is available.
+    await import('./conversation/chat-message-list')
     const library = {
       configurations: [
         { provider: 'ollama' as const, baseUrl: 'http://localhost:11434', enabled: true }

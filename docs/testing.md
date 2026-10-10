@@ -86,6 +86,20 @@ Never edit source or tests while Vitest is running in the checkout. After an aud
 
 The custom rules live in [tools/oxlint/anti-slop](../tools/oxlint/anti-slop). Detection is syntactic and does not prove test value, faithful fakes, complete timer coverage, or typed stubs. Review enforces those standards even when lint passes. Shared test helpers live next to the domain they serve (`src/main/ai/tools/test-helpers.ts`, `packages/ai-providers/src/__tests__/test-helpers.ts`); consolidate repeated setup when it represents the same domain scenario without adding flags for unrelated callers.
 
+## Coverage Gate
+
+CI runs `pnpm test:coverage` and uploads HTML and JSON summary reports for the
+application, UI package, and provider package. Each Vitest configuration owns its
+source scope and thresholds. Application coverage includes TypeScript sources;
+UI coverage excludes Storybook stories. Untested production sources remain in the
+reports.
+
+The application branch and UI package thresholds currently preserve the measured
+baseline below the 80% target. These are regression floors, not evidence that the
+80% target is met. Raise them as independent behavioral coverage is added; do not
+exclude production code or add implementation-mirroring tests to improve the
+number. Provider thresholds already meet or exceed the target for all metrics.
+
 ## Verify the Changed Contract
 
 Apply the [repository verification requirements](../CLAUDE.md#verification), including the required lint, type, test, build, and UI checks for the change. After audit edits, also run `git diff --check` and review `git diff --numstat`, separating production/tooling from tests and test support. When removing source inspections, execute the script or build that owns the claimed contract where applicable. When changing a lint rule, confirm it fires on a real violation and stays silent on the passing pattern. Report which checks ran and any gaps; existing green checks do not prove every rule above is already satisfied.
