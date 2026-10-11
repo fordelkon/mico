@@ -1,5 +1,5 @@
-import { createServer, type ServerResponse } from 'node:http'
 import { once } from 'node:events'
+import { createServer, type ServerResponse } from 'node:http'
 
 import * as z from 'zod'
 
@@ -38,7 +38,7 @@ type CompletionDelta = {
 }
 type Reply =
   | { type: 'text'; text: string; hold?: boolean }
-  | { type: 'error'; status: number }
+  | { type: 'error'; status: number; retryAfter?: string }
   | {
       type: 'tool'
       name: string
@@ -72,6 +72,7 @@ export async function startLocalProvider() {
     finishArguments?: () => void
   }> = []
   const errors: string[] = []
+  let requests: readonly ProviderRequest[] = []
   const server = createServer((request, response) => {
     void (async () => {
       if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
@@ -94,13 +95,16 @@ export async function startLocalProvider() {
         finish(response)
         return
       }
+      requests = [...requests, body]
       const entry = queue.shift()
       if (!entry) throw new Error('The application made an unscripted chat request.')
       entry.response = response
       response.on('close', entry.closed)
       entry.received(body)
       if (entry.reply.type === 'error') {
-        response.writeHead(entry.reply.status, { 'content-type': 'application/json' })
+        response.setHeader('content-type', 'application/json')
+        if (entry.reply.retryAfter) response.setHeader('retry-after', entry.reply.retryAfter)
+        response.writeHead(entry.reply.status)
         response.end(JSON.stringify({ error: { message: 'E2E provider rejected the request.' } }))
         return
       }
@@ -151,6 +155,9 @@ export async function startLocalProvider() {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     modelId: 'e2e-model',
     errors,
+    get requests(): readonly ProviderRequest[] {
+      return requests
+    },
     enqueue(reply: Reply) {
       const received = Promise.withResolvers<ProviderRequest>()
       const closed = Promise.withResolvers<void>()
@@ -166,6 +173,13 @@ export async function startLocalProvider() {
         finishArguments() {
           if (!entry.finishArguments) throw new Error('No tool argument stream to finish.')
           entry.finishArguments()
+        },
+        /** End HTTP cleanly without a native completion marker. */
+        close() {
+          const response = entry.response
+          if (!response || response.destroyed)
+            throw new Error('No active provider response to close.')
+          response.end()
         },
         finish(text = '') {
           const response = entry.response
