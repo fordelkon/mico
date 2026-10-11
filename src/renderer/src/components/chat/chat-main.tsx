@@ -3,11 +3,10 @@ import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-ses
 import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
 import { isActiveChatResponse } from '@renderer/types/chat'
 import * as React from 'react'
-
-import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
-import { EmptyConversation } from './empty-conversation'
-import { ProjectSelector } from './composer/project-selector'
 import { ChatApproval } from './composer/chat-approval'
+import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
+import { ProjectSelector } from './composer/project-selector'
+import { EmptyConversation } from './empty-conversation'
 import './chat-main.css'
 
 const SubscribedChatMessageList = React.lazy(async () => {
@@ -27,7 +26,7 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
   const isActiveResponse = isActiveChatResponse(response) && isForActiveConversation
   const composerMode: ChatComposerMode = !isActiveChatResponse(response)
     ? 'send'
-    : isActiveResponse
+    : isActiveResponse && response.status !== 'settling'
       ? 'stop'
       : 'disabled'
   const errorMessage =
@@ -107,7 +106,11 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
                   errorMessage={errorMessage}
                   isResponding={isActiveResponse}
                   isThinkingEnabled={session.thinkingEffort !== 'none'}
-                  onRetry={errorMessage ? responses.retryResponse : undefined}
+                  onRetry={
+                    errorMessage && response.status === 'error' && response.canRetry !== false
+                      ? responses.retryResponse
+                      : undefined
+                  }
                   retry={retry}
                 />
               </React.Suspense>

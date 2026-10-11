@@ -39,18 +39,20 @@ type Conversation = {
 type ActiveChatResponse =
   | { status: 'submitted'; conversationId: string }
   | { status: 'streaming'; conversationId: string }
+  | { status: 'settling'; conversationId: string }
   | ({ status: 'retrying'; conversationId: string } & ChatRetryState)
 
 type ChatResponseState =
   | { status: 'idle' }
   | ActiveChatResponse
-  | { status: 'error'; conversationId: string; message: string }
+  | { status: 'error'; conversationId: string; message: string; canRetry?: boolean }
 
 function isActiveChatResponse(response: ChatResponseState): response is ActiveChatResponse {
   return (
     response.status === 'submitted' ||
     response.status === 'streaming' ||
-    response.status === 'retrying'
+    response.status === 'retrying' ||
+    response.status === 'settling'
   )
 }
 

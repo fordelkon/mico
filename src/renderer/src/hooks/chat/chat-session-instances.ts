@@ -8,6 +8,7 @@ import {
 } from '@renderer/types/chat'
 import type { PermissionMode } from '@shared/ai/permissions'
 import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
+import type { SessionRecovery } from '@shared/data/schemas/session'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import * as React from 'react'
 
@@ -70,10 +71,18 @@ function useChatResponses(): ChatResponsesStore {
 type ChatSession = {
   conversation: Conversation
   chat: Chat<MicoUIMessage>
+  transport: ElectronChatTransport
+  stopping?: Promise<void>
+  deleting?: boolean
+  cancellationFailed?: boolean
   modelEntryId: string | null
   thinkingEffort: ThinkingSelection | null
   project: WorkspaceProject | null
   permissionMode: PermissionMode
+  recovery?: SessionRecovery | null
+  recoveryRevision?: number
+  recoveryNeedsRefresh?: boolean
+  retryInProgress?: boolean
 }
 
 function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
@@ -129,11 +138,13 @@ type ChatSessionsStore = {
   responseControl: ChatResponseControl
   getSession: (conversationId: string) => ChatSession | undefined
   removeSession: (conversationId: string) => void
+  refreshRecovery: (conversationId: string) => Promise<void>
   createSession: (
     conversation: Conversation,
     messages?: ChatMessage[],
     selection?: Pick<ChatSession, 'modelEntryId' | 'thinkingEffort'>,
-    project?: WorkspaceProject | null
+    project?: WorkspaceProject | null,
+    recovery?: SessionRecovery | null
   ) => ChatSession
   updateSession: (conversationId: string, patch: (session: ChatSession) => void) => void
 }
@@ -174,6 +185,70 @@ function useChatSessions(): ChatSessionsStore {
     []
   )
 
+  const refreshRecovery = React.useCallback(
+    async (conversationId: string): Promise<void> => {
+      const instance = sessionsRef.current.get(conversationId)
+      if (!instance) return
+      const cancellationRevision = instance.recoveryRevision
+      if (instance.cancellationFailed) {
+        try {
+          await instance.transport.retryCancellation()
+          if (
+            sessionsRef.current.get(conversationId) !== instance ||
+            instance.recoveryRevision !== cancellationRevision ||
+            !instance.cancellationFailed
+          )
+            return
+          instance.stopping = undefined
+          instance.cancellationFailed = false
+          onResponseSettled(conversationId)
+        } catch {
+          return
+        }
+      }
+      const currentResponse = getResponse(conversationId)
+      if (
+        instance.stopping ||
+        instance.deleting ||
+        (currentResponse && isActiveChatResponse(currentResponse))
+      )
+        return
+      const revision = instance.recoveryRevision
+      const isCurrent = (): boolean =>
+        sessionsRef.current.get(conversationId) === instance &&
+        instance.recoveryRevision === revision &&
+        !instance.stopping &&
+        !instance.deleting &&
+        !isActiveChatResponse(getResponse(conversationId) ?? { status: 'idle' })
+      try {
+        const persisted = await window.api.sessions.load(conversationId)
+        if (!isCurrent()) return
+        instance.chat.messages = toUiMessages(persisted.messages)
+        instance.recovery = persisted.recovery
+        instance.recoveryNeedsRefresh = false
+        if (persisted.recovery)
+          onResponseState({
+            status: 'error',
+            conversationId,
+            message: persisted.recovery.blockedReason ?? persisted.recovery.failure.message,
+            canRetry: persisted.recovery.canRetry
+          })
+        else onResponseSettled(conversationId)
+      } catch {
+        if (!isCurrent()) return
+        instance.recoveryNeedsRefresh = true
+        onResponseState({
+          status: 'error',
+          conversationId,
+          message:
+            'Could not reload the saved conversation. Select this conversation again to restore its messages and recovery details.',
+          canRetry: false
+        })
+      }
+    },
+    [getResponse, onResponseState, onResponseSettled]
+  )
+
   const createSession = React.useCallback(
     (
       conversation: Conversation,
@@ -182,58 +257,83 @@ function useChatSessions(): ChatSessionsStore {
         modelEntryId: null,
         thinkingEffort: null
       },
-      project: WorkspaceProject | null = null
+      project: WorkspaceProject | null = null,
+      recovery?: SessionRecovery | null
     ): ChatSession => {
+      const transport = new ElectronChatTransport(window.api.chat, {
+        sessionId: conversation.id,
+        getRetryRunId: () => sessionsRef.current.get(conversation.id)?.recovery?.runId,
+        getThinkingEffort: () =>
+          sessionsRef.current.get(conversation.id)?.thinkingEffort ?? 'default',
+        getPermissionMode: () =>
+          sessionsRef.current.get(conversation.id)?.permissionMode ?? 'default',
+        onStatusChange: (status) => {
+          const currentResponse = getResponse(conversation.id)
+          if (
+            !currentResponse ||
+            currentResponse.status === 'error' ||
+            currentResponse.status === 'settling'
+          )
+            return
+
+          if (status.type === 'retrying') {
+            onResponseState({
+              status: 'retrying',
+              conversationId: conversation.id,
+              ...status,
+              startedAt: Date.now()
+            })
+          } else if (
+            currentResponse.status === 'submitted' ||
+            currentResponse.status === 'retrying'
+          ) {
+            onResponseState({ status: 'streaming', conversationId: conversation.id })
+          }
+        }
+      })
       const chat = new Chat<MicoUIMessage>({
         id: conversation.id,
         messages: toUiMessages(messages),
-        transport: new ElectronChatTransport(window.api.chat, {
-          sessionId: conversation.id,
-          getThinkingEffort: () =>
-            sessionsRef.current.get(conversation.id)?.thinkingEffort ?? 'default',
-          getPermissionMode: () =>
-            sessionsRef.current.get(conversation.id)?.permissionMode ?? 'default',
-          onStatusChange: (status) => {
-            const currentResponse = getResponse(conversation.id)
-            if (!currentResponse || currentResponse.status === 'error') return
-
-            if (status.type === 'retrying') {
-              onResponseState({
-                status: 'retrying',
-                conversationId: conversation.id,
-                ...status,
-                startedAt: Date.now()
-              })
-            } else if (
-              currentResponse.status === 'submitted' ||
-              currentResponse.status === 'retrying'
-            ) {
-              onResponseState({ status: 'streaming', conversationId: conversation.id })
-            }
-          }
-        }),
+        transport,
         onFinish: ({ isError }) => {
-          if (!isError) onResponseSettled(conversation.id)
+          if (!isError && !sessionsRef.current.get(conversation.id)?.stopping)
+            onResponseSettled(conversation.id)
         },
-        onError: (error) =>
+        onError: (error) => {
+          const instance = sessionsRef.current.get(conversation.id)
+          if (instance?.stopping) return
           onResponseState({
             status: 'error',
             conversationId: conversation.id,
-            message: error.message
+            message: error.message,
+            canRetry: false
           })
+          // A retried attempt has one terminal refresh owned by its awaited regeneration.
+          if (!instance?.retryInProgress) void refreshRecovery(conversation.id)
+        }
       })
 
       const session: ChatSession = {
         conversation,
         chat,
+        transport,
         project,
         permissionMode: 'default',
+        recovery,
+        recoveryRevision: 0,
         ...selection
       }
       sessionsRef.current.set(conversation.id, session)
+      if (recovery)
+        onResponseState({
+          status: 'error',
+          conversationId: conversation.id,
+          message: recovery.blockedReason ?? recovery.failure.message,
+          canRetry: recovery.canRetry
+        })
       return session
     },
-    [getResponse, onResponseState, onResponseSettled]
+    [getResponse, onResponseState, onResponseSettled, refreshRecovery]
   )
 
   React.useEffect(
@@ -250,7 +350,17 @@ function useChatSessions(): ChatSessionsStore {
     (conversationId: string, parts: MicoUIMessage['parts']): boolean => {
       const instance = getSession(conversationId)
       const current = getResponse(conversationId)
-      if (!instance || (current && isActiveChatResponse(current))) return false
+      if (
+        !instance ||
+        instance.stopping ||
+        instance.deleting ||
+        (current && isActiveChatResponse(current))
+      )
+        return false
+      instance.recoveryRevision = (instance.recoveryRevision ?? 0) + 1
+      instance.recovery = null
+      instance.recoveryNeedsRefresh = false
+      instance.retryInProgress = false
       onResponseState({ status: 'submitted', conversationId })
       void instance.chat.sendMessage({ parts })
       return true
@@ -277,7 +387,15 @@ function useChatSessions(): ChatSessionsStore {
         onResponseSettled(conversationId)
         return
       }
-      void instance.chat.stop().then(
+      instance.recoveryRevision = (instance.recoveryRevision ?? 0) + 1
+      instance.retryInProgress = false
+      if (instance.stopping) return
+      onResponseState({ status: 'settling', conversationId })
+      instance.stopping = (async () => {
+        await instance.chat.stop()
+        await instance.transport.awaitCancellation()
+      })()
+      void instance.stopping.then(
         () => {
           instance.chat.messages = instance.chat.messages.map((message, index, messages) =>
             index === messages.length - 1 && message.role === 'assistant'
@@ -287,35 +405,69 @@ function useChatSessions(): ChatSessionsStore {
                 }
               : message
           )
+          instance.stopping = undefined
           onResponseSettled(conversationId)
         },
-        () => onResponseSettled(conversationId)
+        () => {
+          instance.cancellationFailed = true
+          instance.recoveryNeedsRefresh = true
+          onResponseState({
+            status: 'error',
+            conversationId,
+            canRetry: false,
+            message:
+              'Could not confirm that the response stopped. Reopen this conversation before sending or deleting it.'
+          })
+        }
       )
     },
-    [getSession, getResponse, onResponseSettled]
+    [getSession, getResponse, onResponseState, onResponseSettled]
   )
 
   const retryResponse = React.useCallback(
     (conversationId: string): void => {
       if (getResponse(conversationId)?.status !== 'error') return
       const instance = getSession(conversationId)
-      if (!instance) return
+      if (!instance?.recovery?.canRetry) return
+      instance.recoveryRevision = (instance.recoveryRevision ?? 0) + 1
+      const revision = instance.recoveryRevision
+      instance.retryInProgress = true
       onResponseState({ status: 'submitted', conversationId })
-      void instance.chat.regenerate()
+      void instance.chat
+        .regenerate()
+        .then(async () => {
+          if (
+            instance.recoveryRevision !== revision ||
+            sessionsRef.current.get(conversationId) !== instance
+          )
+            return
+          instance.retryInProgress = false
+          await refreshRecovery(conversationId)
+        })
+        .catch(() => {
+          if (
+            instance.recoveryRevision !== revision ||
+            sessionsRef.current.get(conversationId) !== instance
+          )
+            return
+          instance.retryInProgress = false
+          void refreshRecovery(conversationId)
+        })
     },
-    [getSession, getResponse, onResponseState]
+    [getSession, getResponse, onResponseState, refreshRecovery]
   )
 
   const prepareForDeletion = React.useCallback(
     async (conversationId: string): Promise<void> => {
       const instance = getSession(conversationId)
-      if (instance && getResponse(conversationId)) {
-        // Deletion must not continue if stopping fails, unlike the interactive stop action.
-        await instance.chat.stop()
-        onResponseSettled(conversationId)
+      if (!instance) return
+      instance.deleting = true
+      if (getResponse(conversationId)) {
+        stopResponse(conversationId)
+        await instance.stopping
       }
     },
-    [getSession, getResponse, onResponseSettled]
+    [getSession, getResponse, stopResponse]
   )
 
   const responseControl = React.useMemo(
@@ -339,7 +491,14 @@ function useChatSessions(): ChatSessionsStore {
     ]
   )
 
-  return { getSession, removeSession, createSession, updateSession, responseControl }
+  return {
+    getSession,
+    removeSession,
+    createSession,
+    updateSession,
+    refreshRecovery,
+    responseControl
+  }
 }
 
 export { type ChatSession, type ChatSessionsStore, useChatSessions }
