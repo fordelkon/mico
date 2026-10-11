@@ -129,6 +129,8 @@ const providers: ProvidersAPI = {
 }
 
 const sessions: SessionsAPI = {
+  compact: (request) => invoke(IpcChannel.Sessions_Compact, request),
+  cancelCompact: (request) => invoke(IpcChannel.Sessions_CancelCompact, request),
   create: (input) => invoke(IpcChannel.Sessions_Create, input),
   delete: (sessionId) => invoke(IpcChannel.Sessions_Delete, sessionId),
   list: () => invoke(IpcChannel.Sessions_List),

@@ -9,6 +9,7 @@ import {
   ipcMain,
   shell
 } from 'electron'
+import type { SessionCompactor } from './ai/chat/session-compactor'
 import type { SessionModelProfile } from './ai/chat/session-model-profile'
 import type { TurnExecutor } from './ai/chat/turn-executor'
 import { TurnSenderGate } from './ai/chat/turn-sender-gate'
@@ -33,6 +34,7 @@ type IpcDependencies = CodeDocumentPickerDependencies & {
 }
 
 interface IpcServices {
+  sessionCompactor: Pick<SessionCompactor, 'compact' | 'cancel'>
   turnExecutor: Pick<
     TurnExecutor,
     'abortAllTurns' | 'abortTurn' | 'startTurn' | 'respondToPermission'
@@ -68,7 +70,16 @@ interface IpcServices {
 }
 
 function registerIpc(
-  { turnExecutor, modelProfile, mainWindow, preference, provider, session, workspace }: IpcServices,
+  {
+    turnExecutor,
+    sessionCompactor,
+    modelProfile,
+    mainWindow,
+    preference,
+    provider,
+    session,
+    workspace
+  }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
     ipcMain,
@@ -211,6 +222,56 @@ function registerIpc(
       turnExecutor.abortTurn({ ownerId: String(event.sender.id), requestId })
   })
 
+  const summaries = new Map<string, { ownerId: number; requestId: string }>()
+  const summarySenders = new Set<number>()
+  register({
+    channel: IpcChannel.Sessions_Compact,
+    invalidMessage: 'Invalid summary request',
+    handle: async ({ sessionId, requestId }, { event }) => {
+      if (summaries.has(sessionId))
+        throw new Error('A summary is already running for this session.')
+      const operation = { ownerId: event.sender.id, requestId }
+      summaries.set(sessionId, operation)
+      if (!summarySenders.has(event.sender.id)) {
+        summarySenders.add(event.sender.id)
+        const cancelOwnedSummaries = (): void => {
+          for (const [id, pending] of summaries) {
+            if (pending.ownerId !== event.sender.id) continue
+            void sessionCompactor.cancel(id).catch((error: Error) => {
+              console.error(
+                'Could not settle a conversation summary after renderer teardown.',
+                error
+              )
+            })
+          }
+        }
+        event.sender.on('render-process-gone', cancelOwnedSummaries)
+        event.sender.on('did-start-navigation', (details) => {
+          if (details.isMainFrame && !details.isSameDocument) cancelOwnedSummaries()
+        })
+        event.sender.once('destroyed', () => {
+          summarySenders.delete(event.sender.id)
+          cancelOwnedSummaries()
+        })
+      }
+      try {
+        return await sessionCompactor.compact(sessionId)
+      } finally {
+        if (summaries.get(sessionId) === operation) summaries.delete(sessionId)
+      }
+    }
+  })
+  register({
+    channel: IpcChannel.Sessions_CancelCompact,
+    invalidMessage: 'Invalid summary cancellation request',
+    handle: async ({ sessionId, requestId }, { event }) => {
+      const operation = summaries.get(sessionId)
+      if (!operation || operation.requestId !== requestId) return
+      if (operation.ownerId !== event.sender.id)
+        throw new Error('This summary belongs to another window. Cancel it in that window.')
+      await sessionCompactor.cancel(sessionId)
+    }
+  })
   register({
     channel: IpcChannel.Sessions_List,
     handle: () => session.listSessions()

@@ -1,3 +1,4 @@
+import type { ChatCompactionsStore } from '@renderer/hooks/chat/chat-session-instances'
 import {
   SidebarGroupLabel,
   SidebarMenu,
@@ -13,6 +14,7 @@ import * as React from 'react'
 import { ConversationRow } from './conversation-row'
 
 type ConversationNavigationProps = {
+  compactions?: ChatCompactionsStore
   conversations: Conversation[]
   projects: WorkspaceProject[]
   activeConversationId: string | null
@@ -40,6 +42,7 @@ function latestActivity(conversations: Conversation[]): number {
 }
 
 function ConversationList({
+  compactions,
   conversations,
   activeConversationId,
   respondingConversationIds,
@@ -62,6 +65,9 @@ function ConversationList({
         <ConversationRow
           key={conversation.id}
           conversation={conversation}
+          compactionState={compactions?.states.get(conversation.id)}
+          onCompactConversation={compactions?.startCompaction}
+          onCancelCompaction={compactions?.cancelCompaction}
           isResponding={respondingConversationIds.has(conversation.id)}
           shortcutNumber={commandKeyPressed ? shortcutIndexes.get(conversation.id) : undefined}
           selected={conversation.id === activeConversationId}

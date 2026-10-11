@@ -103,6 +103,7 @@ function startApp(services: MainServices): void {
     preference: services.preference,
     provider: services.provider,
     session: services.sessionRuntime,
+    sessionCompactor: services.sessionCompactor,
     workspace: services.workspace
   })
 

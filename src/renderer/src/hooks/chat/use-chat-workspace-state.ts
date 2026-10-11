@@ -6,7 +6,7 @@ import {
 import type { ChatSkillInvocationPart } from '@shared/ai/skills'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import * as React from 'react'
-import { useChatSessions } from './chat-session-instances'
+import { type ChatCompactionsStore, useChatSessions } from './chat-session-instances'
 import { type ChatActiveSessionSlice, useActiveSession } from './use-active-session'
 import { useConversationList } from './use-conversation-list'
 
@@ -30,6 +30,7 @@ type ChatWorkspace = {
   conversations: ReturnType<typeof useConversationList>['conversations']
   renameConversation: (conversationId: string, title: string) => Promise<void>
   deleteConversation: (conversationId: string) => Promise<void>
+  compactions: ChatCompactionsStore
   session: ChatActiveSessionSlice
   responses: ChatResponseSlice
 }
@@ -206,6 +207,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
   return {
     conversations,
+    compactions: sessions.compactions,
     renameConversation,
     deleteConversation,
     session,
