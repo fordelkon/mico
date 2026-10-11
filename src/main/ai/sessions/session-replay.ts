@@ -3,6 +3,7 @@ import type { SessionDatabase } from '../../data/session-database'
 import { toProviderReplayContext } from '../chat/conversation-context'
 import { type RunRow, type SessionEventLog } from './session-event-log'
 import type { SessionToolJournal } from './session-tool-journal'
+
 function getSessionReplay(
   database: SessionDatabase,
   eventLog: SessionEventLog,
@@ -10,20 +11,28 @@ function getSessionReplay(
   run: RunRow
 ): ChatProviderMessage[] {
   const runId = run.id
-  let messages = eventLog.getReplayMessages(run)
+  const checkpoint = eventLog.getTurnCheckpoint(run.turn_id)
+  const throughSequence = checkpoint?.coverage.throughSequence ?? 0
+  // Checkpoint summaries are plain user text. Provider replay/continuation markers
+  // in retained raw history still follow the existing replay contract; marker
+  // stripping at a compaction boundary is deferred to the dedicated Task 6 policy.
+  const summary: ChatProviderMessage[] = checkpoint
+    ? [{ role: 'user', parts: [{ type: 'text', text: checkpoint.summary }] }]
+    : []
+  let messages = eventLog.getReplayMessages(run, throughSequence)
   // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
   const relevant = database.connection
     .prepare(
-      `SELECT runs.id FROM runs JOIN runtime_events e ON e.run_id = runs.id AND e.kind = 'run_started' WHERE runs.session_id = ? AND (runs.turn_id = ? AND runs.attempt < ? OR EXISTS (SELECT 1 FROM runs accepted JOIN runtime_events terminal ON terminal.run_id = accepted.id AND terminal.kind IN ('run_completed','run_cancelled') WHERE accepted.turn_id = runs.turn_id AND runs.attempt <= accepted.attempt AND terminal.session_sequence < (SELECT session_sequence FROM runtime_events WHERE run_id = ? AND kind = 'run_started'))) ORDER BY e.session_sequence`
+      `SELECT runs.id FROM runs JOIN runtime_events e ON e.run_id = runs.id AND e.kind = 'run_started' WHERE runs.session_id = ? AND (runs.turn_id = ? AND runs.attempt < ? OR EXISTS (SELECT 1 FROM runs accepted JOIN runtime_events terminal ON terminal.run_id = accepted.id AND terminal.kind IN ('run_completed','run_cancelled') WHERE accepted.turn_id = runs.turn_id AND runs.attempt <= accepted.attempt AND terminal.session_sequence > ? AND terminal.session_sequence < (SELECT session_sequence FROM runtime_events WHERE run_id = ? AND kind = 'run_started'))) ORDER BY e.session_sequence`
     )
-    .all(run.session_id, run.turn_id, run.attempt, runId) as { id: string }[]
+    .all(run.session_id, run.turn_id, run.attempt, throughSequence, runId) as { id: string }[]
   // Legacy assembly remains authoritative unless this history contains the new journal.
   if (
     !relevant.some((prior) =>
       journal.rows(prior.id).some((row) => row.kind === 'model_step_accepted')
     )
   )
-    return messages
+    return [...summary, ...messages]
   messages = []
   const seenTurns = new Set<string>()
   for (const prior of relevant) {
@@ -42,7 +51,7 @@ function getSessionReplay(
       toProviderReplayContext(eventLog.getTurnUserMessage(run.turn_id)),
       ...(eventLog.getTurnContext(run.turn_id) ?? [])
     )
-  return messages
+  return [...summary, ...messages]
 
   function getRunRow(id: string): RunRow {
     // SAFETY: fixed runs columns have the schema-owned RunRow shape.
@@ -53,4 +62,5 @@ function getSessionReplay(
     return row
   }
 }
+
 export { getSessionReplay }

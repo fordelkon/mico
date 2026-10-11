@@ -10,6 +10,8 @@ import { type SessionRecovery, SessionRecoverySchema } from '@shared/data/schema
 import { SessionDatabase } from '../../data/session-database'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
 import {
+  CheckpointBoundaryRejected,
+  ContextCheckpointSchema,
   canonicalJson,
   type ProviderUserMessage,
   parseTurnContext,
@@ -74,6 +76,13 @@ const defaultDependencies = {
   createId: () => crypto.randomUUID(),
   now: () => Date.now()
 }
+
+/**
+ * The single recovery gate copy: unknown tool outcomes block retry, compaction
+ * acceptance, and every consumer that surfaces the reason to the user.
+ */
+const UNKNOWN_TOOL_OUTCOME_MESSAGE =
+  'A tool execution outcome is unknown. Inspect the workspace files and command results before starting a new request.'
 
 class SessionRuntimeService {
   private readonly dependencies: Required<SessionRuntimeServiceDependencies>
@@ -186,6 +195,73 @@ class SessionRuntimeService {
     )
   }
 
+  getCompactionSource(sessionId: string): {
+    throughSequence: number
+    sourceDigest: string
+    events: import('./session-event-log').CompactionEvent[]
+    messages: ChatProviderMessage[]
+  } | null {
+    this.findSession(sessionId)
+    // SAFETY: the query selects the declared boundary columns.
+    const boundaries = this.dependencies.database.connection
+      .prepare(
+        "SELECT session_sequence, run_id FROM runtime_events WHERE session_id = ? AND kind = 'run_completed' ORDER BY session_sequence DESC"
+      )
+      .all(sessionId) as { session_sequence: number; run_id: string }[]
+    for (const boundary of boundaries) {
+      try {
+        this.eventLog.assertCheckpointBoundary(sessionId, boundary.session_sequence)
+      } catch (error) {
+        if (!(error instanceof CheckpointBoundaryRejected)) throw error
+        continue
+      }
+      const run = this.getRunRow(boundary.run_id)
+      // The terminal run's original pin is authoritative, including when preparing
+      // a repeated compaction. Append that turn's accepted attempt history once.
+      const messages = [...this.getReplayMessages(run.id), ...this.journal.replay(run.id)]
+      return {
+        throughSequence: boundary.session_sequence,
+        sourceDigest: this.eventLog.getSourceDigest(sessionId, boundary.session_sequence),
+        events: this.eventLog.getSourceEvents(sessionId, boundary.session_sequence),
+        messages
+      }
+    }
+    return null
+  }
+
+  acceptContextCheckpoint(input: {
+    sessionId: string
+    summary: string
+    coverage: { throughSequence: number }
+    sourceDigest: string
+  }): { checkpointEventId: string } {
+    const payload = ContextCheckpointSchema.parse({
+      trigger: 'manual',
+      summary: input.summary,
+      coverage: input.coverage,
+      sourceDigest: input.sourceDigest
+    })
+    return this.dependencies.database.transaction(() => {
+      this.findSession(input.sessionId)
+      const active = this.dependencies.database.connection
+        .prepare("SELECT id FROM runs WHERE session_id = ? AND status = 'running'")
+        .get(input.sessionId)
+      if (active) throw new Error('Session already has an active run.')
+      const recovery = this.getRecovery(input.sessionId)
+      if (recovery && !recovery.canRetry) throw new Error(recovery.blockedReason)
+      const run = this.eventLog.assertCheckpointBoundary(
+        input.sessionId,
+        payload.coverage.throughSequence
+      )
+      if (
+        this.eventLog.getSourceDigest(input.sessionId, payload.coverage.throughSequence) !==
+        payload.sourceDigest
+      )
+        throw new Error('Checkpoint source digest no longer matches the captured history.')
+      return { checkpointEventId: this.eventLog.recordContextCheckpoint(run, payload) }
+    })
+  }
+
   renameSession(sessionId: string, title: string): SessionSummary {
     const now = this.dependencies.now()
     const result = this.dependencies.database.connection
@@ -261,8 +337,10 @@ class SessionRuntimeService {
       }
       const turnOrdinal = this.nextTurnOrdinal(input.sessionId)
       this.dependencies.database.connection
-        .prepare('INSERT INTO turns (id, session_id, ordinal, created_at) VALUES (?, ?, ?, ?)')
-        .run(turnId, input.sessionId, turnOrdinal, now)
+        .prepare(`INSERT INTO turns (id, session_id, ordinal, created_at, checkpoint_event_id)
+          VALUES (?, ?, ?, ?, (SELECT id FROM runtime_events WHERE session_id = ?
+            AND kind = 'context_checkpoint_recorded' ORDER BY session_sequence DESC LIMIT 1))`)
+        .run(turnId, input.sessionId, turnOrdinal, now, input.sessionId)
       this.dependencies.database.connection
         .prepare(
           `INSERT INTO runs (id, session_id, turn_id, attempt, status, started_at, finished_at, failure_json)
@@ -278,6 +356,9 @@ class SessionRuntimeService {
         message: visibleMessage(input.userMessage)
       })
       this.touchSession(input.sessionId)
+      // Replay construction belongs to the lifecycle transaction: a corrupt pinned
+      // checkpoint must reject the turn instead of committing a stranded running run.
+      this.getReplayMessages(runId)
       return this.toStartedRun(run)
     })
   }
@@ -404,9 +485,7 @@ class SessionRuntimeService {
         ? JSON.parse(row.failure_json)
         : { code: 'process_interrupted', message: 'The app closed while this run was active.' },
       canRetry: !unknown,
-      blockedReason: unknown
-        ? 'A tool execution outcome is unknown. Inspect the workspace files and command results before starting a new request.'
-        : undefined
+      blockedReason: unknown ? UNKNOWN_TOOL_OUTCOME_MESSAGE : undefined
     })
   }
 
@@ -463,6 +542,9 @@ class SessionRuntimeService {
         retryRunId: failedRunId
       })
       this.touchSession(failed.session_id)
+      // A corrupt pinned checkpoint must reject the retry inside this transaction
+      // instead of committing a stranded running run.
+      this.getReplayMessages(runId)
       return this.toStartedRun(run)
     })
   }

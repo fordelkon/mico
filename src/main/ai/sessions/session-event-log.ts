@@ -45,7 +45,32 @@ const ContextPayloadSchema = z.object({
   )
 })
 
+const ContextCheckpointSchema = z
+  .object({
+    trigger: z.literal('manual'),
+    summary: z
+      .string()
+      .min(1)
+      .max(100_000)
+      .refine((value) => value.trim().length > 0),
+    coverage: z.object({ throughSequence: z.number().int().positive() }),
+    sourceDigest: z.string().regex(/^[a-f0-9]{64}$/)
+  })
+  .strict()
+type ContextCheckpoint = z.infer<typeof ContextCheckpointSchema>
+/** Expected business rejection while selecting a safe compaction boundary. */
+class CheckpointBoundaryRejected extends Error {}
+type CompactionEvent = {
+  id: string
+  run_id: string
+  session_sequence: number
+  kind: string
+  payload_json: string
+  payload_digest: string
+}
+
 type RuntimeEventPayloads = {
+  context_checkpoint_recorded: ContextCheckpoint
   turn_context_recorded: { messages: ProviderUserMessage[] }
   run_started: {
     attempt: number
@@ -207,7 +232,7 @@ class SessionEventLog {
     return ContextPayloadSchema.parse(JSON.parse(row.payload_json)).messages
   }
 
-  getReplayMessages(run: RunRow): ChatProviderMessage[] {
+  getReplayMessages(run: RunRow, throughSequence = 0): ChatProviderMessage[] {
     const runId = run.id
     // SAFETY: this fixed query returns only accepted-run identity columns. An accepted run joins
     // history where its terminal event occurred, not where its user turn was created, preserving
@@ -230,9 +255,10 @@ class SessionEventLog {
            ON terminal.run_id = accepted_run.id
           AND terminal.kind IN ('run_completed', 'run_cancelled')
           AND terminal.session_sequence < current_run.started_sequence
+          AND terminal.session_sequence > ?
          ORDER BY terminal.session_sequence`
       )
-      .all(runId, runId) as Array<{ id: string; turn_id: string }>
+      .all(runId, runId, throughSequence) as Array<{ id: string; turn_id: string }>
     const messages: ChatProviderMessage[] = []
     for (const prior of priorRuns) {
       messages.push(toProviderReplayContext(this.getTurnUserMessage(prior.turn_id)))
@@ -247,6 +273,110 @@ class SessionEventLog {
       .all(run.turn_id, run.attempt) as Array<{ id: string }>
     for (const retry of retryRuns) messages.push(...this.getRunReplayEvents(retry.id))
     return messages
+  }
+
+  getTurnCheckpoint(turnId: string): ContextCheckpoint | undefined {
+    // SAFETY: the fixed query selects only the declared turn columns.
+    const row = this.dependencies.database.connection
+      .prepare('SELECT session_id, checkpoint_event_id FROM turns WHERE id = ?')
+      .get(turnId) as { session_id: string; checkpoint_event_id: string | null } | undefined
+    // An unpinned turn replays in full; a non-null pin delegates to getCheckpoint,
+    // where a missing, corrupt, or stale checkpoint fails loudly.
+    if (!row) throw new Error('Turn does not exist.')
+    if (row.checkpoint_event_id === null) return undefined
+    return this.getCheckpoint(row.checkpoint_event_id, row.session_id)
+  }
+
+  getCheckpoint(id: string, sessionId: string): ContextCheckpoint {
+    // SAFETY: the query selects schema-owned payload columns only.
+    const row = this.dependencies.database.connection
+      .prepare(
+        "SELECT payload_json, payload_digest FROM runtime_events WHERE id = ? AND session_id = ? AND kind = 'context_checkpoint_recorded'"
+      )
+      .get(id, sessionId) as { payload_json: string; payload_digest: string } | undefined
+    if (!row) throw new Error('Pinned context checkpoint does not exist.')
+    assertPayloadDigest(row)
+    const checkpoint = ContextCheckpointSchema.parse(JSON.parse(row.payload_json))
+    if (
+      this.getSourceDigest(sessionId, checkpoint.coverage.throughSequence) !==
+      checkpoint.sourceDigest
+    )
+      throw new Error('Context checkpoint source digest does not match its covered history.')
+    this.assertCheckpointBoundary(sessionId, checkpoint.coverage.throughSequence)
+    return checkpoint
+  }
+
+  getSourceEvents(sessionId: string, throughSequence: number): CompactionEvent[] {
+    // SAFETY: the fixed SELECT returns the declared event columns.
+    const rows = this.dependencies.database.connection
+      .prepare(
+        "SELECT id, run_id, session_sequence, kind, payload_json, payload_digest FROM runtime_events WHERE session_id = ? AND session_sequence <= ? AND kind NOT IN ('context_checkpoint_recorded', 'compaction_notice_recorded') ORDER BY session_sequence"
+      )
+      .all(sessionId, throughSequence) as CompactionEvent[]
+    for (const row of rows) assertPayloadDigest(row)
+    return rows
+  }
+
+  getSourceDigest(sessionId: string, throughSequence: number): string {
+    return digest(
+      canonicalJson(
+        this.getSourceEvents(sessionId, throughSequence).map((row) => ({
+          session_sequence: row.session_sequence,
+          kind: row.kind,
+          payload_digest: row.payload_digest
+        }))
+      )
+    )
+  }
+
+  assertCheckpointBoundary(sessionId: string, throughSequence: number): RunRow {
+    // SAFETY: runs.* has the schema-owned RunRow shape.
+    const run = this.dependencies.database.connection
+      .prepare(
+        "SELECT runs.* FROM runtime_events e JOIN runs ON runs.id = e.run_id WHERE e.session_id = ? AND e.session_sequence = ? AND e.kind = 'run_completed' AND runs.status = 'completed'"
+      )
+      .get(sessionId, throughSequence) as RunRow | undefined
+    if (!run)
+      throw new CheckpointBoundaryRejected(
+        'Checkpoint coverage must end at an accepted turn boundary.'
+      )
+    const unsafe = this.dependencies.database.connection
+      .prepare(
+        `SELECT e.id FROM runtime_events e JOIN runs ON runs.id = e.run_id
+       WHERE e.session_id = ? AND e.session_sequence <= ? AND
+       (runs.status = 'cancelled' OR NOT EXISTS (
+         SELECT 1 FROM runtime_events terminal JOIN runs accepted ON accepted.id = terminal.run_id
+         WHERE accepted.turn_id = runs.turn_id AND terminal.kind = 'run_completed'
+         AND terminal.session_sequence <= ?)) LIMIT 1`
+      )
+      .get(sessionId, throughSequence, throughSequence)
+    if (unsafe)
+      throw new CheckpointBoundaryRejected(
+        'Checkpoint boundary includes an unsettled or cancelled turn.'
+      )
+    return run
+  }
+
+  recordContextCheckpoint(
+    run: Pick<RunRow, 'id' | 'session_id'>,
+    payload: ContextCheckpoint
+  ): string {
+    // SAFETY: the fixed SELECT returns stored checkpoint identity and payload columns.
+    const existing = this.dependencies.database.connection
+      .prepare(
+        "SELECT id, payload_json, payload_digest FROM runtime_events WHERE session_id = ? AND kind = 'context_checkpoint_recorded' AND json_extract(payload_json, '$.coverage.throughSequence') = ?"
+      )
+      .get(run.session_id, payload.coverage.throughSequence) as
+      | { id: string; payload_json: string; payload_digest: string }
+      | undefined
+    if (existing) {
+      this.getCheckpoint(existing.id, run.session_id)
+      if (existing.payload_json === canonicalJson(toJsonValue(payload))) return existing.id
+      throw new Error(
+        'A context checkpoint already exists at this coverage boundary with different content.'
+      )
+    }
+    return this.appendEvent(run, 'context_checkpoint_recorded', payload)
   }
 
   private agentEventExists(runId: string, index: number): boolean {
@@ -376,8 +506,9 @@ class SessionEventLog {
     run: Pick<RunRow, 'id' | 'session_id'>,
     kind: Kind,
     payload: RuntimeEventPayloads[Kind]
-  ): void {
+  ): string {
     const payloadJson = canonicalJson(toJsonValue(payload))
+    const id = this.dependencies.createId()
     // appendEvent is only called inside an IMMEDIATE transaction, so sequence allocation and the
     // insert are atomic even though the next value is derived from the existing session log.
     this.dependencies.database.connection
@@ -391,7 +522,7 @@ class SessionEventLog {
          WHERE session_id = ?`
       )
       .run(
-        this.dependencies.createId(),
+        id,
         run.session_id,
         run.id,
         kind,
@@ -400,6 +531,7 @@ class SessionEventLog {
         this.dependencies.now(),
         run.session_id
       )
+    return id
   }
 }
 
@@ -430,5 +562,12 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-export type { ProviderUserMessage, RunRow }
-export { assertPayloadDigest, canonicalJson, parseTurnContext, SessionEventLog }
+export type { CompactionEvent, ContextCheckpoint, ProviderUserMessage, RunRow }
+export {
+  assertPayloadDigest,
+  CheckpointBoundaryRejected,
+  ContextCheckpointSchema,
+  canonicalJson,
+  parseTurnContext,
+  SessionEventLog
+}
