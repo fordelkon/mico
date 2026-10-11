@@ -39,6 +39,22 @@ describe('tool call assembler', () => {
     ])
   })
 
+  it.each(['null', '42', '[]', '"text"'])(
+    'user receives %s tool arguments when parsing, then they are not executable',
+    (argumentsJson) => {
+      const assembler = createToolCallAssembler('invalid arguments.')
+      expect(assembler.completeJson('call-1', 'read', argumentsJson)).toEqual([
+        {
+          type: 'tool-input-error',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          input: argumentsJson,
+          errorText: 'invalid arguments.'
+        }
+      ])
+    }
+  )
+
   it('user sees the protocol error chunk when a pre-parsed argument fails its shape check, then the raw value is preserved', () => {
     const assembler = createToolCallAssembler('invalid arguments.')
 

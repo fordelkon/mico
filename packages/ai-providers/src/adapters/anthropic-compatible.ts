@@ -13,6 +13,7 @@ import type {
   ThinkingSelection
 } from '../contracts'
 import { providerFinish } from '../contracts'
+import { ProviderError, assertProviderResponse, providerApiError } from '../provider-error'
 import { createRequestNegotiator, type RequestVariant } from '../request-negotiator'
 import { createReasoningChunkEmitter, type ReasoningChunkEmitter } from '../streaming/parts'
 import { parseSse } from '../streaming/sse'
@@ -92,7 +93,13 @@ const EventSchema = z.object({
     })
     .optional(),
   usage: z.object({ output_tokens: z.number().nonnegative().optional() }).optional(),
-  error: z.object({ message: z.string().optional() }).optional()
+  error: z
+    .object({
+      message: z.string().optional(),
+      type: z.string().optional(),
+      code: z.string().optional()
+    })
+    .optional()
 })
 const SignatureSchema = z.object({ signature: z.string() })
 const ToolArgumentsSchema = z.record(z.string(), z.json())
@@ -196,6 +203,7 @@ function createAnthropicCompatibleProvider(
           input_schema: tool.inputSchema
         }))
       const response = await negotiate({
+        signal,
         // Only the optimistic effort levels carry thinking; other selections
         // stream without a thinking field at all.
         thinkingEffort:
@@ -219,13 +227,8 @@ function createAnthropicCompatibleProvider(
           })
         }
       })
-      if (!response.ok)
-        throw new Error(
-          `Anthropic-compatible request failed (${response.status} ${response.statusText}).`
-        )
-      if (!response.body)
-        throw new Error('Anthropic-compatible provider returned an empty streaming response.')
-      const stream = response.body
+      await assertProviderResponse(response, signal)
+      const stream = response.body!
       return (async function* (): AsyncIterable<ProviderStreamPart> {
         // Anthropic reasoning blocks interleave with text by content-block index,
         // so each block owns a reasoning emitter and text never closes them; only
@@ -241,10 +244,10 @@ function createAnthropicCompatibleProvider(
           { id?: string; name?: string; argumentsJson: string; initialInput?: unknown }
         >()
         let stopReason: string | undefined
+        let completed = false
         for await (const event of parseSse(stream)) {
           if (event.data === '[DONE]') {
-            if (toolUses.size > 0)
-              throw new Error('The Anthropic-compatible provider returned an incomplete tool call.')
+            if (toolUses.size > 0) throw new ProviderError('incomplete_stream')
             break
           }
           const parsed = EventSchema.safeParse(JSON.parse(event.data))
@@ -252,7 +255,7 @@ function createAnthropicCompatibleProvider(
             throw new Error(
               'The Anthropic-compatible streaming response contained invalid event data.'
             )
-          if (parsed.data.error?.message) throw new Error(parsed.data.error.message)
+          if (parsed.data.error) throw providerApiError(parsed.data.error)
           if (parsed.data.usage?.output_tokens !== undefined)
             onPerformanceMetrics?.({ outputTokens: parsed.data.usage.output_tokens })
           if (event.event === 'message_delta') stopReason = parsed.data.delta?.stop_reason
@@ -315,32 +318,24 @@ function createAnthropicCompatibleProvider(
               ) ?? []
             const tool = toolUses.get(index)
             if (tool) {
-              if (!tool.id || !tool.name)
-                throw new Error(
-                  'The Anthropic-compatible provider returned an incomplete tool call.'
-                )
+              if (!tool.id || !tool.name) throw new ProviderError('incomplete_stream')
               if (!tool.argumentsJson && tool.initialInput === undefined)
-                throw new Error(
-                  'The Anthropic-compatible provider returned an incomplete tool call.'
-                )
+                throw new ProviderError('incomplete_stream')
               const argumentsJson = tool.argumentsJson || JSON.stringify(tool.initialInput)
               yield* assembler.start(tool.id, tool.name)
               yield* assembler.completeJson(tool.id, tool.name, argumentsJson)
               toolUses.delete(index)
             }
           }
-          if (event.event === 'error')
-            throw new Error(
-              parsed.data.error?.message ?? 'The Anthropic-compatible provider returned an error.'
-            )
+          if (event.event === 'error') throw providerApiError(parsed.data.error)
           if (event.event === 'message_stop') {
-            if (toolUses.size > 0)
-              throw new Error('The Anthropic-compatible provider returned an incomplete tool call.')
+            completed = true
+            if (toolUses.size > 0) throw new ProviderError('incomplete_stream')
             break
           }
         }
-        if (toolUses.size > 0)
-          throw new Error('The Anthropic-compatible provider returned an incomplete tool call.')
+        if (toolUses.size > 0) throw new ProviderError('incomplete_stream')
+        if (!completed) throw new ProviderError('incomplete_stream')
         for (const [index, emitter] of reasoning)
           yield* emitter.finish(
             signatures.has(index) ? { anthropic: { signature: signatures.get(index) } } : undefined
@@ -348,7 +343,14 @@ function createAnthropicCompatibleProvider(
         yield* text.finish()
         // `max_tokens` is an incomplete response, not a successful finish.
         // The main-process runner consumes this signal and performs one bounded continuation.
-        if (stopReason === 'max_tokens') yield providerFinish({ reason: 'length' })
+        yield providerFinish({
+          reason:
+            stopReason === 'max_tokens'
+              ? 'length'
+              : stopReason === 'tool_use'
+                ? 'tool-calls'
+                : 'stop'
+        })
       })()
     }
   }

@@ -12,6 +12,7 @@ import type {
   ThinkingSelection
 } from '../contracts'
 import { providerFinish } from '../contracts'
+import { ProviderError, assertProviderResponse, providerApiError } from '../provider-error'
 import { parseNdjson } from '../streaming/ndjson'
 import { createStreamSequencer } from '../streaming/sequencer'
 import { createToolCallAssembler } from '../streaming/tool-calls'
@@ -135,10 +136,7 @@ function createOllamaProvider(
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: configuration.modelId })
       })
-      if (!response.ok)
-        throw new Error(
-          `Ollama model capabilities request failed (${response.status} ${response.statusText}).`
-        )
+      await assertProviderResponse(response)
       const details = ModelDetailsSchema.safeParse(await response.json())
       if (!details.success) throw new Error('Ollama returned invalid model capabilities.')
       return details.data.capabilities.includes('thinking')
@@ -160,21 +158,20 @@ function createOllamaProvider(
         body: JSON.stringify(body),
         signal
       })
-      if (!response.ok)
-        throw new Error(`Ollama request failed (${response.status} ${response.statusText}).`)
-      if (!response.body) throw new Error('Ollama returned an empty streaming response.')
-      const stream = response.body
+      await assertProviderResponse(response, signal)
+      const stream = response.body!
       return (async function* (): AsyncIterable<ProviderStreamPart> {
         const seq = createStreamSequencer(dependencies.createId)
         const assembler = createToolCallAssembler(
           'The Ollama provider returned invalid tool arguments.'
         )
         let finishReason: 'length' | 'stop' | 'unknown' = 'stop'
+        let completed = false
         for await (const value of parseNdjson(stream)) {
           const parsed = ChunkSchema.safeParse(value)
           if (!parsed.success)
             throw new Error('The Ollama streaming response contained invalid event data.')
-          if (parsed.data.error) throw new Error(parsed.data.error)
+          if (parsed.data.error) throw providerApiError(parsed.data.error)
           if (parsed.data.message?.thinking) yield* seq.emitReasoning(parsed.data.message.thinking)
           if (parsed.data.message?.content) yield* seq.emitText(parsed.data.message.content)
           for (const call of parsed.data.message?.tool_calls ?? []) {
@@ -190,6 +187,7 @@ function createOllamaProvider(
             )
           }
           if (parsed.data.done) {
+            completed = true
             finishReason =
               parsed.data.done_reason === 'length'
                 ? 'length'
@@ -208,6 +206,7 @@ function createOllamaProvider(
             break
           }
         }
+        if (!completed) throw new ProviderError('incomplete_stream')
         yield* seq.finish()
         yield providerFinish({ reason: finishReason })
       })()

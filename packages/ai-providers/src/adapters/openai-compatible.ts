@@ -10,6 +10,7 @@ import type {
   ProviderStreamPart
 } from '../contracts'
 import { providerFinish } from '../contracts'
+import { ProviderError, assertProviderResponse, providerApiError } from '../provider-error'
 import { createRequestNegotiator } from '../request-negotiator'
 import { parseEvent } from '../streaming/event-parse'
 import { parseSse } from '../streaming/sse'
@@ -94,7 +95,11 @@ const EventSchema = z.object({
   error: z
     .union([
       z.string().transform((message) => ({ message })),
-      z.object({ message: z.string().optional() })
+      z.object({
+        message: z.string().optional(),
+        code: z.string().nullable().optional(),
+        type: z.string().optional()
+      })
     ])
     .optional()
 })
@@ -186,6 +191,7 @@ function createOpenAICompatibleProvider(
       if (tools?.length) request.tools = toTools(tools)
       if (collectPerformanceMetrics) request.stream_options = { include_usage: true }
       const response = await negotiate({
+        signal,
         thinkingEffort,
         attempt: (variant) =>
           dependencies.fetch(chatUrl, {
@@ -197,13 +203,8 @@ function createOpenAICompatibleProvider(
             signal
           })
       })
-      if (!response.ok)
-        throw new Error(
-          `OpenAI-compatible request failed (${response.status} ${response.statusText}).`
-        )
-      if (!response.body)
-        throw new Error('OpenAI-compatible provider returned an empty streaming response.')
-      const stream = response.body
+      await assertProviderResponse(response, signal)
+      const stream = response.body!
       return (async function* (): AsyncIterable<ProviderStreamPart> {
         const seq = createStreamSequencer(dependencies.createId)
         const assembler = createToolCallAssembler(
@@ -220,14 +221,14 @@ function createOpenAICompatibleProvider(
           }
         >()
         let finishReason: ProviderFinishReason = 'stop'
+        let completed = false
         for await (const event of parseSse(stream)) {
           if (event.data === '[DONE]') {
-            if (toolCalls.size > 0)
-              throw new Error('The OpenAI-compatible provider returned an incomplete tool call.')
+            if (toolCalls.size > 0) throw new ProviderError('incomplete_stream')
             break
           }
           const parsed = parseEvent(EventSchema, 'OpenAI-compatible', event.data)
-          if (parsed.error?.message) throw new Error(parsed.error.message)
+          if (parsed.error) throw providerApiError(parsed.error)
           if (parsed.usage?.completion_tokens !== undefined)
             onPerformanceMetrics?.({ outputTokens: parsed.usage.completion_tokens })
           const delta = parsed.choices?.[0]?.delta
@@ -235,6 +236,7 @@ function createOpenAICompatibleProvider(
             (choice) => choice.finish_reason !== null && choice.finish_reason !== undefined
           )?.finish_reason
           if (nativeFinishReason) {
+            completed = true
             finishReason =
               nativeFinishReason === 'length'
                 ? 'length'
@@ -282,16 +284,15 @@ function createOpenAICompatibleProvider(
           }
           if (parsed.choices?.some((choice) => choice.finish_reason === 'tool_calls')) {
             for (const call of toolCalls.values()) {
-              if (!call.id || !call.name)
-                throw new Error('The OpenAI-compatible provider returned an incomplete tool call.')
+              if (!call.id || !call.name) throw new ProviderError('incomplete_stream')
               yield* assembler.start(call.id, call.name)
               yield* assembler.completeJson(call.id, call.name, call.argumentsJson)
             }
             toolCalls.clear()
           }
         }
-        if (toolCalls.size > 0)
-          throw new Error('The OpenAI-compatible provider returned an incomplete tool call.')
+        if (toolCalls.size > 0) throw new ProviderError('incomplete_stream')
+        if (!completed) throw new ProviderError('incomplete_stream')
         for (const part of tagged.finish()) {
           if (part.type === 'reasoning') yield* seq.emitReasoning(part.delta)
           else yield* seq.emitText(part.delta)

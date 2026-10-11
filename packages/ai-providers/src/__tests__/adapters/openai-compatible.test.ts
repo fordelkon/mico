@@ -49,7 +49,12 @@ describe('OpenAI-compatible provider', () => {
   it('user gets the tool definition serialized when tools are sent, then it maps over', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response('data: [DONE]\n\n'))
+      .mockImplementation(
+        async () =>
+          new Response(
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+          )
+      )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
     await collect(
@@ -101,7 +106,12 @@ describe('OpenAI-compatible provider', () => {
   it('user gets calls and results replayed when history is resent, then the ID is kept', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response('data: [DONE]\n\n'))
+      .mockImplementation(
+        async () =>
+          new Response(
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+          )
+      )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
     await collect(
@@ -165,9 +175,9 @@ describe('OpenAI-compatible provider', () => {
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
-    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toThrow(
-      'incomplete tool call'
-    )
+    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toMatchObject({
+      kind: 'incomplete_stream'
+    })
   })
 
   it('user sees buffered deltas flushed when the call name arrives, then order holds', async () => {
@@ -221,15 +231,20 @@ describe('OpenAI-compatible provider', () => {
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
-    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toThrow(
-      'incomplete tool call'
-    )
+    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toMatchObject({
+      kind: 'incomplete_stream'
+    })
   })
 
   it('user sees Chat Completions appended when the root is versioned, then it stays', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response('data: [DONE]\n\n'))
+      .mockImplementation(
+        async () =>
+          new Response(
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+          )
+      )
     const provider = createChatProvider(
       providerConfig({ baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3' }),
       streamDependencies(fetch)
@@ -246,7 +261,12 @@ describe('OpenAI-compatible provider', () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(new Response('', { status: 422 }))
-      .mockResolvedValue(new Response('data: [DONE]\n\n'))
+      .mockImplementation(
+        async () =>
+          new Response(
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+          )
+      )
     const provider = createChatProvider(
       providerConfig({ baseUrl: 'http://localhost:8000/v1' }),
       streamDependencies(fetch)
@@ -269,7 +289,7 @@ describe('OpenAI-compatible provider', () => {
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(
         new Response(
-          'data: {"choices":[{"delta":{"reasoning_content":"Inspect."}}]}\n\ndata: {"choices":[{"delta":{"content":"Done."}}]}\n\ndata: [DONE]\n\n'
+          'data: {"choices":[{"delta":{"reasoning_content":"Inspect."}}]}\n\ndata: {"choices":[{"delta":{"content":"Done."}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
         )
       )
     const provider = createChatProvider(
@@ -294,7 +314,7 @@ describe('OpenAI-compatible provider', () => {
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(
         new Response(
-          'data: {"choices":[{"delta":{"content":null,"reasoning_content":"Inspect."}}]}\n\ndata: {"choices":[{"delta":{"content":"Done."}}]}\n\ndata: [DONE]\n\n'
+          'data: {"choices":[{"delta":{"content":null,"reasoning_content":"Inspect."}}]}\n\ndata: {"choices":[{"delta":{"content":"Done."}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
         )
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
@@ -314,7 +334,7 @@ describe('OpenAI-compatible provider', () => {
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(
         new Response(
-          'data: {"choices":[{"delta":null}]}\n\ndata: {"choices":null}\n\ndata: {"usage":{"completion_tokens":null}}\n\ndata: [DONE]\n\n'
+          'data: {"choices":[{"delta":null}]}\n\ndata: {"choices":null}\n\ndata: {"usage":{"completion_tokens":null}}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
         )
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
@@ -326,7 +346,9 @@ describe('OpenAI-compatible provider', () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(
-        new Response('data: {"usage":{"completion_tokens":null}}\n\ndata: [DONE]\n\n')
+        new Response(
+          'data: {"usage":{"completion_tokens":null}}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+        )
       )
     let receivedPerformanceMetrics = false
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
@@ -350,7 +372,7 @@ describe('OpenAI-compatible provider', () => {
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(
         new Response(
-          'data: {"choices":[{"delta":{"content":"Done.","reasoning_content":null}}]}\n\ndata: [DONE]\n\n'
+          'data: {"choices":[{"delta":{"content":"Done.","reasoning_content":null}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
         )
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
@@ -367,7 +389,7 @@ describe('OpenAI-compatible provider', () => {
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(
         new Response(
-          'data: {"choices":[{"delta":{"content":[{"type":"text","text":"He"},{"type":"text","text":"llo"}]}}]}\n\ndata: [DONE]\n\n'
+          'data: {"choices":[{"delta":{"content":[{"type":"text","text":"He"},{"type":"text","text":"llo"}]}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
         )
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
@@ -379,13 +401,15 @@ describe('OpenAI-compatible provider', () => {
     ])
   })
 
-  it('user gets a rejected stream when the endpoint sends an error string, then the message is kept', async () => {
+  it('user gets a rejected stream when the endpoint sends an error string, then the failure is safe', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(new Response('data: {"error":"rate limited"}\n\n'))
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
-    await expect(collect(await provider.stream(streamInput()))).rejects.toThrow('rate limited')
+    await expect(collect(await provider.stream(streamInput()))).rejects.toMatchObject({
+      kind: 'provider'
+    })
   })
 
   it('user sees the tool call assembled when the index is omitted, then it completes', async () => {

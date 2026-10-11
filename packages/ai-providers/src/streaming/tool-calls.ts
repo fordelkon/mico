@@ -1,4 +1,7 @@
 ﻿import type { UIMessageChunk } from 'ai'
+import * as z from 'zod'
+
+const ToolArgumentsSchema = z.record(z.string(), z.json())
 
 import type { JsonValue } from '../contracts'
 
@@ -42,7 +45,12 @@ function createToolCallAssembler(errorText: string): ToolCallAssembler {
     completeJson: (toolCallId, toolName, argumentsJson) => {
       try {
         return [
-          { type: 'tool-input-available', toolCallId, toolName, input: JSON.parse(argumentsJson) }
+          {
+            type: 'tool-input-available',
+            toolCallId,
+            toolName,
+            input: ToolArgumentsSchema.parse(JSON.parse(argumentsJson))
+          }
         ]
       } catch {
         return [{ type: 'tool-input-error', toolCallId, toolName, input: argumentsJson, errorText }]

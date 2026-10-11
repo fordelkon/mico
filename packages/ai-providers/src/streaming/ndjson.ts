@@ -21,6 +21,9 @@ async function* parseNdjson(stream: ReadableStream<Uint8Array>): AsyncIterable<u
     buffer += decoder.decode()
     if (buffer.trim()) yield JSON.parse(buffer)
   } finally {
+    // Native completion can stop consumption before EOF; release the connection
+    // without allowing cleanup failures to replace the primary result.
+    void reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }
 }

@@ -9,6 +9,7 @@ import type {
   ProviderStreamPart
 } from '../contracts'
 import { providerFinish } from '../contracts'
+import { ProviderError, assertProviderResponse, providerApiError } from '../provider-error'
 import { createRequestNegotiator } from '../request-negotiator'
 import { parseEvent } from '../streaming/event-parse'
 import { parseSse } from '../streaming/sse'
@@ -23,10 +24,12 @@ type OpenAIResponsesConfiguration = Extract<
 const OpenAIEventSchema = z.object({
   delta: z.string().optional(),
   message: z.string().optional(),
+  code: z.string().nullable().optional(),
   output_index: z.number().int().nonnegative().optional(),
   response: z
     .object({
       id: z.string().optional(),
+      error: z.json().optional(),
       incomplete_details: z.object({ reason: z.string().optional() }).nullable().optional(),
       status: z.string().optional(),
       // Usage is null until the response completes, per the Responses protocol.
@@ -47,7 +50,7 @@ const OpenAIEventSchema = z.object({
   error: z
     .union([
       z.string().transform((message) => ({ message })),
-      z.object({ message: z.string().optional() })
+      z.object({ message: z.string().optional(), code: z.string().nullable().optional() })
     ])
     .optional(),
   item: z
@@ -171,6 +174,7 @@ function createOpenAIResponsesProvider(
       // Responses uses a different stream vocabulary from Chat Completions, so
       // reasoning summaries and output text are parsed from response.* events below.
       const response = await negotiate({
+        signal,
         thinkingEffort,
         attempt: (variant) => {
           const headers = new Headers({
@@ -191,10 +195,8 @@ function createOpenAIResponsesProvider(
           })
         }
       })
-      if (!response.ok)
-        throw new Error(`OpenAI request failed (${response.status} ${response.statusText}).`)
-      const stream = response.body
-      if (!stream) throw new Error('OpenAI returned an empty streaming response.')
+      await assertProviderResponse(response, signal)
+      const stream = response.body!
       return (async function* (): AsyncIterable<ProviderStreamPart> {
         const seq = createStreamSequencer(dependencies.createId)
         const assembler = createToolCallAssembler(
@@ -229,27 +231,27 @@ function createOpenAIResponsesProvider(
             call.id = data.item.call_id ?? call.id
             call.name = data.item.name ?? call.name
             if (data.item.arguments !== undefined) call.argumentsJson = data.item.arguments
-            if (!call.id || !call.name)
-              throw new Error('The OpenAI provider returned an incomplete tool call.')
+            if (!call.id || !call.name) throw new ProviderError('incomplete_stream')
             yield* assembler.start(call.id, call.name)
             yield* assembler.completeJson(call.id, call.name, call.argumentsJson)
             calls.delete(outputIndex)
           }
           if (event.event === 'response.completed') {
-            if (calls.size > 0)
-              throw new Error('The OpenAI provider returned an incomplete tool call.')
+            if (calls.size > 0) throw new ProviderError('incomplete_stream')
             if (data.response?.usage?.output_tokens !== undefined)
               onPerformanceMetrics?.({ outputTokens: data.response.usage.output_tokens })
             yield* seq.finish()
+            const finish = providerFinish({ reason: 'stop' })
             if (data.response?.id)
-              yield providerFinish({
-                reason: 'stop',
-                continuation: { provider: 'openai-responses', responseId: data.response.id },
-                usage: toUsage(data.response.usage)
-              })
+              finish.continuation = { provider: 'openai-responses', responseId: data.response.id }
+            const usage = toUsage(data.response?.usage)
+            if (usage) finish.usage = usage
+            yield finish
             return
           }
           if (event.event === 'response.incomplete') {
+            // Native output limits permit continuation, but pending arguments
+            // have no executable completion boundary and must remain deltas.
             yield* seq.finish()
             const reason = data.response?.incomplete_details?.reason
             const finish = providerFinish({
@@ -262,12 +264,10 @@ function createOpenAIResponsesProvider(
             return
           }
           if (event.event === 'error' || event.event === 'response.failed')
-            throw new Error(
-              data.message ?? data.error?.message ?? 'The OpenAI provider returned an error.'
-            )
+            throw providerApiError(data.response?.error ?? data.error ?? data)
         }
-        if (calls.size > 0) throw new Error('The OpenAI provider returned an incomplete tool call.')
-        yield* seq.finish()
+        if (calls.size > 0) throw new ProviderError('incomplete_stream')
+        throw new ProviderError('incomplete_stream')
       })()
     }
   }

@@ -472,7 +472,7 @@ describe('OpenAI Responses provider', () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('', { status: 400 }))
-      .mockResolvedValue(new Response('event: response.completed\ndata: {}\n\n'))
+      .mockImplementation(async () => new Response('event: response.completed\ndata: {}\n\n'))
     const provider = createChatProvider(
       providerConfig({ apiKey: 'key', modelId: 'model' }),
       streamDependencies(fetchMock, () => 'part-1')
@@ -507,13 +507,15 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('user gets the endpoint error message when the error event carries a string, then it fails', async () => {
+  it('user receives an error string when reading, then gets a safe failure', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(sseResponse('event: error\ndata: {"error":"boom"}\n\n'))
     const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
-    await expect(collect(await provider.stream(streamInput()))).rejects.toThrow('boom')
+    await expect(collect(await provider.stream(streamInput()))).rejects.toMatchObject({
+      kind: 'provider'
+    })
   })
 
   it('user gets the failing field in the error when an event is malformed, then it can be diagnosed', async () => {
