@@ -6,6 +6,7 @@ import type {
   PersistedSession,
   SessionSummary
 } from '@shared/data/schemas/session'
+import { type SessionRecovery, SessionRecoverySchema } from '@shared/data/schemas/session'
 import { SessionDatabase } from '../../data/session-database'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
 import {
@@ -15,6 +16,13 @@ import {
   type RunRow,
   SessionEventLog
 } from './session-event-log'
+import { getSessionReplay } from './session-replay'
+import {
+  type ModelStepAccepted,
+  SessionToolJournal,
+  type ToolExecutionSettled,
+  type ToolExecutionStarted
+} from './session-tool-journal'
 import { type AgentStep, sanitizeAgentStep, visibleMessage } from './session-transcript'
 
 type StartedRun = {
@@ -31,7 +39,7 @@ type StartTurnInput = {
 }
 type RunOutcome =
   | { status: 'completed'; assistant: ChatMessage }
-  | { status: 'failed'; failure: TurnFailure }
+  | { status: 'failed'; failure: TurnFailure; assistant?: ChatMessage }
   | { status: 'cancelled'; assistant?: ChatMessage }
 /**
  * One accepted run, scoped to the turn executor's needs. The handle hides the
@@ -50,7 +58,10 @@ type TurnRunHandle = {
   recordStep: (step: AgentStep) => void
   recordTrace: (trace: ToolExecutionTrace) => void
   complete: (assistant: ChatMessage) => void
-  fail: (failure: TurnFailure) => void
+  recordModelStep: (step: ModelStepAccepted) => void
+  recordToolExecutionStarted: (execution: ToolExecutionStarted) => void
+  recordToolExecutionSettled: (execution: ToolExecutionSettled) => void
+  fail: (failure: TurnFailure, assistant?: ChatMessage) => void
   cancel: (assistant?: ChatMessage) => void
 }
 type SessionRuntimeServiceDependencies = {
@@ -67,10 +78,12 @@ const defaultDependencies = {
 class SessionRuntimeService {
   private readonly dependencies: Required<SessionRuntimeServiceDependencies>
   private readonly eventLog: SessionEventLog
+  private readonly journal: SessionToolJournal
 
   constructor(dependencies: SessionRuntimeServiceDependencies) {
     this.dependencies = { ...defaultDependencies, ...dependencies }
     this.eventLog = new SessionEventLog(this.dependencies)
+    this.journal = new SessionToolJournal(dependencies.database, this.eventLog)
   }
 
   createSession({
@@ -127,7 +140,11 @@ class SessionRuntimeService {
 
   loadSession(sessionId: string): PersistedSession {
     const session = this.findSession(sessionId)
-    return { ...toSessionSummary(session), messages: this.eventLog.getTranscript(sessionId) }
+    return {
+      ...toSessionSummary(session),
+      messages: this.eventLog.getTranscript(sessionId),
+      recovery: this.getRecovery(sessionId)
+    }
   }
 
   recordToolTrace(runId: string, trace: ToolExecutionTrace): void {
@@ -161,7 +178,12 @@ class SessionRuntimeService {
   }
 
   getReplayMessages(runId: string): ChatProviderMessage[] {
-    return this.eventLog.getReplayMessages(this.getRunRow(runId))
+    return getSessionReplay(
+      this.dependencies.database,
+      this.eventLog,
+      this.journal,
+      this.getRunRow(runId)
+    )
   }
 
   renameSession(sessionId: string, title: string): SessionSummary {
@@ -270,7 +292,21 @@ class SessionRuntimeService {
         )
         return
       case 'failed':
-        this.completeTerminalRun(runId, 'failed', 'run_failed', () => undefined, outcome.failure)
+        this.completeTerminalRun(
+          runId,
+          'failed',
+          'run_failed',
+          (run) => {
+            if (outcome.assistant)
+              this.eventLog.appendEvent(run, 'assistant_output_snapshot', {
+                message: visibleMessage({
+                  ...outcome.assistant,
+                  metadata: { completionState: 'stopped' }
+                })
+              })
+          },
+          outcome.failure
+        )
         return
       case 'cancelled':
         this.completeTerminalRun(runId, 'cancelled', 'run_cancelled', (run) =>
@@ -295,19 +331,22 @@ class SessionRuntimeService {
     userMessage: ChatMessage
     profile: ExecutionProfileSnapshot
     retry: boolean
+    retryRunId?: string
   }): TurnRunHandle {
-    const started = input.retry
-      ? this.retryTurn({
-          sessionId: input.sessionId,
-          requestId: input.requestId,
-          userMessage: input.userMessage
-        })
-      : this.startTurn({
-          sessionId: input.sessionId,
-          requestId: input.requestId,
-          userMessage: input.userMessage,
-          profile: input.profile
-        })
+    const started =
+      input.retry || input.retryRunId
+        ? this.retryTurn({
+            sessionId: input.sessionId,
+            requestId: input.requestId,
+            userMessage: input.userMessage,
+            retryRunId: input.retryRunId
+          })
+        : this.startTurn({
+            sessionId: input.sessionId,
+            requestId: input.requestId,
+            userMessage: input.userMessage,
+            profile: input.profile
+          })
     this.markRequestStarted(started.runId)
     const { cwd } = this.findSession(input.sessionId)
     const runId = started.runId
@@ -317,18 +356,70 @@ class SessionRuntimeService {
       shouldGenerateTitle: started.shouldGenerateTitle,
       cwd,
       replayMessages: this.getReplayMessages(runId),
+      recordModelStep: (step) =>
+        this.dependencies.database.transaction(() =>
+          this.journal.recordModelStep(this.getRunRow(runId), step)
+        ),
+      recordToolExecutionStarted: (execution) =>
+        this.dependencies.database.transaction(() =>
+          this.journal.recordStarted(this.getRunRow(runId), execution)
+        ),
+      recordToolExecutionSettled: (execution) =>
+        this.dependencies.database.transaction(() => {
+          this.journal.recordSettled(this.getRunRow(runId), execution)
+          this.eventLog.recordToolTrace(this.getRunRow(runId), execution.trace, execution.index)
+        }),
       contextMessages: this.eventLog.getTurnContext(started.turnId),
       recordContext: (messages) => this.recordTurnContext(runId, messages),
       recordStep: (step) => this.recordAgentStep(runId, step),
       recordTrace: (trace) => this.recordToolTrace(runId, trace),
       complete: (assistant) => this.finishRun(runId, { status: 'completed', assistant }),
-      fail: (failure) => this.finishRun(runId, { status: 'failed', failure }),
+      fail: (failure, assistant) => this.finishRun(runId, { status: 'failed', failure, assistant }),
       cancel: (assistant) =>
         this.finishRun(
           runId,
           assistant ? { status: 'cancelled', assistant } : { status: 'cancelled' }
         )
     }
+  }
+
+  getRetryProfile(sessionId: string, retryRunId?: string): ExecutionProfileSnapshot {
+    return this.eventLog.getExecutionProfile(this.assertRetrySource(sessionId, retryRunId).id)
+  }
+
+  private getRecovery(sessionId: string): SessionRecovery | null {
+    // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
+    const row = this.dependencies.database.connection
+      .prepare(
+        `SELECT runs.* FROM runs JOIN runtime_events e ON e.run_id = runs.id AND e.kind = 'run_started' WHERE runs.session_id = ? ORDER BY e.session_sequence DESC LIMIT 1`
+      )
+      .get(sessionId) as (RunRow & { failure_json: string | null }) | undefined
+    if (!row || (row.status !== 'failed' && row.status !== 'interrupted')) return null
+    const unknown = this.journal.hasUnknown(row.turn_id)
+    return SessionRecoverySchema.parse({
+      runId: row.id,
+      turnId: row.turn_id,
+      status: row.status,
+      failure: row.failure_json
+        ? JSON.parse(row.failure_json)
+        : { code: 'process_interrupted', message: 'The app closed while this run was active.' },
+      canRetry: !unknown,
+      blockedReason: unknown
+        ? 'A tool execution outcome is unknown. Inspect the workspace files and command results before starting a new request.'
+        : undefined
+    })
+  }
+
+  private assertRetrySource(sessionId: string, retryRunId?: string): RunRow {
+    const recovery = this.getRecovery(sessionId)
+    if (!recovery || (retryRunId && recovery.runId !== retryRunId))
+      throw new Error('Retry requires the latest failed or interrupted attempt in this session.')
+    if (!recovery.canRetry) throw new Error(recovery.blockedReason)
+    const active = this.dependencies.database.connection
+      .prepare("SELECT id FROM runs WHERE session_id = ? AND status = 'running'")
+      .get(sessionId)
+    if (active) throw new Error('Session already has an active run.')
+    return this.getRunRow(recovery.runId)
   }
 
   private retryRun({
@@ -339,7 +430,8 @@ class SessionRuntimeService {
     requestId: string
   }): StartedRun {
     const failed = this.getRunRow(failedRunId)
-    if (failed.status !== 'failed') throw new Error('Only failed runs can be retried.')
+    if (failed.status !== 'failed' && failed.status !== 'interrupted')
+      throw new Error('Only failed or interrupted runs can be retried.')
     return this.dependencies.database.transaction(() => {
       this.eventLog.assertRetrySource(failedRunId)
       const runId = this.dependencies.createId()
@@ -349,6 +441,7 @@ class SessionRuntimeService {
         (
           this.dependencies.database.connection
             .prepare('SELECT COALESCE(MAX(attempt), 0) AS attempt FROM runs WHERE turn_id = ?')
+            // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
             .get(failed.turn_id) as { attempt: number }
         ).attempt + 1
       const profile = this.eventLog.getExecutionProfile(failed.id)
@@ -366,7 +459,8 @@ class SessionRuntimeService {
       this.eventLog.appendEvent(run, 'run_started', {
         attempt,
         profile,
-        requestId
+        requestId,
+        retryRunId: failedRunId
       })
       this.touchSession(failed.session_id)
       return this.toStartedRun(run)
@@ -376,22 +470,32 @@ class SessionRuntimeService {
   retryTurn({
     sessionId,
     requestId,
-    userMessage
+    userMessage,
+    retryRunId
   }: {
     sessionId: string
     requestId: string
     userMessage: ChatMessage
+    retryRunId?: string
   }): StartedRun {
     const existing = this.eventLog.findRunByRequestId(sessionId, requestId)
     if (existing) {
       if (existing.attempt === 1)
         throw new Error('Request ID was already used to start a new turn.')
       this.assertRetryReplay(existing, userMessage)
+      if (retryRunId) {
+        const source = this.dependencies.database.connection
+          .prepare('SELECT id FROM runs WHERE turn_id = ? AND attempt = ?')
+          .get(existing.turn_id, existing.attempt - 1)
+        // SAFETY: the fixed SELECT returns only the source run identity.
+        if (!source || (source as { id: string }).id !== retryRunId)
+          throw new Error('Request ID was already used with a different retry source.')
+      }
       return this.toStartedRun(existing)
     }
 
-    const failed = this.eventLog.findFailedTurn(sessionId, userMessage)
-    if (!failed) throw new Error('Failed turn does not exist for this user message.')
+    const failed = this.assertRetrySource(sessionId, retryRunId)
+    this.assertRetryReplay(failed, userMessage)
     return this.retryRun({ failedRunId: failed.id, requestId })
   }
 
@@ -399,6 +503,7 @@ class SessionRuntimeService {
     // SAFETY: runs.* maps to the schema-controlled runs table.
     const runningRuns = this.dependencies.database.connection
       .prepare("SELECT * FROM runs WHERE status = 'running'")
+      // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
       .all() as RunRow[]
     for (const run of runningRuns) {
       this.dependencies.database.transaction(() => {
@@ -477,6 +582,7 @@ class SessionRuntimeService {
     // SAFETY: sessions.* maps to the schema-controlled sessions table.
     const row = this.dependencies.database.connection
       .prepare('SELECT * FROM sessions WHERE id = ?')
+      // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
       .get(id) as SessionRow | undefined
     if (!row) throw new Error('Session does not exist.')
     return row
@@ -485,6 +591,7 @@ class SessionRuntimeService {
     // SAFETY: runs.* maps to the schema-controlled runs table.
     const row = this.dependencies.database.connection
       .prepare('SELECT * FROM runs WHERE id = ?')
+      // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
       .get(id) as RunRow | undefined
     if (!row) throw new Error('Run does not exist.')
     return row
@@ -494,6 +601,7 @@ class SessionRuntimeService {
     // SAFETY: the aggregate query always returns one numeric row.
     const row = this.dependencies.database.connection
       .prepare('SELECT COALESCE(MAX(ordinal), 0) AS ordinal FROM turns WHERE session_id = ?')
+      // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
       .get(sessionId) as { ordinal: number }
     return row.ordinal + 1
   }
@@ -524,7 +632,8 @@ function toSessionSummary(row: SessionRow): SessionSummary {
     projectId: row.project_id,
     cwd: row.cwd,
     defaultProfile: row.default_execution_profile_json
-      ? (JSON.parse(row.default_execution_profile_json) as ExecutionProfileSnapshot)
+      ? // SAFETY: schema-owned event writers and fixed SQL columns establish this stored row shape.
+        (JSON.parse(row.default_execution_profile_json) as ExecutionProfileSnapshot)
       : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

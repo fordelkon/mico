@@ -51,13 +51,25 @@ type RuntimeEventPayloads = {
     attempt: number
     profile: ExecutionProfileSnapshot
     requestId: string
+    retryRunId?: string
   }
   user_message_recorded: { message: VisibleMessage }
   model_request_started: Record<string, never>
   assistant_output_finalized: { message: VisibleMessage }
-  tool_trace_recorded: { trace: StoredToolTrace }
+  tool_trace_recorded: { trace: StoredToolTrace; index?: number }
   tool_trace_summary_recorded: { summary: ToolTraceSummary }
   agent_step_recorded: { step: AgentStep }
+  model_step_accepted: {
+    index: number
+    assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
+  }
+  tool_execution_started: { index: number; toolCallId: string; startedAt: number }
+  tool_execution_settled: {
+    index: number
+    result: import('@mico/ai-providers').ChatProviderToolResultPart
+    trace: StoredToolTrace
+  }
+  assistant_output_snapshot: { message: VisibleMessage }
   run_failed: { code: string; message: string }
   run_cancelled: Record<string, never>
   run_completed: Record<string, never>
@@ -83,15 +95,15 @@ type EventLogDependencies = {
 class SessionEventLog {
   constructor(private readonly dependencies: EventLogDependencies) {}
 
-  recordToolTrace(run: RunRow, trace: ToolExecutionTrace): void {
+  recordToolTrace(run: RunRow, trace: ToolExecutionTrace, index?: number): void {
     if (run.status !== 'running' || this.findTerminalEvent(run.id)) return
     const existing = this.dependencies.database.connection
       .prepare(
-        "SELECT id FROM runtime_events WHERE run_id = ? AND kind = 'tool_trace_recorded' AND json_extract(payload_json, '$.trace.toolCallId') = ?"
+        "SELECT id FROM runtime_events WHERE run_id = ? AND kind = 'tool_trace_recorded' AND json_extract(payload_json, '$.trace.toolCallId') = ? AND (? IS NULL OR json_extract(payload_json, '$.index') = ?)"
       )
-      .get(run.id, trace.toolCallId)
+      .get(run.id, trace.toolCallId, index ?? null, index ?? null)
     if (existing) return
-    this.appendEvent(run, 'tool_trace_recorded', { trace: toStoredToolTrace(trace) })
+    this.appendEvent(run, 'tool_trace_recorded', { trace: toStoredToolTrace(trace), index })
   }
 
   recordAgentStep(run: RunRow, stored: AgentStep): void {
@@ -169,6 +181,7 @@ class SessionEventLog {
          WHERE turns.session_id = ? AND runtime_events.kind IN (
            'user_message_recorded',
            'assistant_output_finalized',
+           'assistant_output_snapshot',
            'agent_step_recorded',
            'tool_trace_recorded',
            'tool_trace_summary_recorded'
@@ -417,4 +430,4 @@ function digest(value: string): string {
 }
 
 export type { ProviderUserMessage, RunRow }
-export { canonicalJson, parseTurnContext, SessionEventLog }
+export { assertPayloadDigest, canonicalJson, parseTurnContext, SessionEventLog }

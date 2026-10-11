@@ -50,7 +50,8 @@ const TurnStartRequestSchema = defineSchema(
     userMessage: ChatUserMessageSchema,
     thinkingEffort: ThinkingSelectionSchema.optional(),
     permissionMode: PermissionModeSchema.optional(),
-    retry: z.boolean().optional()
+    retry: z.boolean().optional(),
+    retryRunId: z.string().trim().min(1).optional()
   })
 )
 const TurnStreamEventSchema: z.ZodType<TurnStreamEvent> = defineSchema(

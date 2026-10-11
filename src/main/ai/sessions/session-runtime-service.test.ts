@@ -325,7 +325,7 @@ describe('SessionRuntimeService', () => {
           parts: [{ type: 'document', name: 'index.ts', text: 'different' }]
         }
       })
-    ).toThrow(/Failed turn/)
+    ).toThrow(/different user message/)
     const retried = reloaded.retryTurn({
       sessionId: session.id,
       requestId: 'retry-1',
@@ -430,7 +430,7 @@ describe('SessionRuntimeService', () => {
     })
   })
 
-  it('user keeps existing events when the schema migrates, then the old log accepts tool trace events', async () => {
+  it('user keeps v6 events when the schema migrates, then the reopened log accepts journal events', async () => {
     const userDataPath = await mkdtemp(join(tmpdir(), 'mico-session-migration-'))
     let legacy: Database.Database | undefined
     let database: SessionDatabase | undefined
@@ -439,7 +439,7 @@ describe('SessionRuntimeService', () => {
       legacy.exec(
         'CREATE TABLE session_schema_migrations (id TEXT PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL)'
       )
-      for (const migration of sessionMigrations.slice(0, 3)) {
+      for (const migration of sessionMigrations.slice(0, 6)) {
         legacy.exec(migration.sql)
         legacy
           .prepare('INSERT INTO session_schema_migrations (id, applied_at) VALUES (?, ?)')
@@ -472,6 +472,29 @@ describe('SessionRuntimeService', () => {
           'legacy-digest',
           1
         )
+      const insert = legacy.prepare(
+        'INSERT INTO runtime_events (id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      )
+      insert.run(
+        'legacy-step',
+        'session-1',
+        'run-1',
+        2,
+        'agent_step_recorded',
+        '{"step":{"index":1}}',
+        'step-digest',
+        2
+      )
+      insert.run(
+        'legacy-context',
+        'session-1',
+        'run-1',
+        3,
+        'turn_context_recorded',
+        '{"messages":[]}',
+        'context-digest',
+        3
+      )
       legacy.close()
 
       database = new SessionDatabase({ getUserDataPath: () => userDataPath })
@@ -493,20 +516,59 @@ describe('SessionRuntimeService', () => {
         .prepare(
           'INSERT INTO runtime_events (id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         )
-        .run('event-1', 'session-1', 'run-1', 2, 'tool_trace_recorded', '{}', 'digest', 1)
+        .run('event-1', 'session-1', 'run-1', 4, 'model_step_accepted', '{"index":1}', 'digest', 1)
 
       expect(
         database.connection
           .prepare('SELECT kind FROM runtime_events WHERE id = ?')
           .pluck()
           .get('event-1')
-      ).toBe('tool_trace_recorded')
+      ).toBe('model_step_accepted')
       expect(
         database.connection
           .prepare('SELECT id FROM session_schema_migrations WHERE id = ?')
           .pluck()
-          .get('0004_tool_trace_events')
-      ).toBe('0004_tool_trace_events')
+          .get('0007_tool_execution_journal')
+      ).toBe('0007_tool_execution_journal')
+      database.close()
+      database = new SessionDatabase({ getUserDataPath: () => userDataPath })
+      await database.initialize()
+      expect(
+        database.connection
+          .prepare(
+            "SELECT id,session_sequence,payload_json,payload_digest FROM runtime_events WHERE id IN ('legacy-step','legacy-context') ORDER BY session_sequence"
+          )
+          .all()
+      ).toEqual([
+        {
+          id: 'legacy-step',
+          session_sequence: 2,
+          payload_json: '{"step":{"index":1}}',
+          payload_digest: 'step-digest'
+        },
+        {
+          id: 'legacy-context',
+          session_sequence: 3,
+          payload_json: '{"messages":[]}',
+          payload_digest: 'context-digest'
+        }
+      ])
+      expect(() =>
+        database?.connection
+          .prepare(
+            'INSERT INTO runtime_events (id,session_id,run_id,session_sequence,kind,payload_json,payload_digest,created_at) VALUES (?,?,?,?,?,?,?,?)'
+          )
+          .run(
+            'duplicate',
+            'session-1',
+            'run-1',
+            5,
+            'model_step_accepted',
+            '{"index":1}',
+            'digest',
+            1
+          )
+      ).toThrow(/UNIQUE/)
     } finally {
       database?.close()
       if (legacy?.open) legacy.close()
@@ -843,53 +905,20 @@ describe('SessionRuntimeService', () => {
     expect(service.loadSession(session.id).messages).toEqual([userMessage, assistantMessage])
   })
 
-  it('user keeps later turns when retrying an earlier failure, then replay contains the full history', async () => {
+  it('user cannot retry an earlier failure when a later turn completed, then stale recovery is rejected', async () => {
     const { service, session } = await createSession()
-    const secondUserMessage: ChatMessage = {
-      role: 'user',
-      parts: [{ type: 'text', text: 'second prompt' }]
-    }
-    const thirdUserMessage: ChatMessage = {
-      role: 'user',
-      parts: [{ type: 'text', text: 'third prompt' }]
-    }
-    const thirdAssistantMessage: ChatMessage = {
-      role: 'assistant',
-      parts: [{ type: 'text', text: 'third answer' }]
-    }
-    const retriedAssistantMessage: ChatMessage = {
-      role: 'assistant',
-      parts: [{ type: 'text', text: 'retried second answer' }]
-    }
-
-    const first = startTurn(service, session)
-    completeRun(service, first)
-    const failed = startTurn(service, session, 'request-2', secondUserMessage)
+    const failed = startTurn(service, session)
     failRun(service, failed)
-    const third = startTurn(service, session, 'request-3', thirdUserMessage)
-    service.finishRun(third.runId, { status: 'completed', assistant: thirdAssistantMessage })
-
-    const retried = service.retryTurn({
-      sessionId: session.id,
-      requestId: 'request-4',
-      userMessage: secondUserMessage
-    })
-    service.finishRun(retried.runId, {
-      status: 'completed',
-      assistant: retriedAssistantMessage
-    })
-    const fourth = startTurn(service, session, 'request-5', {
-      role: 'user',
-      parts: [{ type: 'text', text: 'fourth prompt' }]
-    })
-    expect(service.getReplayMessages(fourth.runId)).toEqual([
-      userMessage,
-      assistantMessage,
-      thirdUserMessage,
-      thirdAssistantMessage,
-      secondUserMessage,
-      retriedAssistantMessage,
-      { role: 'user', parts: [{ type: 'text', text: 'fourth prompt' }] }
-    ])
+    const later = startTurn(service, session, 'later', secondPrompt)
+    completeRun(service, later)
+    expect(() =>
+      service.retryTurn({
+        sessionId: session.id,
+        requestId: 'stale',
+        userMessage,
+        retryRunId: failed.runId
+      })
+    ).toThrow(/latest/)
+    expect(service.loadSession(session.id).recovery).toBeNull()
   })
 })
