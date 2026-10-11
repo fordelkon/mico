@@ -2,6 +2,7 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { createChatProvider } from '@mico/ai-providers'
 import { app } from 'electron'
 import { createChatProviderResolver } from './ai/chat/chat-provider-resolver'
+import { SessionCompactor } from './ai/chat/session-compactor'
 import { SessionModelProfile } from './ai/chat/session-model-profile'
 import { TurnExecutor } from './ai/chat/turn-executor'
 import { ProviderService } from './ai/providers/provider-service'
@@ -22,6 +23,7 @@ type MainServices = {
   provider: ProviderService
   sessionDatabase: SessionDatabase
   sessionRuntime: SessionRuntimeService
+  sessionCompactor: SessionCompactor
   tray: TrayService
   turnExecutor: TurnExecutor
   workspace: WorkspaceService
@@ -61,6 +63,7 @@ async function createMainServices(): Promise<MainServices> {
     getSelectedChatConfiguration: () => provider.getSelectedChatConfiguration(),
     runtime: sessionRuntime
   })
+  const sessionCompactor = new SessionCompactor({ runtime: sessionRuntime, modelProfile })
   const turnExecutor = new TurnExecutor({
     profiles: modelProfile,
     runtime: sessionRuntime
@@ -85,6 +88,7 @@ async function createMainServices(): Promise<MainServices> {
     provider,
     sessionDatabase,
     sessionRuntime,
+    sessionCompactor,
     tray: trayService,
     turnExecutor,
     workspace
@@ -170,18 +174,30 @@ if (gotTheLock) {
     prepareToQuit: async () => {
       await startup
       services?.tray.beginQuit()
-      await services?.mainWindow.prepareToQuit()
-      services?.turnExecutor.dispose()
-      await services?.turnExecutor.drain()
+      services?.sessionCompactor.dispose()
+      try {
+        await services?.mainWindow.prepareToQuit()
+      } finally {
+        services?.turnExecutor.dispose()
+        try {
+          await services?.turnExecutor.drain()
+        } finally {
+          await services?.sessionCompactor.drain()
+        }
+      }
     },
     dispose: () => {
       try {
         services?.turnExecutor.dispose()
       } finally {
         try {
-          services?.sessionDatabase.close()
+          services?.sessionCompactor.dispose()
         } finally {
-          services?.tray.dispose()
+          try {
+            services?.sessionDatabase.close()
+          } finally {
+            services?.tray.dispose()
+          }
         }
       }
     }

@@ -58,6 +58,20 @@ const ContextCheckpointSchema = z
   })
   .strict()
 type ContextCheckpoint = z.infer<typeof ContextCheckpointSchema>
+/**
+ * Durable outcome record for one manual compaction attempt. A summary
+ * rejection, a changed source or session profile, and a cancellation all land
+ * here so a later process can explain why no checkpoint was accepted.
+ */
+const CompactionNoticeSchema = z
+  .object({
+    reason: z.enum(['rejected', 'source_changed', 'profile_changed', 'cancelled', 'failed']),
+    message: z.string().min(1).max(2_000),
+    coverage: z.object({ throughSequence: z.number().int().positive() }),
+    sourceDigest: z.string().regex(/^[a-f0-9]{64}$/)
+  })
+  .strict()
+type CompactionNotice = z.infer<typeof CompactionNoticeSchema>
 /** Expected business rejection while selecting a safe compaction boundary. */
 class CheckpointBoundaryRejected extends Error {}
 type CompactionEvent = {
@@ -71,6 +85,7 @@ type CompactionEvent = {
 
 type RuntimeEventPayloads = {
   context_checkpoint_recorded: ContextCheckpoint
+  compaction_notice_recorded: CompactionNotice
   turn_context_recorded: { messages: ProviderUserMessage[] }
   run_started: {
     attempt: number
@@ -562,10 +577,11 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-export type { CompactionEvent, ContextCheckpoint, ProviderUserMessage, RunRow }
+export type { CompactionEvent, CompactionNotice, ContextCheckpoint, ProviderUserMessage, RunRow }
 export {
   assertPayloadDigest,
   CheckpointBoundaryRejected,
+  CompactionNoticeSchema,
   ContextCheckpointSchema,
   canonicalJson,
   parseTurnContext,

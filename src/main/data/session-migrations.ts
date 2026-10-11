@@ -8,6 +8,7 @@ type SessionMigration = {
     | '0006_turn_context_events'
     | '0007_tool_execution_journal'
     | '0008_context_checkpoints'
+    | '0009_compaction_notices'
   sql: string
 }
 
@@ -257,10 +258,49 @@ const checkpointMigration: SessionMigration = {
     ALTER TABLE turns ADD COLUMN checkpoint_event_id TEXT;
   `
 }
+const compactionNoticeMigration: SessionMigration = {
+  id: '0009_compaction_notices',
+  // SQLite cannot alter a CHECK constraint. Rebuild only the child event log while preserving
+  // every append-only row, digest, sequence, and foreign-key relationship.
+  sql: `
+    CREATE TABLE runtime_events_next (
+      id TEXT PRIMARY KEY NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      session_sequence INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN (
+        'run_started', 'user_message_recorded', 'model_request_started',
+        'assistant_output_finalized', 'tool_trace_recorded', 'tool_trace_summary_recorded',
+        'agent_step_recorded', 'turn_context_recorded', 'model_step_accepted',
+        'tool_execution_started', 'tool_execution_settled', 'assistant_output_snapshot',
+        'context_checkpoint_recorded', 'compaction_notice_recorded',
+        'run_failed', 'run_cancelled', 'run_completed'
+      )),
+      payload_json TEXT NOT NULL,
+      payload_digest TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(session_id, session_sequence)
+    );
+    INSERT INTO runtime_events_next (id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at)
+      SELECT id, session_id, run_id, session_sequence, kind, payload_json, payload_digest, created_at FROM runtime_events;
+    DROP TABLE runtime_events;
+    ALTER TABLE runtime_events_next RENAME TO runtime_events;
+    CREATE INDEX runtime_events_run_id ON runtime_events(run_id);
+    CREATE INDEX runtime_events_session_id ON runtime_events(session_id, session_sequence);
+    CREATE UNIQUE INDEX runtime_events_run_request_id ON runtime_events(session_id, json_extract(payload_json, '$.requestId')) WHERE kind = 'run_started';
+    CREATE UNIQUE INDEX runtime_events_model_step ON runtime_events(run_id, json_extract(payload_json, '$.index')) WHERE kind = 'model_step_accepted';
+    CREATE UNIQUE INDEX runtime_events_tool_start ON runtime_events(run_id, json_extract(payload_json, '$.index'), json_extract(payload_json, '$.toolCallId')) WHERE kind = 'tool_execution_started';
+    CREATE UNIQUE INDEX runtime_events_tool_settlement ON runtime_events(run_id, json_extract(payload_json, '$.index'), json_extract(payload_json, '$.result.toolCallId')) WHERE kind = 'tool_execution_settled';
+    CREATE UNIQUE INDEX runtime_events_context_checkpoint
+      ON runtime_events(session_id, json_extract(payload_json, '$.coverage.throughSequence'))
+      WHERE kind = 'context_checkpoint_recorded';
+  `
+}
 const migrations: readonly SessionMigration[] = [
   ...sessionMigrations,
   journalMigration,
-  checkpointMigration
+  checkpointMigration,
+  compactionNoticeMigration
 ]
 
 export type { SessionMigration }

@@ -11,6 +11,8 @@ import { SessionDatabase } from '../../data/session-database'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
 import {
   CheckpointBoundaryRejected,
+  type CompactionNotice,
+  CompactionNoticeSchema,
   ContextCheckpointSchema,
   canonicalJson,
   type ProviderUserMessage,
@@ -88,6 +90,13 @@ class SessionRuntimeService {
   private readonly dependencies: Required<SessionRuntimeServiceDependencies>
   private readonly eventLog: SessionEventLog
   private readonly journal: SessionToolJournal
+  /**
+   * Sessions whose summary operation currently owns the per-session gate. The
+   * active-run gate stays authoritative in the database; this in-memory set
+   * only keeps delete and a second summary from contending with one running
+   * summary in this process.
+   */
+  private readonly activeCompactions = new Set<string>()
 
   constructor(dependencies: SessionRuntimeServiceDependencies) {
     this.dependencies = { ...defaultDependencies, ...dependencies }
@@ -262,6 +271,56 @@ class SessionRuntimeService {
     })
   }
 
+  /** Acquires the summary gate before any asynchronous provider work. */
+  beginCompaction(sessionId: string): void {
+    this.findSession(sessionId)
+    const active = this.dependencies.database.connection
+      .prepare("SELECT id FROM runs WHERE session_id = ? AND status = 'running'")
+      .get(sessionId)
+    if (active) throw new Error('Session already has an active run.')
+    if (this.activeCompactions.has(sessionId))
+      throw new Error('A summary is already running for this session.')
+    this.activeCompactions.add(sessionId)
+  }
+
+  private assertNoCompaction(sessionId: string): void {
+    if (this.activeCompactions.has(sessionId))
+      throw new Error(
+        'A summary is running for this session. Wait for it to finish or cancel it before sending.'
+      )
+  }
+
+  /** Releases the per-session summary gate; safe to call when nothing is held. */
+  endCompaction(sessionId: string): void {
+    this.activeCompactions.delete(sessionId)
+  }
+
+  /** Records a durable outcome on the captured terminal run; storage errors propagate. */
+  recordCompactionNotice(input: {
+    sessionId: string
+    coverage: { throughSequence: number }
+    sourceDigest: string
+    reason: CompactionNotice['reason']
+    message: string
+  }): { noticeEventId: string } {
+    const payload = CompactionNoticeSchema.parse({
+      reason: input.reason,
+      message: input.message,
+      coverage: input.coverage,
+      sourceDigest: input.sourceDigest
+    })
+    return this.dependencies.database.transaction(() => {
+      this.findSession(input.sessionId)
+      const run = this.eventLog.assertCheckpointBoundary(
+        input.sessionId,
+        payload.coverage.throughSequence
+      )
+      return {
+        noticeEventId: this.eventLog.appendEvent(run, 'compaction_notice_recorded', payload)
+      }
+    })
+  }
+
   renameSession(sessionId: string, title: string): SessionSummary {
     const now = this.dependencies.now()
     const result = this.dependencies.database.connection
@@ -299,6 +358,8 @@ class SessionRuntimeService {
 
   deleteSession(sessionId: string): void {
     this.dependencies.database.transaction(() => {
+      if (this.activeCompactions.has(sessionId))
+        throw new Error('A summary is running for this session.')
       const active = this.dependencies.database.connection
         .prepare("SELECT id FROM runs WHERE session_id = ? AND status = 'running'")
         .get(sessionId)
@@ -312,6 +373,7 @@ class SessionRuntimeService {
 
   startTurn(input: StartTurnInput): StartedRun {
     return this.dependencies.database.transaction(() => {
+      this.assertNoCompaction(input.sessionId)
       const existing = this.eventLog.findRunByRequestId(input.sessionId, input.requestId)
       if (existing) {
         if (existing.attempt !== 1)
@@ -560,6 +622,7 @@ class SessionRuntimeService {
     userMessage: ChatMessage
     retryRunId?: string
   }): StartedRun {
+    this.assertNoCompaction(sessionId)
     const existing = this.eventLog.findRunByRequestId(sessionId, requestId)
     if (existing) {
       if (existing.attempt === 1)
