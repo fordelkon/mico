@@ -8,7 +8,7 @@ import {
 } from '@shared/ipc/contracts'
 import type { AppearanceAPI } from '@shared/ipc/schemas/appearance'
 import type { AttachmentsAPI } from '@shared/ipc/schemas/attachments'
-import type { ChatAPI } from '@shared/ipc/schemas/chat'
+import { type ChatAPI, TurnStreamEventSchema } from '@shared/ipc/schemas/chat'
 import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { SkillsAPI } from '@shared/ipc/schemas/skills'
@@ -107,7 +107,10 @@ const chat: ChatAPI = {
       _event: IpcRendererEvent,
       turnEvent: Parameters<typeof listener>[0]
     ): void => {
-      listener(turnEvent)
+      // Validate main notifications before exposing them to renderer consumers.
+      // Malformed observations must not throw from an Electron event listener.
+      const parsed = TurnStreamEventSchema.safeParse(turnEvent)
+      if (parsed.success) listener(parsed.data)
     }
 
     ipcRenderer.on(IpcChannel.Chat_TurnEvent, wrappedListener)

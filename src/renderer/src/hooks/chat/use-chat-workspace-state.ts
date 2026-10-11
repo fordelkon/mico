@@ -19,6 +19,7 @@ type ChatSendInput = {
 /** Response control for the workspace: state, and the actions that drive it. */
 type ChatResponseSlice = {
   response: ChatResponseState
+  estimatedInputTokens?: number
   respondingConversationIds: ReadonlySet<string>
   sendMessage: (content: ChatSendInput) => Promise<boolean>
   retryResponse: () => void
@@ -184,12 +185,23 @@ function useChatWorkspaceState(): ChatWorkspace {
   const responseSlice = React.useMemo(
     () => ({
       response,
+      estimatedInputTokens: activeSession
+        ? sessions.contextEstimates.get(activeSession.conversationId)
+        : undefined,
       respondingConversationIds,
       sendMessage,
       retryResponse,
       stopResponse
     }),
-    [response, respondingConversationIds, retryResponse, sendMessage, stopResponse]
+    [
+      response,
+      respondingConversationIds,
+      retryResponse,
+      sendMessage,
+      stopResponse,
+      activeSession,
+      sessions.contextEstimates
+    ]
   )
 
   return {

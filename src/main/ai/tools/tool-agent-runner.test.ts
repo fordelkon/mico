@@ -52,6 +52,26 @@ function createRunInput(
 describe('ToolAgentRunner', () => {
   afterEach(() => removeTemporaryPaths())
 
+  it('user continues after an output limit when usage is absent, then each prepared step is measured', async () => {
+    const observations: Array<{ estimatedInputTokens: number }> = []
+    const provider = createScriptedProvider([
+      [providerFinish({ reason: 'length' })],
+      [providerFinish({ reason: 'stop' })]
+    ])
+    await new ToolAgentRunner().run(
+      createRunInput(provider, 'abcd', {
+        prepareMessages: (history) => [
+          { role: 'system', parts: [{ type: 'text', text: 'abcd'.repeat(20) }] },
+          ...history
+        ],
+        onContextMeasurement: (measurement) => observations.push(measurement)
+      })
+    )
+    expect(observations).toHaveLength(2)
+    expect(observations[0].estimatedInputTokens).toBe(24)
+    expect(observations[1].estimatedInputTokens).toBeGreaterThan(24)
+  })
+
   it('user receives an unknown legacy finish when the stream ends, then completion is rejected', async () => {
     await expect(
       new ToolAgentRunner().run(

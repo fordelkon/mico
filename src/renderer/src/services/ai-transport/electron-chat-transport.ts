@@ -1,4 +1,5 @@
 import type { MicoUIMessage } from '@renderer/types/chat'
+import type { ContextMeasurement } from '@shared/ai/context-measurement'
 import type { PermissionMode } from '@shared/ai/permissions'
 import type { ChatUserMessage, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { ChatAPI, TurnStartRequest } from '@shared/ipc/schemas/chat'
@@ -40,6 +41,7 @@ type ElectronChatTransportOptions = {
   getPermissionMode?: () => PermissionMode
   getRetryRunId?: () => string | undefined
   onStatusChange?: (status: TurnTransportStatus) => void
+  onContextMeasurement?: (measurement: ContextMeasurement) => void
 }
 
 const TEXT_DELTA_BATCH_DELAY_MS = 16
@@ -54,6 +56,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
   readonly #getPermissionMode: () => PermissionMode
   readonly #getRetryRunId: () => string | undefined
   readonly #onStatusChange?: ElectronChatTransportOptions['onStatusChange']
+  readonly #onContextMeasurement?: ElectronChatTransportOptions['onContextMeasurement']
 
   constructor(
     api: ChatAPI,
@@ -62,7 +65,8 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
       getThinkingEffort,
       getPermissionMode = () => 'default',
       getRetryRunId = () => undefined,
-      onStatusChange
+      onStatusChange,
+      onContextMeasurement
     }: ElectronChatTransportOptions
   ) {
     this.#api = api
@@ -71,6 +75,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
     this.#getPermissionMode = getPermissionMode
     this.#getRetryRunId = getRetryRunId
     this.#onStatusChange = onStatusChange
+    this.#onContextMeasurement = onContextMeasurement
   }
 
   async retryCancellation(): Promise<void> {
@@ -149,6 +154,10 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
         const unsubscribe = this.#api.onTurnEvent((event) => {
           if (!active || event.requestId !== requestId) return
 
+          if (event.type === 'context-measurement') {
+            this.#onContextMeasurement?.(event.measurement)
+            return
+          }
           if (event.type === 'chunk') {
             this.#onStatusChange?.({ type: 'streaming' })
             enqueueChunk(event.chunk)

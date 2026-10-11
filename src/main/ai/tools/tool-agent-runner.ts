@@ -2,6 +2,7 @@ import type {
   ChatProvider,
   ChatProviderMessage,
   ChatProviderReasoningPart,
+  ChatProviderStreamInput,
   ChatProviderTextPart,
   ChatProviderToolCallPart,
   ChatProviderToolResultPart,
@@ -9,9 +10,11 @@ import type {
   ThinkingSelection
 } from '@mico/ai-providers'
 import { isProviderFinish, ProviderError } from '@mico/ai-providers'
+import type { ContextMeasurement } from '@shared/ai/context-measurement'
 import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
 import type { ProviderMetadata, UIMessageChunk } from 'ai'
 import * as z from 'zod'
+import { estimatePreparedContextTokens } from '../chat/context-estimator'
 import { ModelStepRetry, type RetryEvent } from '../chat/model-step-retry'
 import { AgentBudgetError } from '../chat/turn-failure'
 import type { TurnRunHandle } from '../sessions/session-runtime-service'
@@ -45,6 +48,7 @@ type ToolAgentRunnerInput = {
   maxAttempts?: number
   retryDelayMs?: number
   onRetry?: (event: RetryEvent) => void
+  onContextMeasurement?: (measurement: ContextMeasurement) => void
 }
 /** One replayable model step: its response and the observations it caused. */
 type AgentStep = {
@@ -108,7 +112,8 @@ class ToolAgentRunner {
     prepareMessages = (history) => [...history],
     maxAttempts = 5,
     retryDelayMs = 1_000,
-    onRetry
+    onRetry,
+    onContextMeasurement
   }: ToolAgentRunnerInput): Promise<{
     assistantText: string
     finalAssistant: Extract<ChatProviderMessage, { role: 'assistant' }>
@@ -128,12 +133,13 @@ class ToolAgentRunner {
     // real failure occurs. Successful tool use must not silently remove capabilities.
     for (;;) {
       signal.throwIfAborted()
-      const request = {
+      const request: ChatProviderStreamInput = {
         messages: prepareMessages(history),
         thinkingEffort,
         signal
       }
-      if (registry) Object.assign(request, { tools: registry.definitions })
+      if (registry) request.tools = registry.definitions
+      onContextMeasurement?.(estimatePreparedContextTokens(request.messages, request.tools))
       const stream = retry.stream(provider, request)
       const invalidResults: ChatProviderToolResultPart[] = []
       const calls: ToolCall[] = []

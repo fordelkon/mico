@@ -1,4 +1,4 @@
-import { Spinner } from '@mico/ui'
+import { Spinner, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@mico/ui'
 import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
 import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
 import { isActiveChatResponse } from '@renderer/types/chat'
@@ -116,6 +116,26 @@ function ChatMain({ session, responses }: ChatMainProps): React.JSX.Element {
               </React.Suspense>
             )}
           </div>
+          {responses.estimatedInputTokens !== undefined && (
+            <div className="mx-auto w-full max-w-[50rem] px-4 text-xs text-text-tertiary sm:px-6">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className="rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      Approximate input: {responses.estimatedInputTokens.toLocaleString()} tokens
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Approximate application-visible input only. Tokenizers and provider formatting
+                    differ; hidden provider state is excluded. The model context limit is unknown.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
           {composer}
         </>
       ) : (

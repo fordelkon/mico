@@ -98,6 +98,27 @@ function approvalMessage(permissions: ToolPermissionData[]): MicoUIMessage {
 }
 
 describe('ChatMain', () => {
+  it('user views a measured request when it completes, then approximate input stays visible', () => {
+    const { rerender } = render(
+      <ProviderLibraryProvider>
+        <ChatMain
+          session={createSessionSlice()}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            estimatedInputTokens: 1234
+          }}
+        />
+      </ProviderLibraryProvider>
+    )
+    expect(screen.getByText('Approximate input: 1,234 tokens')).toBeVisible()
+    rerender(
+      <ProviderLibraryProvider>
+        <ChatMain session={createSessionSlice()} responses={createResponseSlice()} />
+      </ProviderLibraryProvider>
+    )
+    expect(screen.queryByText(/Approximate input:/)).not.toBeInTheDocument()
+  })
   beforeEach(async () => {
     // These scenarios verify layout and approvals after the lazy transcript is available.
     await import('./conversation/chat-message-list')

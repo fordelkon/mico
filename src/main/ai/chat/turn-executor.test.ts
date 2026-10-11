@@ -268,6 +268,12 @@ describe('TurnExecutor', () => {
       )
     ).toHaveLength(1)
     expect(JSON.stringify(calls[2]?.messages)).toContain('Current manual reference')
+    const observations = second.events.filter((event) => event.type === 'context-measurement')
+    expect(observations).toHaveLength(2)
+    expect(observations[0].measurement.estimatedInputTokens).toBeGreaterThan(100)
+    expect(observations[1].measurement.estimatedInputTokens).toBeGreaterThan(
+      observations[0].measurement.estimatedInputTokens
+    )
   })
 
   it.each(['missing', 'hidden', 'no-workspace'])(
@@ -308,7 +314,7 @@ describe('TurnExecutor', () => {
       )
       await recorded.terminal
       expect(stream).not.toHaveBeenCalled()
-      expect(recorded.events).toEqual([
+      expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
         expect.objectContaining({
           type: 'error',
           message: expect.stringMatching(/skill|workspace/i)
@@ -450,7 +456,7 @@ describe('TurnExecutor', () => {
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
     await recorded.terminal
-    expect(recorded.events).toEqual([
+    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
       {
         type: 'error',
         requestId: 'request-1',
@@ -467,7 +473,12 @@ describe('TurnExecutor', () => {
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
     await recorded.terminal
-    expect(recorded.events).toEqual([
+    expect(recorded.events[0]).toEqual({
+      type: 'context-measurement',
+      requestId: 'request-1',
+      measurement: { policyId: 'unicode-heuristic-v1', estimatedInputTokens: 3 }
+    })
+    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
       { type: 'chunk', requestId: 'request-1', chunk: textChunk },
       {
         type: 'chunk',
@@ -587,7 +598,7 @@ describe('TurnExecutor', () => {
         metadata: { completionState: 'complete' }
       }
     ])
-    expect(recorded.events).toEqual([
+    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
       {
         type: 'chunk',
         requestId: 'request-1',
@@ -633,7 +644,7 @@ describe('TurnExecutor', () => {
       parts: [{ type: 'text', text: 'abcdef' }],
       metadata: { completionState: 'complete' }
     })
-    expect(recorded.events).toEqual([
+    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
       {
         type: 'chunk',
         requestId: 'request-1',
@@ -886,7 +897,9 @@ describe('TurnExecutor', () => {
     expect(signals.get('1')?.aborted).toBe(true)
     expect(signals.get('2')?.aborted).toBe(false)
     await firstStreamStopped.promise
-    expect(events).toEqual([{ type: 'cancelled', requestId: 'request-1' }])
+    expect(events.filter((event) => event.type !== 'context-measurement')).toEqual([
+      { type: 'cancelled', requestId: 'request-1' }
+    ])
   })
 
   it('user keeps same-ID requests isolated when aborting one owner, then only that owner is aborted', async () => {
@@ -941,7 +954,7 @@ describe('TurnExecutor', () => {
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
     await recorded.terminal
-    expect(recorded.events).toEqual([
+    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
       {
         type: 'error',
         requestId: 'request-1',
@@ -966,7 +979,7 @@ describe('TurnExecutor', () => {
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
     await recorded.terminal
-    expect(recorded.events).toEqual([
+    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
       {
         type: 'retry',
         requestId: 'request-1',
@@ -997,7 +1010,7 @@ describe('TurnExecutor', () => {
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
     await recorded.terminal
-    expect(recorded.events).toEqual([
+    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
       { type: 'chunk', requestId: 'request-1', chunk: textChunk },
       {
         type: 'error',
@@ -1288,9 +1301,11 @@ describe('TurnExecutor', () => {
     expect(database.connection.prepare('SELECT status FROM runs').all()).toEqual([
       { status: 'cancelled' }
     ])
-    expect(recorded.events.filter((event) => event.type !== 'chunk')).toEqual([
-      { type: 'cancelled', requestId: request.requestId }
-    ])
+    expect(
+      recorded.events.filter(
+        (event) => event.type !== 'chunk' && event.type !== 'context-measurement'
+      )
+    ).toEqual([{ type: 'cancelled', requestId: request.requestId }])
   })
 
   it('user retries before output when project skills change, then one stable context drives the turn', async () => {

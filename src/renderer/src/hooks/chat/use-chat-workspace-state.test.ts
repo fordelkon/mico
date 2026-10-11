@@ -146,6 +146,40 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('user navigates after measurement when sending again, then estimates stay isolated and reset', async () => {
+    const { api, result } = renderWorkspaceState()
+    act(() => void result.current.responses.sendMessage({ text: 'First', documents: [] }))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    const first = api.startedRequests[0].requestId
+    act(() =>
+      api.emit({
+        type: 'context-measurement',
+        requestId: first,
+        measurement: { policyId: 'unicode-heuristic-v1', estimatedInputTokens: 42 }
+      })
+    )
+    expect(result.current.responses.estimatedInputTokens).toBe(42)
+    expect(result.current.responses.response.status).toBe('submitted')
+    act(() => result.current.session.startNewChat())
+    expect(result.current.responses.estimatedInputTokens).toBeUndefined()
+    act(() => result.current.session.selectConversation('session-new'))
+    await waitFor(() => expect(result.current.responses.estimatedInputTokens).toBe(42))
+    act(() => api.emit({ type: 'finish', requestId: first }))
+    await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    await act(async () => {
+      await result.current.responses.sendMessage({ text: 'Next', documents: [] })
+    })
+    expect(result.current.responses.estimatedInputTokens).toBeUndefined()
+    act(() =>
+      api.emit({
+        type: 'context-measurement',
+        requestId: first,
+        measurement: { policyId: 'unicode-heuristic-v1', estimatedInputTokens: 999 }
+      })
+    )
+    expect(result.current.responses.estimatedInputTokens).toBeUndefined()
+    act(() => api.emit({ type: 'finish', requestId: api.startedRequests[1].requestId }))
+  })
   it('user deletes a responding conversation when cancellation is pending, then sending stays blocked through deletion', async () => {
     const stopped = Promise.withResolvers<void>()
     const deleted = Promise.withResolvers<void>()

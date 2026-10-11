@@ -136,6 +136,7 @@ type ChatResponseControl = {
 
 type ChatSessionsStore = {
   responseControl: ChatResponseControl
+  contextEstimates: ReadonlyMap<string, number>
   getSession: (conversationId: string) => ChatSession | undefined
   removeSession: (conversationId: string) => void
   refreshRecovery: (conversationId: string) => Promise<void>
@@ -161,6 +162,12 @@ function useChatSessions(): ChatSessionsStore {
     chat: Chat<MicoUIMessage>
     parts: MicoUIMessage['parts']
   } | null>(null)
+  // Latest per-conversation approximate input observation; cleared when a conversation
+  // starts a new request and never persisted as durable user text.
+  const contextEstimatesRef = React.useRef(new Map<string, number>())
+  const [contextEstimates, setContextEstimates] = React.useState<Map<string, number>>(
+    () => new Map()
+  )
 
   React.useEffect(() => {
     if (pendingMessage) void pendingMessage.chat.sendMessage({ parts: pendingMessage.parts })
@@ -175,7 +182,18 @@ function useChatSessions(): ChatSessionsStore {
 
   const removeSession = React.useCallback((conversationId: string): void => {
     sessionsRef.current.delete(conversationId)
+    contextEstimatesRef.current.delete(conversationId)
+    setContextEstimates(new Map(contextEstimatesRef.current))
   }, [])
+
+  const setContextEstimate = React.useCallback(
+    (conversationId: string, tokens: number | null): void => {
+      if (tokens === null) contextEstimatesRef.current.delete(conversationId)
+      else contextEstimatesRef.current.set(conversationId, tokens)
+      setContextEstimates(new Map(contextEstimatesRef.current))
+    },
+    []
+  )
 
   const updateSession = React.useCallback(
     (conversationId: string, patch: (session: ChatSession) => void): void => {
@@ -289,6 +307,9 @@ function useChatSessions(): ChatSessionsStore {
           ) {
             onResponseState({ status: 'streaming', conversationId: conversation.id })
           }
+        },
+        onContextMeasurement: (measurement) => {
+          setContextEstimate(conversation.id, measurement.estimatedInputTokens)
         }
       })
       const chat = new Chat<MicoUIMessage>({
@@ -333,7 +354,7 @@ function useChatSessions(): ChatSessionsStore {
         })
       return session
     },
-    [getResponse, onResponseState, onResponseSettled, refreshRecovery]
+    [getResponse, onResponseState, onResponseSettled, refreshRecovery, setContextEstimate]
   )
 
   React.useEffect(
@@ -361,22 +382,24 @@ function useChatSessions(): ChatSessionsStore {
       instance.recovery = null
       instance.recoveryNeedsRefresh = false
       instance.retryInProgress = false
+      setContextEstimate(conversationId, null)
       onResponseState({ status: 'submitted', conversationId })
       void instance.chat.sendMessage({ parts })
       return true
     },
-    [getSession, getResponse, onResponseState]
+    [getSession, getResponse, onResponseState, setContextEstimate]
   )
 
   const queueFirstMessage = React.useCallback(
     (conversationId: string, parts: MicoUIMessage['parts']): void => {
       const instance = getSession(conversationId)
       if (!instance) return
+      setContextEstimate(conversationId, null)
       onResponseState({ status: 'submitted', conversationId })
       // The newly active chat must reach subscribers before its first message starts.
       setPendingMessage({ chat: instance.chat, parts })
     },
-    [getSession, onResponseState]
+    [getSession, onResponseState, setContextEstimate]
   )
 
   const stopResponse = React.useCallback(
@@ -432,6 +455,7 @@ function useChatSessions(): ChatSessionsStore {
       instance.recoveryRevision = (instance.recoveryRevision ?? 0) + 1
       const revision = instance.recoveryRevision
       instance.retryInProgress = true
+      setContextEstimate(conversationId, null)
       onResponseState({ status: 'submitted', conversationId })
       void instance.chat
         .regenerate()
@@ -454,7 +478,7 @@ function useChatSessions(): ChatSessionsStore {
           void refreshRecovery(conversationId)
         })
     },
-    [getSession, getResponse, onResponseState, refreshRecovery]
+    [getSession, getResponse, onResponseState, refreshRecovery, setContextEstimate]
   )
 
   const prepareForDeletion = React.useCallback(
@@ -497,7 +521,8 @@ function useChatSessions(): ChatSessionsStore {
     createSession,
     updateSession,
     refreshRecovery,
-    responseControl
+    responseControl,
+    contextEstimates
   }
 }
 

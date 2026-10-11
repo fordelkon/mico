@@ -1,6 +1,36 @@
 import { expect, test } from '../fixtures/local-provider.fixture'
 import { assistantMessages, composer, sendUserMessage, waitForReply } from '../utils/chat'
 
+test('user views approximate input when a request streams, then status survives completion and navigation', async ({
+  app,
+  provider
+}, testInfo) => {
+  const held = provider.enqueue({ type: 'text', text: 'Measured reply.', hold: true })
+  await composer(app.window).fill('Measure this prepared request')
+  await app.window.getByRole('button', { name: 'Send message' }).click()
+  const estimate = app.window.getByText(/^Approximate input: [\d,.\s]+ tokens$/)
+  await expect(estimate).toBeVisible()
+  await expect(app.window.getByRole('button', { name: 'Stop response' })).toBeVisible()
+  await estimate.focus()
+  await expect(app.window.getByRole('tooltip')).toContainText('model context limit is unknown')
+  await app.window.screenshot({ path: testInfo.outputPath('context-measurement-streaming.png') })
+  await app.window.keyboard.press('Escape')
+  held.finish()
+  await waitForReply(app.window, assistantMessages(app.window).last())
+  await expect(estimate).toBeVisible()
+  await app.window.getByRole('button', { name: 'New chat', exact: true }).click()
+  await expect(estimate).toHaveCount(0)
+  await app.window.getByRole('button', { name: 'E2E conversation', exact: true }).click()
+  await expect(estimate).toBeVisible()
+  await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
+  await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
+  await app.window.getByRole('radio', { name: 'Dark', exact: true }).click()
+  await app.window.getByRole('button', { name: 'Back', exact: true }).click()
+  await expect(estimate).toBeVisible()
+  await expect(app.window.locator('html')).toHaveClass(/dark/)
+  await app.window.screenshot({ path: testInfo.outputPath('context-measurement-dark.png') })
+})
+
 test('user continues a conversation when sending another turn, then each reply finishes separately', async ({
   app,
   provider
