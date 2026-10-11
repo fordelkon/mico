@@ -62,6 +62,7 @@ type RuntimeEventPayloads = {
   model_step_accepted: {
     index: number
     assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
+    usage?: import('@mico/ai-providers').ProviderUsage
   }
   tool_execution_started: { index: number; toolCallId: string; startedAt: number }
   tool_execution_settled: {
