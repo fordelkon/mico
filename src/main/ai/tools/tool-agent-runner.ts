@@ -7,11 +7,13 @@ import type {
   ChatProviderToolResultPart,
   ThinkingSelection
 } from '@mico/ai-providers'
-import { isProviderFinish } from '@mico/ai-providers'
+import { isProviderFinish, ProviderError } from '@mico/ai-providers'
 import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
 import type { ProviderMetadata, UIMessageChunk } from 'ai'
 import * as z from 'zod'
+import { ModelStepRetry, type RetryEvent } from '../chat/model-step-retry'
 import { AgentBudgetError } from '../chat/turn-failure'
+import type { TurnRunHandle } from '../sessions/session-runtime-service'
 import type { ToolExecutionTrace } from './tool-contract'
 import { type ToolCall, ToolRegistry } from './tool-registry'
 
@@ -34,6 +36,14 @@ type ToolAgentRunnerInput = {
   emit: (chunk: UIMessageChunk) => void
   onStep?: (step: AgentStep) => void
   onToolResult?: (trace: ToolExecutionTrace) => void
+  journal?: Pick<
+    TurnRunHandle,
+    'recordModelStep' | 'recordToolExecutionStarted' | 'recordToolExecutionSettled'
+  >
+  prepareMessages?: (history: readonly ChatProviderMessage[]) => ChatProviderMessage[]
+  maxAttempts?: number
+  retryDelayMs?: number
+  onRetry?: (event: RetryEvent) => void
 }
 /** One replayable model step: its response and the observations it caused. */
 type AgentStep = {
@@ -92,13 +102,23 @@ class ToolAgentRunner {
     signal,
     emit,
     onStep,
-    onToolResult
+    onToolResult,
+    journal,
+    prepareMessages = (history) => [...history],
+    maxAttempts = 5,
+    retryDelayMs = 1_000,
+    onRetry
   }: ToolAgentRunnerInput): Promise<{
     assistantText: string
     finalAssistant: Extract<ChatProviderMessage, { role: 'assistant' }>
     displaySequence: AgentDisplayPart[]
   }> {
-    let history = [...messages]
+    let history = messages.map((message) =>
+      message.role === 'tool'
+        ? { ...message, parts: message.parts.map(boundToolResultForHistory) }
+        : message
+    )
+    const retry = new ModelStepRetry({ maxAttempts, retryDelayMs, onRetry })
     let assistantText = ''
     let outputTokenRecoveries = 0
     let responseCount = 0
@@ -108,12 +128,13 @@ class ToolAgentRunner {
     for (;;) {
       signal.throwIfAborted()
       const request = {
-        messages: history,
+        messages: prepareMessages(history),
         thinkingEffort,
         signal
       }
       if (registry) Object.assign(request, { tools: registry.definitions })
-      const stream = await provider.stream(request)
+      const stream = retry.stream(provider, request)
+      const invalidResults: ChatProviderToolResultPart[] = []
       const calls: ToolCall[] = []
       const parts: Array<
         ChatProviderReasoningPart | ChatProviderTextPart | ChatProviderToolCallPart
@@ -129,6 +150,8 @@ class ToolAgentRunner {
         // Provider-finish is protocol state for the runner. It must never cross
         // the main/renderer boundary as an AI SDK UI message chunk.
         if (isProviderFinish(chunk)) {
+          if (chunk.reason === 'unknown' || chunk.reason === 'content-filter')
+            throw new ProviderError('provider')
           continuation = chunk.continuation
           finishReason =
             chunk.reason === 'length'
@@ -155,6 +178,7 @@ class ToolAgentRunner {
         }
         const finish = FinishChunkSchema.safeParse(chunk)
         if (finish.success) {
+          if (finish.data.finishReason === 'unknown') throw new ProviderError('provider')
           finishReason = finish.data.finishReason ?? 'stop'
           continue
         }
@@ -180,6 +204,28 @@ class ToolAgentRunner {
           if (part && reasoningEnd.data.providerMetadata)
             part.providerMetadata = reasoningEnd.data.providerMetadata
           emit(chunk)
+          continue
+        }
+        if (chunk.type === 'tool-input-error' && chunk.toolCallId && chunk.toolName) {
+          parts.push({
+            type: 'tool-call',
+            toolCallId: chunk.toolCallId,
+            toolName: chunk.toolName,
+            argumentsJson: '{}'
+          })
+          displayParts.push({
+            type: 'tool-call',
+            toolCallId: chunk.toolCallId,
+            toolName: chunk.toolName
+          })
+          invalidResults.push({
+            type: 'tool-result',
+            toolCallId: chunk.toolCallId,
+            toolName: chunk.toolName,
+            output: `Invalid tool arguments. ${chunk.errorText} Submit valid JSON object arguments.`,
+            isError: true
+          })
+          emit({ ...chunk, dynamic: true })
           continue
         }
         if (chunk.type !== 'tool-input-available') {
@@ -213,7 +259,8 @@ class ToolAgentRunner {
         parts: parts.filter((part) => part.type !== 'reasoning' || part.text)
       }
       const replayAssistant = continuation ? { ...assistant, replay: continuation } : assistant
-      if (!calls.length) {
+      journal?.recordModelStep({ index: responseCount + 1, assistant: replayAssistant })
+      if (!calls.length && !invalidResults.length) {
         const shouldContinue =
           finishReason === 'length' && outputTokenRecoveries < MAX_OUTPUT_TOKEN_RECOVERIES
         const step: AgentStep = {
@@ -241,25 +288,63 @@ class ToolAgentRunner {
         outputTokenRecoveries += 1
         continue
       }
-      if (!registry) throw new Error('The model requested a tool outside a project session.')
+      if (!registry && calls.length)
+        throw new Error('The model requested a tool outside a project session.')
       responseCount += 1
-      const executions = await registry.executeBatch(calls, signal, (delta) => {
-        // The renderer reads message parts, so each delta must append there.
-        // A shared id would replace earlier deltas; transient parts only reach
-        // onData. Durable history still stores the completed tool trace.
-        const parsed = ToolOutputDeltaDataSchema.safeParse(delta)
-        if (!parsed.success) return
-        emit({
-          type: 'data-tool-output-delta',
-          data: parsed.data
-        })
-      })
-      const results = executions.map(({ result }) => boundToolResultForHistory(result))
-      onStep?.({ index: responseCount, assistant: replayAssistant, toolResults: results })
-      for (const { result, trace } of executions) {
+      for (const result of invalidResults) {
+        const now = Date.now()
+        const trace: ToolExecutionTrace = {
+          toolCallId: result.toolCallId,
+          toolName: result.toolName,
+          input: {},
+          output: result.output,
+          isError: true,
+          startedAt: now,
+          finishedAt: now
+        }
+        journal?.recordToolExecutionSettled({ index: responseCount, result, trace })
         onToolResult?.(trace)
         emitToolResult(result, emit)
       }
+      const executions = registry
+        ? await registry.executeBatch(
+            calls,
+            signal,
+            (delta) => {
+              // The renderer reads message parts, so each delta must append there.
+              // A shared id would replace earlier deltas; transient parts only reach
+              // onData. Durable history still stores the completed tool trace.
+              const parsed = ToolOutputDeltaDataSchema.safeParse(delta)
+              if (!parsed.success) return
+              emit({
+                type: 'data-tool-output-delta',
+                data: parsed.data
+              })
+            },
+            {
+              onExecutionStarted: (call, startedAt) =>
+                journal?.recordToolExecutionStarted({
+                  index: responseCount,
+                  toolCallId: call.toolCallId,
+                  startedAt
+                }),
+              onExecutionSettled: (execution) => {
+                journal?.recordToolExecutionSettled({ index: responseCount, ...execution })
+                onToolResult?.(execution.trace)
+              }
+            }
+          )
+        : []
+      const orderedResults = parts.flatMap((part) =>
+        part.type === 'tool-call'
+          ? [...invalidResults, ...executions.map((execution) => execution.result)].filter(
+              (result) => result.toolCallId === part.toolCallId
+            )
+          : []
+      )
+      const results = orderedResults.map(boundToolResultForHistory)
+      onStep?.({ index: responseCount, assistant: replayAssistant, toolResults: results })
+      for (const { result } of executions) emitToolResult(result, emit)
       history = [
         ...history,
         replayAssistant,
@@ -279,11 +364,13 @@ function boundToolResultForHistory(result: ChatProviderToolResultPart): ChatProv
   const contentBytes = MAX_TOOL_RESULT_HISTORY_BYTES - markerBytes
   const headBytes = Math.floor(contentBytes * 0.75)
   const tailBytes = contentBytes - headBytes
+  let headEnd = headBytes
+  while (headEnd > 0 && (bytes[headEnd] & 0xc0) === 0x80) headEnd -= 1
+  let tailStart = bytes.byteLength - tailBytes
+  while (tailStart < bytes.byteLength && (bytes[tailStart] & 0xc0) === 0x80) tailStart += 1
   return {
     ...result,
-    output: `${bytes.subarray(0, headBytes).toString()}${TOOL_RESULT_TRUNCATION_MARKER}${bytes
-      .subarray(bytes.byteLength - tailBytes)
-      .toString()}`
+    output: `${bytes.subarray(0, headEnd).toString()}${TOOL_RESULT_TRUNCATION_MARKER}${bytes.subarray(tailStart).toString()}`
   }
 }
 

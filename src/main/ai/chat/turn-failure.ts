@@ -1,4 +1,5 @@
 import { APICallError } from '@ai-sdk/provider'
+import { ProviderError } from '@mico/ai-providers'
 
 import type { TurnFailure } from '@shared/ai/turn-failure'
 
@@ -20,7 +21,6 @@ class NoModelSelectedError extends Error {
 }
 
 class SkillInvocationError extends Error {}
-
 type TurnFailureClassification = { failure: TurnFailure; retryable: boolean }
 
 /**
@@ -37,6 +37,23 @@ function toTurnFailure(error: Error): TurnFailureClassification {
 
   if (error instanceof AgentBudgetError)
     return { failure: { code: error.code, message: error.message }, retryable: false }
+
+  if (error instanceof ProviderError) {
+    const retryable =
+      error.kind === 'transport' ||
+      error.kind === 'incomplete_stream' ||
+      error.kind === 'rate_limit' ||
+      (error.kind === 'http' &&
+        error.status !== undefined &&
+        (error.status === 408 || error.status >= 500))
+    const message =
+      error.status === 401 || error.status === 403
+        ? 'Authentication failed for this provider. Check the API key and account permissions.'
+        : error.status === 404
+          ? 'The selected model or API endpoint is unavailable. Check the provider settings.'
+          : error.message
+    return { failure: { code: 'provider_error', message }, retryable }
+  }
 
   if (error instanceof TypeError) {
     return {
