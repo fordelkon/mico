@@ -32,6 +32,10 @@ export enum IpcChannel {
   Sessions_Create = 'sessions:create',
   /** Permanently removes a session and its runtime records. */
   Sessions_Delete = 'sessions:delete',
+  /** Starts a manual conversation summary owned by the invoking renderer. */
+  Sessions_Compact = 'sessions:compact',
+  /** Cancels the running conversation summary owned by the invoking renderer. */
+  Sessions_CancelCompact = 'sessions:cancel-compaction',
   /** Returns session summaries. */
   Sessions_List = 'sessions:list',
   /** Returns one session's visible persisted transcript. */

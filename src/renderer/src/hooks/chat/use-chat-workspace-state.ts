@@ -6,7 +6,7 @@ import {
 import type { ChatSkillInvocationPart } from '@shared/ai/skills'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import * as React from 'react'
-import { useChatSessions } from './chat-session-instances'
+import { type ChatCompactionsStore, useChatSessions } from './chat-session-instances'
 import { type ChatActiveSessionSlice, useActiveSession } from './use-active-session'
 import { useConversationList } from './use-conversation-list'
 
@@ -19,6 +19,7 @@ type ChatSendInput = {
 /** Response control for the workspace: state, and the actions that drive it. */
 type ChatResponseSlice = {
   response: ChatResponseState
+  estimatedInputTokens?: number
   respondingConversationIds: ReadonlySet<string>
   sendMessage: (content: ChatSendInput) => Promise<boolean>
   retryResponse: () => void
@@ -29,6 +30,7 @@ type ChatWorkspace = {
   conversations: ReturnType<typeof useConversationList>['conversations']
   renameConversation: (conversationId: string, title: string) => Promise<void>
   deleteConversation: (conversationId: string) => Promise<void>
+  compactions: ChatCompactionsStore
   session: ChatActiveSessionSlice
   responses: ChatResponseSlice
 }
@@ -184,16 +186,28 @@ function useChatWorkspaceState(): ChatWorkspace {
   const responseSlice = React.useMemo(
     () => ({
       response,
+      estimatedInputTokens: activeSession
+        ? sessions.contextEstimates.get(activeSession.conversationId)
+        : undefined,
       respondingConversationIds,
       sendMessage,
       retryResponse,
       stopResponse
     }),
-    [response, respondingConversationIds, retryResponse, sendMessage, stopResponse]
+    [
+      response,
+      respondingConversationIds,
+      retryResponse,
+      sendMessage,
+      stopResponse,
+      activeSession,
+      sessions.contextEstimates
+    ]
   )
 
   return {
     conversations,
+    compactions: sessions.compactions,
     renameConversation,
     deleteConversation,
     session,

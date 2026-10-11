@@ -6,9 +6,10 @@ import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { ChatMessage } from '@shared/data/schemas/chat'
-import type { ChatProviderMessage } from '@mico/ai-providers'
+import { type ChatProvider, type ChatProviderMessage, providerFinish } from '@mico/ai-providers'
 import { SessionDatabase } from '../../data/session-database'
 import { sessionMigrations } from '../../data/session-migrations'
+import { ToolAgentRunner } from '../tools/tool-agent-runner'
 import { SessionRuntimeService, type ExecutionProfileSnapshot } from './session-runtime-service'
 import type { TurnFailure } from '@shared/ai/turn-failure'
 
@@ -803,6 +804,46 @@ describe('SessionRuntimeService', () => {
 
     expect(() => service.deleteSession(session.id)).toThrow('Session has an active run.')
     expect(service.listSessions()).toHaveLength(1)
+  })
+
+  it('user streams invalid usage when a step finishes, then the runner rejects without persisting an event', async () => {
+    const { database, service, session } = await createSession()
+    const run = service.beginTurn({
+      sessionId: session.id,
+      requestId: 'first',
+      userMessage,
+      profile,
+      retry: false
+    })
+    const provider: ChatProvider = {
+      getModelCapabilities: async () => null,
+      stream: async () =>
+        (async function* () {
+          yield { type: 'text-delta' as const, id: 'answer', delta: 'done' }
+          yield providerFinish({ reason: 'stop', usage: { inputTokens: Number.NaN } })
+        })()
+    }
+    await expect(
+      new ToolAgentRunner().run({
+        provider,
+        messages: run.replayMessages,
+        thinkingEffort: 'none',
+        signal: new AbortController().signal,
+        emit: () => undefined,
+        journal: {
+          recordModelStep: run.recordModelStep,
+          recordToolExecutionStarted: run.recordToolExecutionStarted,
+          recordToolExecutionSettled: run.recordToolExecutionSettled
+        }
+      })
+    ).rejects.toThrow(/inputTokens/)
+    expect(
+      database.connection
+        .prepare(
+          "SELECT payload_json FROM runtime_events WHERE run_id = ? AND kind = 'model_step_accepted'"
+        )
+        .all(run.runId)
+    ).toEqual([])
   })
 
   it('user sees surviving runs interrupted when recovery executes, then each run records a failure event', async () => {

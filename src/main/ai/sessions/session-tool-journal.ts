@@ -1,4 +1,9 @@
-import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
+import type {
+  ChatProviderMessage,
+  ChatProviderToolResultPart,
+  ProviderUsage
+} from '@mico/ai-providers'
+import * as z from 'zod'
 import type { SessionDatabase } from '../../data/session-database'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
 import {
@@ -15,7 +20,7 @@ import {
 } from './session-transcript'
 import { toStoredToolTrace } from './tool-trace-presentation'
 
-type ModelStepAccepted = Pick<AgentStep, 'index' | 'assistant'>
+type ModelStepAccepted = Pick<AgentStep, 'index' | 'assistant'> & { usage?: ProviderUsage }
 type ToolExecutionStarted = { index: number; toolCallId: string; startedAt: number }
 type ToolExecutionSettled = {
   index: number
@@ -28,6 +33,18 @@ type JournalRow = {
   payload_digest: string
   session_sequence: number
 }
+/**
+ * Normalized per-step provider usage. Every field is optional because providers
+ * report what their protocol exposes; absent fields stay absent instead of
+ * becoming zero.
+ */
+const ModelStepUsageSchema = z.object({
+  cachedInputTokens: z.number().finite().nonnegative().optional(),
+  inputTokens: z.number().finite().nonnegative().optional(),
+  outputTokens: z.number().finite().nonnegative().optional(),
+  reasoningTokens: z.number().finite().nonnegative().optional(),
+  totalTokens: z.number().finite().nonnegative().optional()
+})
 class SessionToolJournal {
   constructor(
     private readonly database: SessionDatabase,
@@ -46,7 +63,15 @@ class SessionToolJournal {
   recordModelStep(run: RunRow, step: ModelStepAccepted): void {
     if (!Number.isInteger(step.index) || step.index < 1 || step.assistant.role !== 'assistant')
       throw new Error('Invalid model step.')
-    this.record(run, 'model_step_accepted', step, step.index)
+    // Usage is normalized here, at the journaling boundary, so invalid provider
+    // counters can never enter persisted history. Absence stays absence.
+    const usage = step.usage === undefined ? undefined : ModelStepUsageSchema.parse(step.usage)
+    this.record(
+      run,
+      'model_step_accepted',
+      usage === undefined ? { index: step.index, assistant: step.assistant } : { ...step, usage },
+      step.index
+    )
   }
   recordStarted(run: RunRow, started: ToolExecutionStarted): void {
     this.assertCall(run.id, started.index, started.toolCallId)

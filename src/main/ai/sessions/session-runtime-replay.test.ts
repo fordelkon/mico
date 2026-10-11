@@ -22,6 +22,8 @@ const profile = {
   configurationDigest: 'digest'
 }
 const prompt = { role: 'user' as const, parts: [{ type: 'text' as const, text: 'Read the file.' }] }
+const STEP_ONE_USAGE = { inputTokens: 100, outputTokens: 20, totalTokens: 120 }
+const STEP_TWO_USAGE = { inputTokens: 200, outputTokens: 50, reasoningTokens: 10, totalTokens: 260 }
 const databases: SessionDatabase[] = []
 const paths: string[] = []
 afterEach(async () => {
@@ -432,5 +434,245 @@ describe('Session runtime replay', () => {
       { role: 'assistant', parts: [{ type: 'text', text: 'Final answer.' }] },
       prompt
     ])
+  })
+
+  it('user keeps per-step usage across a restart when a run spans tool and final steps, then each accepted step records its own usage', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mico-usage-restart-'))
+    paths.push(directory)
+    const workspace = await mkdtemp(join(tmpdir(), 'mico-usage-workspace-'))
+    paths.push(workspace)
+    await writeFile(join(workspace, 'a.txt'), 'contents')
+    const database = new SessionDatabase({ getUserDataPath: () => directory })
+    databases.push(database)
+    await database.initialize()
+    const service = new SessionRuntimeService({ database })
+    const session = service.createSession({ title: 'Usage', defaultProfile: profile })
+    const handle = service.beginTurn({
+      sessionId: session.id,
+      requestId: 'first',
+      userMessage: prompt,
+      profile,
+      retry: false
+    })
+    await new ToolAgentRunner().run({
+      provider: scripted([
+        [
+          // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
+          {
+            type: 'tool-input-available',
+            toolCallId: 'read',
+            toolName: 'Read',
+            input: { file_path: 'a.txt' },
+            dynamic: true
+          },
+          providerFinish({ reason: 'tool-calls', usage: STEP_ONE_USAGE })
+        ],
+        [
+          { type: 'text-delta', id: 'final', delta: 'Final answer.' },
+          providerFinish({ reason: 'stop', usage: STEP_TWO_USAGE })
+        ]
+      ]),
+      messages: handle.replayMessages,
+      registry: ToolRegistry.forWorkspace(workspace),
+      thinkingEffort: 'none',
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      onStep: handle.recordStep,
+      onToolResult: handle.recordTrace,
+      journal: {
+        recordModelStep: handle.recordModelStep,
+        recordToolExecutionStarted: handle.recordToolExecutionStarted,
+        recordToolExecutionSettled: handle.recordToolExecutionSettled
+      }
+    })
+    handle.complete({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Final answer.' }]
+    })
+
+    databases.splice(databases.indexOf(database), 1)
+    database.close()
+    const reopened = new SessionDatabase({ getUserDataPath: () => directory })
+    databases.push(reopened)
+    await reopened.initialize()
+    const runtime = new SessionRuntimeService({ database: reopened })
+    const accepted = reopened.connection
+      .prepare(
+        "SELECT payload_json FROM runtime_events WHERE kind = 'model_step_accepted' ORDER BY session_sequence"
+      )
+      .all()
+      .map((row) => {
+        // SAFETY: the fixed SELECT returns the journal's serialized payload column.
+        return JSON.parse((row as { payload_json: string }).payload_json)
+      })
+    expect(accepted).toEqual([
+      {
+        index: 1,
+        assistant: {
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-call',
+              toolCallId: 'read',
+              toolName: 'Read',
+              argumentsJson: '{"file_path":"a.txt"}'
+            }
+          ]
+        },
+        usage: STEP_ONE_USAGE
+      },
+      {
+        index: 2,
+        assistant: { role: 'assistant', parts: [{ type: 'text', text: 'Final answer.' }] },
+        usage: STEP_TWO_USAGE
+      }
+    ])
+    const next = runtime.beginTurn({
+      sessionId: session.id,
+      requestId: 'next',
+      userMessage: prompt,
+      profile,
+      retry: false
+    })
+    expect(next.replayMessages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'assistant',
+      'user'
+    ])
+  })
+
+  it('user gets one usage record when a model request fails before any chunk and retries, then the accepted step carries the retried attempt only', async () => {
+    const { database, begin } = await setup()
+    const handle = begin('first')
+    let attempts = 0
+    const provider: ChatProvider = {
+      getModelCapabilities: async () => null,
+      stream: async () => {
+        if (++attempts === 1) throw new TypeError('fetch failed')
+        return (async function* () {
+          yield { type: 'text-delta' as const, id: 'answer', delta: 'done' }
+          yield providerFinish({ reason: 'stop', usage: { inputTokens: 5, outputTokens: 3 } })
+        })()
+      }
+    }
+    await new ToolAgentRunner().run({
+      provider,
+      messages: handle.replayMessages,
+      thinkingEffort: 'none',
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      journal: {
+        recordModelStep: handle.recordModelStep,
+        recordToolExecutionStarted: handle.recordToolExecutionStarted,
+        recordToolExecutionSettled: handle.recordToolExecutionSettled
+      }
+    })
+    handle.complete({ role: 'assistant', parts: [{ type: 'text', text: 'done' }] })
+
+    const accepted = database.connection
+      .prepare("SELECT payload_json FROM runtime_events WHERE kind = 'model_step_accepted'")
+      .all()
+      .map((row) => {
+        // SAFETY: the fixed SELECT returns the journal's serialized payload column.
+        return JSON.parse((row as { payload_json: string }).payload_json)
+      })
+    expect(accepted).toEqual([
+      {
+        index: 1,
+        assistant: { role: 'assistant', parts: [{ type: 'text', text: 'done' }] },
+        usage: { inputTokens: 5, outputTokens: 3 }
+      }
+    ])
+  })
+
+  it('user keeps completed step usage when cancelling after one step, then the cancelled run retains the recorded usage', async () => {
+    const { database, begin } = await setup()
+    const handle = begin('first')
+    const controller = new AbortController()
+    let requested = false
+    const provider: ChatProvider = {
+      getModelCapabilities: async () => null,
+      stream: async () =>
+        (async function* () {
+          if (!requested) {
+            requested = true
+            yield { type: 'text-delta' as const, id: 'partial', delta: 'Partial ' }
+            yield providerFinish({ reason: 'length', usage: { inputTokens: 11, outputTokens: 7 } })
+            return
+          }
+          yield { type: 'text-delta' as const, id: 'unfinished', delta: 'unfinished' }
+          controller.abort()
+          throw new Error('Stream interrupted')
+        })()
+    }
+    await expect(
+      new ToolAgentRunner().run({
+        provider,
+        messages: handle.replayMessages,
+        thinkingEffort: 'none',
+        signal: controller.signal,
+        emit: () => undefined,
+        journal: {
+          recordModelStep: handle.recordModelStep,
+          recordToolExecutionStarted: handle.recordToolExecutionStarted,
+          recordToolExecutionSettled: handle.recordToolExecutionSettled
+        }
+      })
+    ).rejects.toThrow('aborted')
+    handle.cancel({ role: 'assistant', parts: [{ type: 'text', text: 'Partial unfinished' }] })
+
+    const accepted = database.connection
+      .prepare("SELECT payload_json FROM runtime_events WHERE kind = 'model_step_accepted'")
+      .all()
+      .map((row) => {
+        // SAFETY: the fixed SELECT returns the journal's serialized payload column.
+        return JSON.parse((row as { payload_json: string }).payload_json)
+      })
+    expect(accepted).toEqual([
+      {
+        index: 1,
+        assistant: { role: 'assistant', parts: [{ type: 'text', text: 'Partial ' }] },
+        usage: { inputTokens: 11, outputTokens: 7 }
+      }
+    ])
+  })
+
+  it('user gets no usage recorded when the provider finishes without usage, then the accepted step stays usage-free', async () => {
+    const { database, begin } = await setup()
+    const handle = begin('first')
+    await new ToolAgentRunner().run({
+      provider: scripted([response('done', 'answer')]),
+      messages: handle.replayMessages,
+      thinkingEffort: 'none',
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      journal: {
+        recordModelStep: handle.recordModelStep,
+        recordToolExecutionStarted: handle.recordToolExecutionStarted,
+        recordToolExecutionSettled: handle.recordToolExecutionSettled
+      }
+    })
+    handle.complete({ role: 'assistant', parts: [{ type: 'text', text: 'done' }] })
+
+    const accepted = database.connection
+      .prepare("SELECT payload_json FROM runtime_events WHERE kind = 'model_step_accepted'")
+      .all()
+      .map((row) => {
+        // SAFETY: the fixed SELECT returns the journal's serialized payload column.
+        return JSON.parse((row as { payload_json: string }).payload_json)
+      })
+    expect(accepted).toEqual([
+      {
+        index: 1,
+        assistant: {
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'done' }],
+          replay: { provider: 'openai-responses', responseId: 'answer' }
+        }
+      }
+    ])
+    expect(Object.hasOwn(accepted[0], 'usage')).toBe(false)
   })
 })

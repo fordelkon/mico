@@ -16,6 +16,11 @@ class FakeChatAPI implements ChatAPI {
   readonly startedRequests: Parameters<ChatAPI['startTurn']>[0][] = []
   readonly listeners = new Set<Parameters<ChatAPI['onTurnEvent']>[0]>()
   readonly titleListeners = new Set<(update: { sessionId: string; title: string }) => void>()
+  readonly compact = vi.fn<SessionsAPI['compact']>(async () => ({
+    status: 'accepted',
+    checkpointEventId: 'checkpoint-1'
+  }))
+  readonly cancelCompact = vi.fn<SessionsAPI['cancelCompact']>(async () => {})
   readonly createSession = vi.fn<SessionsAPI['create']>(async (_input: { title: string }) => ({
     id: 'session-new',
     title: 'New chat',
@@ -32,6 +37,8 @@ class FakeChatAPI implements ChatAPI {
   }))
   workspaceProjects: WorkspaceProject[] = []
   readonly sessions: SessionsAPI = {
+    compact: (sessionId) => this.compact(sessionId),
+    cancelCompact: (sessionId) => this.cancelCompact(sessionId),
     create: (input) => this.createSession(input),
     delete: async (): Promise<void> => {},
     list: async () => [],
@@ -146,6 +153,40 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('user navigates after measurement when sending again, then estimates stay isolated and reset', async () => {
+    const { api, result } = renderWorkspaceState()
+    act(() => void result.current.responses.sendMessage({ text: 'First', documents: [] }))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    const first = api.startedRequests[0].requestId
+    act(() =>
+      api.emit({
+        type: 'context-measurement',
+        requestId: first,
+        measurement: { policyId: 'unicode-heuristic-v1', estimatedInputTokens: 42 }
+      })
+    )
+    expect(result.current.responses.estimatedInputTokens).toBe(42)
+    expect(result.current.responses.response.status).toBe('submitted')
+    act(() => result.current.session.startNewChat())
+    expect(result.current.responses.estimatedInputTokens).toBeUndefined()
+    act(() => result.current.session.selectConversation('session-new'))
+    await waitFor(() => expect(result.current.responses.estimatedInputTokens).toBe(42))
+    act(() => api.emit({ type: 'finish', requestId: first }))
+    await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    await act(async () => {
+      await result.current.responses.sendMessage({ text: 'Next', documents: [] })
+    })
+    expect(result.current.responses.estimatedInputTokens).toBeUndefined()
+    act(() =>
+      api.emit({
+        type: 'context-measurement',
+        requestId: first,
+        measurement: { policyId: 'unicode-heuristic-v1', estimatedInputTokens: 999 }
+      })
+    )
+    expect(result.current.responses.estimatedInputTokens).toBeUndefined()
+    act(() => api.emit({ type: 'finish', requestId: api.startedRequests[1].requestId }))
+  })
   it('user deletes a responding conversation when cancellation is pending, then sending stays blocked through deletion', async () => {
     const stopped = Promise.withResolvers<void>()
     const deleted = Promise.withResolvers<void>()
@@ -1201,5 +1242,145 @@ describe('useChatWorkspaceState', () => {
         { id: 'session-1', title: 'Plan release notes' }
       ])
     )
+  })
+})
+
+describe('useChatWorkspaceState compaction', () => {
+  it('user starts a summary when settled, then pending lasts until the durable outcome', async () => {
+    const { api, result } = renderWorkspaceState()
+    const pending = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['compact']>>>()
+    api.compact.mockReturnValue(pending.promise)
+    let started!: Promise<void>
+    act(() => {
+      started = result.current.compactions.startCompaction('session-new')
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(api.compact).toHaveBeenCalledWith({
+      sessionId: 'session-new',
+      requestId: expect.any(String)
+    })
+    expect(result.current.compactions.states.get('session-new')?.status === 'pending').toBe(true)
+    expect(result.current.compactions.states.get('session-new')?.status).not.toBe('failed')
+
+    await act(async () => {
+      pending.resolve({ status: 'accepted', checkpointEventId: 'checkpoint-1' })
+      await started
+    })
+    expect(result.current.compactions.states.get('session-new')).toEqual({ status: 'accepted' })
+  })
+
+  it('user cancels a summary when navigating away, then acknowledged cancellation permits sending and deletion', async () => {
+    const pending = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['compact']>>>()
+    const { api, result } = renderWorkspaceState((api) => {
+      const load = api.sessions.load
+      api.sessions.load = async (id) => ({ ...(await load(id)), recovery: null })
+    })
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() =>
+      expect(result.current.session.activeSession?.conversationId).toBe('session-1')
+    )
+    api.compact.mockReturnValue(pending.promise)
+    let started!: Promise<void>
+    act(() => {
+      started = result.current.compactions.startCompaction('session-1')
+    })
+    await act(async () => {
+      expect(await result.current.responses.sendMessage({ text: 'Blocked', documents: [] })).toBe(
+        false
+      )
+    })
+    await act(async () => {
+      await result.current.compactions.startCompaction('session-1')
+      await result.current.deleteConversation('session-1').catch(() => {})
+    })
+    expect(api.compact).toHaveBeenCalledTimes(1)
+    act(() => result.current.session.startNewChat())
+    expect(result.current.compactions.states.get('session-1')?.status).toBe('pending')
+    const acknowledged = Promise.withResolvers<void>()
+    api.cancelCompact.mockReturnValue(acknowledged.promise)
+    let cancellation!: Promise<void>
+    act(() => {
+      cancellation = result.current.compactions.cancelCompaction('session-1')
+    })
+    await act(async () => {
+      acknowledged.resolve()
+      await cancellation
+    })
+    expect(result.current.compactions.states.get('session-1')?.status).toBe('pending')
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() =>
+      expect(result.current.session.activeSession?.conversationId).toBe('session-1')
+    )
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'Still blocked', documents: [] })
+      ).toBe(false)
+      await expect(result.current.deleteConversation('session-1')).rejects.toThrow(
+        'remains in your history'
+      )
+    })
+    await act(async () => {
+      pending.resolve({ status: 'cancelled' })
+      await started
+    })
+    expect(result.current.compactions.states.get('session-1')).toEqual({ status: 'cancelled' })
+    expect(api.cancelCompact).toHaveBeenCalledWith(api.compact.mock.calls[0][0])
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() =>
+      expect(result.current.session.activeSession?.conversationId).toBe('session-1')
+    )
+    await act(async () => {
+      expect(await result.current.responses.sendMessage({ text: 'Allowed', documents: [] })).toBe(
+        true
+      )
+    })
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() => api.emit({ type: 'finish', requestId: api.startedRequests[0].requestId }))
+    await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    await act(async () => {
+      await result.current.deleteConversation('session-1')
+    })
+    expect(result.current.session.activeSession).toBeNull()
+    expect(result.current.compactions.states.get('session-1')).toBeUndefined()
+    expect(result.current.compactions.states.size).toBe(0)
+    await act(async () => {
+      await result.current.compactions.startCompaction('session-2')
+    })
+    expect(result.current.compactions.states.get('session-1')).toBeUndefined()
+    expect(result.current.compactions.states.size).toBe(1)
+  })
+
+  it('user retries after IPC rejection when summarizing, then the pending state clears', async () => {
+    const { api, result } = renderWorkspaceState()
+    api.compact.mockRejectedValueOnce(new Error('IPC unavailable'))
+    await act(async () => {
+      await result.current.compactions.startCompaction('session-new')
+    })
+    expect(result.current.compactions.states.get('session-new')).toEqual({
+      status: 'failed',
+      message:
+        'Could not summarize this conversation. IPC unavailable Your messages remain intact. Try Compact context again.'
+    })
+    await act(async () => {
+      await result.current.compactions.startCompaction('session-new')
+    })
+    expect(result.current.compactions.states.get('session-new')?.status).toBe('accepted')
+  })
+
+  it('user sees an actionable message when a summary fails, then the conversation stays intact', async () => {
+    const { api, result } = renderWorkspaceState()
+    api.compact.mockResolvedValueOnce({
+      status: 'failed',
+      message: 'The model returned an empty summary. Try summarizing again.'
+    })
+    await act(async () => {
+      await result.current.compactions.startCompaction('session-new')
+    })
+    expect(result.current.compactions.states.get('session-new')).toEqual({
+      status: 'failed',
+      message: 'The model returned an empty summary. Try summarizing again.'
+    })
   })
 })

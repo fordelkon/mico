@@ -197,7 +197,7 @@ describe('TurnExecutor recovery', () => {
           }
         })
       await vi.advanceTimersByTimeAsync(0)
-      expect(events).toEqual([
+      expect(events.filter((event) => event.type !== 'context-measurement')).toEqual([
         { type: 'cancelled', requestId: 'same' },
         { type: 'cancelled', requestId: 'same' }
       ])

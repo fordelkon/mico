@@ -7,6 +7,7 @@ import { IpcChannel } from '@shared/IpcChannel'
 import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
+import type { SessionCompactor } from './ai/chat/session-compactor'
 import type { SessionModelProfile } from './ai/chat/session-model-profile'
 import type { TurnExecutor } from './ai/chat/turn-executor'
 import type { ProviderService } from './ai/providers/provider-service'
@@ -89,6 +90,10 @@ function createHarness() {
     loadSession: vi.fn<SessionRuntimeService['loadSession']>(),
     renameSession: vi.fn<SessionRuntimeService['renameSession']>()
   }
+  const sessionCompactor = {
+    compact: vi.fn<SessionCompactor['compact']>(),
+    cancel: vi.fn<SessionCompactor['cancel']>().mockResolvedValue(undefined)
+  }
   const workspace = {
     addProject: vi.fn<WorkspaceService['addProject']>(),
     archiveProject: vi.fn<WorkspaceService['archiveProject']>(),
@@ -111,7 +116,16 @@ function createHarness() {
   const stat = vi.fn<(filePath: string) => Promise<{ size: number }>>()
 
   registerIpc(
-    { mainWindow, modelProfile, preference, turnExecutor, provider, session, workspace },
+    {
+      mainWindow,
+      modelProfile,
+      preference,
+      provider,
+      session,
+      sessionCompactor,
+      turnExecutor,
+      workspace
+    },
     {
       ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
       // SAFETY: The chat handlers only use this value to establish a trusted calling window.
@@ -132,6 +146,7 @@ function createHarness() {
     preference,
     provider,
     session,
+    sessionCompactor,
     openPath,
     pickCodeDocuments,
     openFile,
@@ -180,6 +195,12 @@ function createEvent({
     once: vi.fn<(event: string, listener: () => void) => void>((event, listener) => {
       if (event === 'destroyed') destroyedListeners.push(listener)
     }),
+    on: vi.fn<
+      (
+        event: string,
+        listener: (details: { isMainFrame: boolean; isSameDocument: boolean }) => void
+      ) => void
+    >(),
     send: vi.fn<(channel: string, ...args: unknown[]) => void>()
   }
   const invokingFrame = isMainFrame ? sender.mainFrame : {}
@@ -709,6 +730,105 @@ describe('registerIpc session handlers', () => {
     expect(session.loadSession).not.toHaveBeenCalled()
     expect(session.deleteSession).not.toHaveBeenCalled()
     expect(session.renameSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('registerIpc session compaction handlers', () => {
+  const request = { sessionId: 'session-1', requestId: 'summary-1' }
+
+  it('user starts a summary when trusted, then receives its durable outcome', async () => {
+    const { handlers, sessionCompactor, event } = createHarness()
+    const outcome = { status: 'accepted', checkpointEventId: 'checkpoint-1' } as const
+    sessionCompactor.compact.mockResolvedValue(outcome)
+    await expect(handlers.get(IpcChannel.Sessions_Compact)?.(event, request)).resolves.toEqual(
+      outcome
+    )
+    expect(sessionCompactor.compact).toHaveBeenCalledWith('session-1')
+  })
+
+  it('user sends an invalid summary task when invoking, then nothing starts', () => {
+    const { handlers, sessionCompactor, event } = createHarness()
+    expect(() =>
+      handlers.get(IpcChannel.Sessions_Compact)?.(event, { sessionId: 'session-1' })
+    ).toThrow('Invalid summary request')
+    expect(sessionCompactor.compact).not.toHaveBeenCalled()
+  })
+
+  it('user cancels from another window when a summary runs, then cancellation is refused', async () => {
+    const { handlers, sessionCompactor, event } = createHarness()
+    const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+    sessionCompactor.compact.mockReturnValue(pending.promise)
+    const started = handlers.get(IpcChannel.Sessions_Compact)?.(event, request)
+    const { event: other } = createEvent({ id: 43 })
+    await expect(handlers.get(IpcChannel.Sessions_CancelCompact)?.(other, request)).rejects.toThrow(
+      'another window'
+    )
+    expect(sessionCompactor.cancel).not.toHaveBeenCalled()
+    pending.resolve({ status: 'cancelled' })
+    await started
+  })
+
+  it('user repeats a request when a summary runs, then the original task keeps cancellation ownership', async () => {
+    const { handlers, sessionCompactor, event } = createHarness()
+    const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+    sessionCompactor.compact.mockReturnValue(pending.promise)
+    const started = handlers.get(IpcChannel.Sessions_Compact)?.(event, request)
+    await expect(
+      handlers.get(IpcChannel.Sessions_Compact)?.(event, { ...request, requestId: 'summary-2' })
+    ).rejects.toThrow('already running')
+    await handlers.get(IpcChannel.Sessions_CancelCompact)?.(event, {
+      ...request,
+      requestId: 'summary-2'
+    })
+    expect(sessionCompactor.cancel).not.toHaveBeenCalled()
+    const acknowledgement = Promise.withResolvers<void>()
+    sessionCompactor.cancel.mockReturnValue(acknowledgement.promise)
+    const cancelled = handlers.get(IpcChannel.Sessions_CancelCompact)?.(event, request)
+    expect(sessionCompactor.cancel).toHaveBeenCalledWith('session-1')
+    acknowledgement.resolve()
+    await cancelled
+    pending.resolve({ status: 'cancelled' })
+    await started
+  })
+
+  it.each(['render-process-gone', 'did-start-navigation'])(
+    'user loses the renderer when %s occurs, then its running summary is cancelled',
+    async (lifecycle) => {
+      const { handlers, sessionCompactor } = createHarness()
+      const { event, sender } = createEvent({ id: 101 })
+      const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+      sessionCompactor.compact.mockReturnValue(pending.promise)
+      const started = handlers.get(IpcChannel.Sessions_Compact)?.(event, request)
+      const listener = sender.on.mock.calls.find(([name]) => name === lifecycle)?.[1]
+      if (!listener) throw new Error('Missing renderer lifecycle listener')
+      // The Electron callback accepts external lifecycle details, supplied by this event seam.
+      listener({ isMainFrame: true, isSameDocument: false })
+      expect(sessionCompactor.cancel).toHaveBeenCalledWith('session-1')
+      pending.resolve({ status: 'cancelled' })
+      await started
+    }
+  )
+
+  it('user closes the owning renderer when cancellation fails, then teardown observes the failure', async () => {
+    const { handlers, sessionCompactor } = createHarness()
+    const { event, destroyedListeners } = createEvent({ id: 99 })
+    const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+    const failed = Promise.withResolvers<void>()
+    sessionCompactor.compact.mockReturnValue(pending.promise)
+    sessionCompactor.cancel.mockReturnValue(failed.promise)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const started = handlers.get(IpcChannel.Sessions_Compact)?.(event, request)
+      for (const listener of destroyedListeners) listener()
+      expect(sessionCompactor.cancel).toHaveBeenCalledWith('session-1')
+      failed.reject(new Error('storage closed'))
+      await failed.promise.catch(() => {})
+      expect(log).toHaveBeenCalled()
+      pending.resolve({ status: 'cancelled' })
+      await started
+    } finally {
+      log.mockRestore()
+    }
   })
 })
 

@@ -32,7 +32,11 @@ import {
   SyncModelsRequestSchema,
   TestModelRequestSchema
 } from './schemas/providers'
-import { CreateSessionRequestSchema } from './schemas/sessions'
+import {
+  CompactionOutcomeSchema,
+  CompactionRequestSchema,
+  CreateSessionRequestSchema
+} from './schemas/sessions'
 
 const empty = z.undefined()
 const completion = z.void()
@@ -73,6 +77,11 @@ const taskSchemas = {
   },
   [IpcChannel.Chat_RespondToPermission]: { input: PermissionResponseSchema, output: completion },
   [IpcChannel.Chat_AbortTurn]: { input: TurnRequestIdSchema, output: completion },
+  [IpcChannel.Sessions_Compact]: {
+    input: CompactionRequestSchema,
+    output: CompactionOutcomeSchema
+  },
+  [IpcChannel.Sessions_CancelCompact]: { input: CompactionRequestSchema, output: completion },
   [IpcChannel.Sessions_List]: { input: empty, output: z.array(SessionSummarySchema) },
   [IpcChannel.Sessions_Create]: { input: CreateSessionRequestSchema, output: SessionSummarySchema },
   [IpcChannel.Sessions_Delete]: { input: SessionIdSchema, output: completion },

@@ -255,6 +255,10 @@ class TurnExecutor {
           maxAttempts: this.maxAttempts,
           retryDelayMs: this.retryDelayMs,
           onRetry: (event) => emit({ type: 'retry', requestId: request.requestId, ...event }),
+          onContextMeasurement: (measurement) => {
+            if (turn.controller.signal.aborted || turn.terminal) return
+            emit({ type: 'context-measurement', requestId: request.requestId, measurement })
+          },
           thinkingEffort: effectiveThinkingEffort,
           signal: turn.controller.signal,
           emit: (chunk) => {

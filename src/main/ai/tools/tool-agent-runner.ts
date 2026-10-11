@@ -2,15 +2,19 @@ import type {
   ChatProvider,
   ChatProviderMessage,
   ChatProviderReasoningPart,
+  ChatProviderStreamInput,
   ChatProviderTextPart,
   ChatProviderToolCallPart,
   ChatProviderToolResultPart,
+  ProviderUsage,
   ThinkingSelection
 } from '@mico/ai-providers'
 import { isProviderFinish, ProviderError } from '@mico/ai-providers'
+import type { ContextMeasurement } from '@shared/ai/context-measurement'
 import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
 import type { ProviderMetadata, UIMessageChunk } from 'ai'
 import * as z from 'zod'
+import { estimatePreparedContextTokens } from '../chat/context-estimator'
 import { ModelStepRetry, type RetryEvent } from '../chat/model-step-retry'
 import { AgentBudgetError } from '../chat/turn-failure'
 import type { TurnRunHandle } from '../sessions/session-runtime-service'
@@ -44,6 +48,7 @@ type ToolAgentRunnerInput = {
   maxAttempts?: number
   retryDelayMs?: number
   onRetry?: (event: RetryEvent) => void
+  onContextMeasurement?: (measurement: ContextMeasurement) => void
 }
 /** One replayable model step: its response and the observations it caused. */
 type AgentStep = {
@@ -107,7 +112,8 @@ class ToolAgentRunner {
     prepareMessages = (history) => [...history],
     maxAttempts = 5,
     retryDelayMs = 1_000,
-    onRetry
+    onRetry,
+    onContextMeasurement
   }: ToolAgentRunnerInput): Promise<{
     assistantText: string
     finalAssistant: Extract<ChatProviderMessage, { role: 'assistant' }>
@@ -127,12 +133,13 @@ class ToolAgentRunner {
     // real failure occurs. Successful tool use must not silently remove capabilities.
     for (;;) {
       signal.throwIfAborted()
-      const request = {
+      const request: ChatProviderStreamInput = {
         messages: prepareMessages(history),
         thinkingEffort,
         signal
       }
-      if (registry) Object.assign(request, { tools: registry.definitions })
+      if (registry) request.tools = registry.definitions
+      onContextMeasurement?.(estimatePreparedContextTokens(request.messages, request.tools))
       const stream = retry.stream(provider, request)
       const invalidResults: ChatProviderToolResultPart[] = []
       const calls: ToolCall[] = []
@@ -146,6 +153,7 @@ class ToolAgentRunner {
       const displayTexts = new Map<string, Extract<AgentDisplayPart, { type: 'text' }>>()
       let finishReason: 'length' | 'stop' | 'tool-calls' | 'unknown' = 'stop'
       let continuation: Extract<ChatProviderMessage, { role: 'assistant' }>['replay']
+      let usage: ProviderUsage | undefined
       for await (const chunk of stream) {
         // Provider-finish is protocol state for the runner. It must never cross
         // the main/renderer boundary as an AI SDK UI message chunk.
@@ -153,6 +161,7 @@ class ToolAgentRunner {
           if (chunk.reason === 'unknown' || chunk.reason === 'content-filter')
             throw new ProviderError('provider')
           continuation = chunk.continuation
+          usage = chunk.usage
           finishReason =
             chunk.reason === 'length'
               ? 'length'
@@ -259,7 +268,11 @@ class ToolAgentRunner {
         parts: parts.filter((part) => part.type !== 'reasoning' || part.text)
       }
       const replayAssistant = continuation ? { ...assistant, replay: continuation } : assistant
-      journal?.recordModelStep({ index: responseCount + 1, assistant: replayAssistant })
+      journal?.recordModelStep(
+        usage === undefined
+          ? { index: responseCount + 1, assistant: replayAssistant }
+          : { index: responseCount + 1, assistant: replayAssistant, usage }
+      )
       if (!calls.length && !invalidResults.length) {
         const shouldContinue =
           finishReason === 'length' && outputTokenRecoveries < MAX_OUTPUT_TOKEN_RECOVERIES

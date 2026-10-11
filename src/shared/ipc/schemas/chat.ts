@@ -1,5 +1,6 @@
 import type { UIMessageChunk } from 'ai'
 import * as z from 'zod'
+import { type ContextMeasurement, ContextMeasurementSchema } from '../../ai/context-measurement'
 import { PermissionModeSchema } from '../../ai/permissions'
 import { defineSchema } from '../../data/define'
 
@@ -21,6 +22,7 @@ type ToolOutputDeltaData = {
 }
 type TurnStreamEvent =
   | { type: 'chunk'; requestId: string; chunk: UIMessageChunk }
+  | { type: 'context-measurement'; requestId: string; measurement: ContextMeasurement }
   | {
       type: 'retry'
       requestId: string
@@ -60,6 +62,11 @@ const TurnStreamEventSchema: z.ZodType<TurnStreamEvent> = defineSchema(
       type: z.literal('chunk'),
       requestId: TurnRequestIdSchema,
       chunk: z.custom<UIMessageChunk>()
+    }),
+    z.object({
+      type: z.literal('context-measurement'),
+      requestId: TurnRequestIdSchema,
+      measurement: ContextMeasurementSchema
     }),
     z.object({
       type: z.literal('error'),

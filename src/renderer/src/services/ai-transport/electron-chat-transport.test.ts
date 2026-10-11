@@ -76,6 +76,34 @@ afterEach(() => {
 })
 
 describe('ElectronChatTransport', () => {
+  it('user receives a context observation when waiting, then stream lifecycle stays pending', async () => {
+    const api = new FakeChatAPI()
+    const observed: number[] = []
+    const statuses: string[] = []
+    const transport = new ElectronChatTransport(api, {
+      sessionId: 'conversation-1',
+      getThinkingEffort: () => 'default',
+      onContextMeasurement: (measurement) => observed.push(measurement.estimatedInputTokens),
+      onStatusChange: (status) => statuses.push(status.type)
+    })
+    const reader = (await transport.sendMessages(sendOptions)).getReader()
+    let settled = false
+    const read = reader.read().then((value) => {
+      settled = true
+      return value
+    })
+    const measurement = { policyId: 'unicode-heuristic-v1' as const, estimatedInputTokens: 42 }
+    api.emit({ type: 'context-measurement', requestId: 'stale', measurement })
+    api.emit({ type: 'context-measurement', requestId, measurement })
+    await Promise.resolve()
+    expect(observed).toEqual([42])
+    expect(statuses).toEqual([])
+    expect(settled).toBe(false)
+    api.emit({ type: 'finish', requestId })
+    await expect(read).resolves.toEqual({ done: true, value: undefined })
+    api.emit({ type: 'context-measurement', requestId, measurement })
+    expect(observed).toEqual([42])
+  })
   it('user selects automatic edits when sending, then the turn retains that permission mode', async () => {
     const api = new FakeChatAPI()
     const transport = new ElectronChatTransport(api, {

@@ -134,8 +134,22 @@ type ChatResponseControl = {
   prepareForDeletion: (conversationId: string) => Promise<void>
 }
 
+type ChatCompactionState =
+  | { status: 'pending'; requestId: string; error?: string }
+  | { status: 'accepted' }
+  | { status: 'cancelled' }
+  | { status: 'failed'; message: string }
+
+type ChatCompactionsStore = {
+  states: ReadonlyMap<string, ChatCompactionState>
+  startCompaction: (conversationId: string) => Promise<void>
+  cancelCompaction: (conversationId: string) => Promise<void>
+}
+
 type ChatSessionsStore = {
   responseControl: ChatResponseControl
+  compactions: ChatCompactionsStore
+  contextEstimates: ReadonlyMap<string, number>
   getSession: (conversationId: string) => ChatSession | undefined
   removeSession: (conversationId: string) => void
   refreshRecovery: (conversationId: string) => Promise<void>
@@ -161,12 +175,81 @@ function useChatSessions(): ChatSessionsStore {
     chat: Chat<MicoUIMessage>
     parts: MicoUIMessage['parts']
   } | null>(null)
+  // Latest per-conversation approximate input observation; cleared when a conversation
+  // starts a new request and never persisted as durable user text.
+  const contextEstimatesRef = React.useRef(new Map<string, number>())
+  const [contextEstimates, setContextEstimates] = React.useState<Map<string, number>>(
+    () => new Map()
+  )
 
   React.useEffect(() => {
     if (pendingMessage) void pendingMessage.chat.sendMessage({ parts: pendingMessage.parts })
   }, [pendingMessage])
   // Keep sessions alive across selection changes so background responses can continue.
   const sessionsRef = React.useRef(new Map<string, ChatSession>())
+  const compactionsRef = React.useRef(new Map<string, ChatCompactionState>())
+  const [compactionStates, setCompactionStates] = React.useState<
+    ReadonlyMap<string, ChatCompactionState>
+  >(() => new Map())
+  const publishCompaction = React.useCallback((id: string, state: ChatCompactionState): void => {
+    compactionsRef.current.set(id, state)
+    setCompactionStates(new Map(compactionsRef.current))
+  }, [])
+  const startCompaction = React.useCallback(
+    async (id: string): Promise<void> => {
+      const instance = sessionsRef.current.get(id)
+      if (compactionsRef.current.get(id)?.status === 'pending') return
+      if (
+        instance?.stopping ||
+        instance?.deleting ||
+        isActiveChatResponse(getResponse(id) ?? { status: 'idle' })
+      )
+        return
+      const requestId = crypto.randomUUID()
+      publishCompaction(id, { status: 'pending', requestId })
+      try {
+        const outcome = await window.api.sessions.compact({ sessionId: id, requestId })
+        const current = compactionsRef.current.get(id)
+        if (current?.status !== 'pending' || current.requestId !== requestId) return
+        publishCompaction(
+          id,
+          outcome.status === 'failed'
+            ? { status: 'failed', message: outcome.message }
+            : { status: outcome.status }
+        )
+      } catch (error) {
+        const current = compactionsRef.current.get(id)
+        if (current?.status !== 'pending' || current.requestId !== requestId) return
+        publishCompaction(id, {
+          status: 'failed',
+          message:
+            error instanceof Error
+              ? `Could not summarize this conversation. ${error.message} Your messages remain intact. Try Compact context again.`
+              : 'Could not summarize this conversation. Your messages remain intact. Try Compact context again.'
+        })
+      }
+    },
+    [getResponse, publishCompaction]
+  )
+  const cancelCompaction = React.useCallback(
+    async (id: string): Promise<void> => {
+      const current = compactionsRef.current.get(id)
+      if (current?.status !== 'pending') return
+      try {
+        await window.api.sessions.cancelCompact({ sessionId: id, requestId: current.requestId })
+        // The compact result owns terminal state: cancellation may race durable acceptance.
+      } catch {
+        const latest = compactionsRef.current.get(id)
+        if (latest?.status !== 'pending' || latest.requestId !== current.requestId) return
+        publishCompaction(id, {
+          ...latest,
+          error:
+            'Could not confirm summary cancellation. Try Cancel again or wait for the summary to finish.'
+        })
+      }
+    },
+    [publishCompaction]
+  )
 
   const getSession = React.useCallback(
     (conversationId: string): ChatSession | undefined => sessionsRef.current.get(conversationId),
@@ -175,7 +258,20 @@ function useChatSessions(): ChatSessionsStore {
 
   const removeSession = React.useCallback((conversationId: string): void => {
     sessionsRef.current.delete(conversationId)
+    if (compactionsRef.current.delete(conversationId))
+      setCompactionStates(new Map(compactionsRef.current))
+    contextEstimatesRef.current.delete(conversationId)
+    setContextEstimates(new Map(contextEstimatesRef.current))
   }, [])
+
+  const setContextEstimate = React.useCallback(
+    (conversationId: string, tokens: number | null): void => {
+      if (tokens === null) contextEstimatesRef.current.delete(conversationId)
+      else contextEstimatesRef.current.set(conversationId, tokens)
+      setContextEstimates(new Map(contextEstimatesRef.current))
+    },
+    []
+  )
 
   const updateSession = React.useCallback(
     (conversationId: string, patch: (session: ChatSession) => void): void => {
@@ -210,6 +306,7 @@ function useChatSessions(): ChatSessionsStore {
       if (
         instance.stopping ||
         instance.deleting ||
+        compactionsRef.current.get(conversationId)?.status === 'pending' ||
         (currentResponse && isActiveChatResponse(currentResponse))
       )
         return
@@ -289,6 +386,9 @@ function useChatSessions(): ChatSessionsStore {
           ) {
             onResponseState({ status: 'streaming', conversationId: conversation.id })
           }
+        },
+        onContextMeasurement: (measurement) => {
+          setContextEstimate(conversation.id, measurement.estimatedInputTokens)
         }
       })
       const chat = new Chat<MicoUIMessage>({
@@ -333,7 +433,7 @@ function useChatSessions(): ChatSessionsStore {
         })
       return session
     },
-    [getResponse, onResponseState, onResponseSettled, refreshRecovery]
+    [getResponse, onResponseState, onResponseSettled, refreshRecovery, setContextEstimate]
   )
 
   React.useEffect(
@@ -354,6 +454,7 @@ function useChatSessions(): ChatSessionsStore {
         !instance ||
         instance.stopping ||
         instance.deleting ||
+        compactionsRef.current.get(conversationId)?.status === 'pending' ||
         (current && isActiveChatResponse(current))
       )
         return false
@@ -361,22 +462,24 @@ function useChatSessions(): ChatSessionsStore {
       instance.recovery = null
       instance.recoveryNeedsRefresh = false
       instance.retryInProgress = false
+      setContextEstimate(conversationId, null)
       onResponseState({ status: 'submitted', conversationId })
       void instance.chat.sendMessage({ parts })
       return true
     },
-    [getSession, getResponse, onResponseState]
+    [getSession, getResponse, onResponseState, setContextEstimate]
   )
 
   const queueFirstMessage = React.useCallback(
     (conversationId: string, parts: MicoUIMessage['parts']): void => {
       const instance = getSession(conversationId)
       if (!instance) return
+      setContextEstimate(conversationId, null)
       onResponseState({ status: 'submitted', conversationId })
       // The newly active chat must reach subscribers before its first message starts.
       setPendingMessage({ chat: instance.chat, parts })
     },
-    [getSession, onResponseState]
+    [getSession, onResponseState, setContextEstimate]
   )
 
   const stopResponse = React.useCallback(
@@ -428,10 +531,17 @@ function useChatSessions(): ChatSessionsStore {
     (conversationId: string): void => {
       if (getResponse(conversationId)?.status !== 'error') return
       const instance = getSession(conversationId)
-      if (!instance?.recovery?.canRetry) return
+      if (
+        !instance?.recovery?.canRetry ||
+        instance.stopping ||
+        instance.deleting ||
+        compactionsRef.current.get(conversationId)?.status === 'pending'
+      )
+        return
       instance.recoveryRevision = (instance.recoveryRevision ?? 0) + 1
       const revision = instance.recoveryRevision
       instance.retryInProgress = true
+      setContextEstimate(conversationId, null)
       onResponseState({ status: 'submitted', conversationId })
       void instance.chat
         .regenerate()
@@ -454,11 +564,13 @@ function useChatSessions(): ChatSessionsStore {
           void refreshRecovery(conversationId)
         })
     },
-    [getSession, getResponse, onResponseState, refreshRecovery]
+    [getSession, getResponse, onResponseState, refreshRecovery, setContextEstimate]
   )
 
   const prepareForDeletion = React.useCallback(
     async (conversationId: string): Promise<void> => {
+      if (compactionsRef.current.get(conversationId)?.status === 'pending')
+        throw new Error('Cancel the summary before deleting this conversation.')
       const instance = getSession(conversationId)
       if (!instance) return
       instance.deleting = true
@@ -497,8 +609,16 @@ function useChatSessions(): ChatSessionsStore {
     createSession,
     updateSession,
     refreshRecovery,
-    responseControl
+    responseControl,
+    contextEstimates,
+    compactions: { states: compactionStates, startCompaction, cancelCompaction }
   }
 }
 
-export { type ChatSession, type ChatSessionsStore, useChatSessions }
+export {
+  type ChatCompactionState,
+  type ChatCompactionsStore,
+  type ChatSession,
+  type ChatSessionsStore,
+  useChatSessions
+}
