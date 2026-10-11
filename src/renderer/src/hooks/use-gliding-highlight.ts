@@ -33,10 +33,20 @@ function useGlidingHighlight<T extends HTMLElement>(): UseGlidingHighlightResult
     const item = itemRefs.current.get(activeIndex)
     if (!item) return
 
-    const nextBox = { height: item.offsetHeight, top: item.offsetTop }
-    setBox((currentBox) =>
-      currentBox?.height === nextBox.height && currentBox.top === nextBox.top ? currentBox : nextBox
-    )
+    const measure = (): void => {
+      const nextBox = { height: item.offsetHeight, top: item.offsetTop }
+      setBox((currentBox) =>
+        currentBox?.height === nextBox.height && currentBox.top === nextBox.top
+          ? currentBox
+          : nextBox
+      )
+    }
+    measure()
+
+    const observer = new ResizeObserver(measure)
+    for (const element of itemRefs.current.values()) observer.observe(element)
+    if (item.offsetParent) observer.observe(item.offsetParent)
+    return () => observer.disconnect()
   }, [activeIndex])
 
   const highlight = React.useCallback((index: number): void => {
@@ -81,4 +91,4 @@ function useGlidingHighlight<T extends HTMLElement>(): UseGlidingHighlightResult
   }
 }
 
-export { useGlidingHighlight, type GlidingHighlightItemProps }
+export { type GlidingHighlightItemProps, useGlidingHighlight }

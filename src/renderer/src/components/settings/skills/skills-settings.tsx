@@ -1,4 +1,5 @@
 import { Button, InputGroup, InputGroupAddon, InputGroupInput, Separator, Spinner } from '@mico/ui'
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import type { SkillCatalog } from '@shared/ai/skills'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import { RefreshCw, ScrollText, Search } from 'lucide-react'
@@ -8,6 +9,51 @@ import { loadError, sourceLabels } from './skill-presentation'
 import './skills-settings.css'
 
 type Skill = SkillCatalog['skills'][number]
+
+interface SkillsListProps {
+  skills: Skill[]
+  onSelect: (skill: Skill, button: HTMLButtonElement) => void
+}
+
+function SkillsList({ skills, onSelect }: SkillsListProps): React.JSX.Element {
+  const { clearHighlight, getItemProps, highlightProps } = useGlidingHighlight<HTMLButtonElement>()
+
+  return (
+    <div className="relative flex flex-col gap-1" onMouseLeave={clearHighlight}>
+      <span
+        {...highlightProps}
+        className={`${highlightProps.className} inset-x-0 rounded-lg bg-accent`}
+      />
+      {skills.map((skill, index) => (
+        <button
+          {...getItemProps(index)}
+          key={skill.id}
+          aria-label={`View ${skill.name}`}
+          type="button"
+          className="relative z-10 flex min-w-0 items-start gap-3 rounded-lg p-3 text-left hover:text-accent-foreground focus-visible:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+          onClick={(event) => onSelect(skill, event.currentTarget)}
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-text-secondary">
+            <ScrollText aria-hidden="true" className="size-5" />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="break-words text-sm font-semibold text-text-primary">
+              {skill.name}
+            </span>
+            <span className="line-clamp-2 break-words text-sm text-text-secondary">
+              {skill.description}
+            </span>
+            <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-tertiary">
+              <span>{sourceLabels[skill.source]}</span>
+              {!skill.userInvocable ? <span>Model only</span> : null}
+              {skill.disableModelInvocation ? <span>Explicit invocation</span> : null}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
 
 function SkillsSettings({ initialProjectId }: { initialProjectId?: string }): React.JSX.Element {
   const [revision, setRevision] = React.useState(0)
@@ -162,37 +208,14 @@ function SkillsSettings({ initialProjectId }: { initialProjectId?: string }): Re
                 <p className="text-xs text-text-tertiary">
                   {current.catalog?.skills.length ?? 0} skills · Workspace and user skills
                 </p>
-                <div className="flex flex-col gap-1">
-                  {skills.map((skill) => (
-                    <button
-                      key={skill.id}
-                      aria-label={`View ${skill.name}`}
-                      type="button"
-                      className="flex min-w-0 items-start gap-3 rounded-lg p-3 text-left hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-                      onClick={(event) => {
-                        selectedButton.current = event.currentTarget
-                        setSelection({ projectId, skill })
-                      }}
-                    >
-                      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-text-secondary">
-                        <ScrollText aria-hidden="true" className="size-5" />
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="break-words text-sm font-semibold text-text-primary">
-                          {skill.name}
-                        </span>
-                        <span className="line-clamp-2 break-words text-sm text-text-secondary">
-                          {skill.description}
-                        </span>
-                        <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-tertiary">
-                          <span>{sourceLabels[skill.source]}</span>
-                          {!skill.userInvocable ? <span>Model only</span> : null}
-                          {skill.disableModelInvocation ? <span>Explicit invocation</span> : null}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                <SkillsList
+                  key={JSON.stringify(skills.map(({ id }) => id))}
+                  skills={skills}
+                  onSelect={(skill, button) => {
+                    selectedButton.current = button
+                    setSelection({ projectId, skill })
+                  }}
+                />
                 {!skills.length ? (
                   <p className="py-10 text-center text-sm text-text-tertiary">
                     {current.catalog?.skills.length

@@ -282,6 +282,22 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('textbox')).toHaveValue('/')
   })
 
+  it('user hovers another skill when browsing commands, then only that skill is selected', async () => {
+    const user = userEvent.setup()
+    renderWithLibrary(<ChatComposer {...props} />)
+    await user.type(screen.getByRole('textbox'), '/')
+    const review = await screen.findByRole('option', { name: /review/ })
+    const manual = screen.getByRole('option', { name: /manual/ })
+    expect(review).toHaveAttribute('aria-selected', 'true')
+
+    await user.hover(manual)
+
+    expect(review).toHaveAttribute('aria-selected', 'false')
+    expect(manual).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('textbox')).toHaveValue('/skill:manual ')
+  })
+
   it('user chooses a slash skill when pressing Tab, then arguments send with its identity', async () => {
     const user = userEvent.setup()
     const onSend = vi

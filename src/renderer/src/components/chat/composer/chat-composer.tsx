@@ -288,7 +288,8 @@ function ChatComposer({
                     role="option"
                     aria-selected={index === skills.selectedIndex}
                     tabIndex={-1}
-                    className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-accent aria-selected:bg-accent aria-selected:text-accent-foreground"
+                    className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left aria-selected:bg-accent aria-selected:text-accent-foreground"
+                    onMouseEnter={() => skills.selectIndex(index)}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => selectSkill(skill.name)}
                   >

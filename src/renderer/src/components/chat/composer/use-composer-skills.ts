@@ -77,6 +77,9 @@ function useComposerSkills(projectId: string | null | undefined, draft: string) 
     diagnostics: catalog?.diagnostics ?? [],
     matches,
     selectedIndex,
+    selectIndex: (index: number): void => {
+      setSelection({ draft, index })
+    },
     moveSelection: (direction: number): void => {
       if (matches.length)
         setSelection({
