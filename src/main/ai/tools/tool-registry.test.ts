@@ -43,8 +43,8 @@ describe('ToolRegistry', () => {
         end: trace.finishedAt
       }))
     ).toEqual([
-      { id: 'write', start: 1000, end: 1200 },
-      { id: 'read', start: 1200, end: 1400 }
+      { id: 'write', start: 1000, end: 1100 },
+      { id: 'read', start: 1200, end: 1300 }
     ])
     expect(executions[1].trace).toMatchObject({
       toolName: 'Read',
