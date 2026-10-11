@@ -40,7 +40,7 @@ describe('testChatProvider', () => {
   it('user gets only a duration when usage is missing, then no throughput appears', async () => {
     const { result } = await runProviderTest(
       { provider: 'openai-compatible', baseUrl: 'http://localhost:8000', modelId: 'model' },
-      new Response('data: [DONE]\n\n'),
+      new Response('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'),
       [0, 200]
     )
 
@@ -73,7 +73,7 @@ describe('testChatProvider', () => {
     const { fetch, result } = await runProviderTest(
       { provider: 'openai-compatible', baseUrl: 'http://localhost:8000', modelId: 'model' },
       new Response(
-        'data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: {"usage":{"completion_tokens":10}}\n\ndata: [DONE]\n\n'
+        'data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: {"usage":{"completion_tokens":10}}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
       ),
       [0, 100, 500]
     )

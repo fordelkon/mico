@@ -38,6 +38,7 @@ type ElectronChatTransportOptions = {
   sessionId: string
   getThinkingEffort: () => ThinkingSelection
   getPermissionMode?: () => PermissionMode
+  getRetryRunId?: () => string | undefined
   onStatusChange?: (status: TurnTransportStatus) => void
 }
 
@@ -45,10 +46,13 @@ const TEXT_DELTA_BATCH_DELAY_MS = 16
 const TEXT_DELTA_BATCH_MAX_CHARS = 4 * 1024
 
 class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
+  #cancellation: Promise<void> = Promise.resolve()
+  #cancelledRequestId: string | undefined
   readonly #api: ChatAPI
   readonly #sessionId: string
   readonly #getThinkingEffort: () => ThinkingSelection
   readonly #getPermissionMode: () => PermissionMode
+  readonly #getRetryRunId: () => string | undefined
   readonly #onStatusChange?: ElectronChatTransportOptions['onStatusChange']
 
   constructor(
@@ -57,6 +61,7 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
       sessionId,
       getThinkingEffort,
       getPermissionMode = () => 'default',
+      getRetryRunId = () => undefined,
       onStatusChange
     }: ElectronChatTransportOptions
   ) {
@@ -64,7 +69,17 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
     this.#sessionId = sessionId
     this.#getThinkingEffort = getThinkingEffort
     this.#getPermissionMode = getPermissionMode
+    this.#getRetryRunId = getRetryRunId
     this.#onStatusChange = onStatusChange
+  }
+
+  async retryCancellation(): Promise<void> {
+    if (this.#cancelledRequestId) this.#cancellation = this.#api.abortTurn(this.#cancelledRequestId)
+    await this.#cancellation
+  }
+
+  async awaitCancellation(): Promise<void> {
+    await this.#cancellation
   }
 
   async reconnectToStream(): Promise<ReadableStream<UIMessageChunk> | null> {
@@ -167,7 +182,9 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
 
           clearPendingTextDelta()
           stop?.()
-          void this.#api.abortTurn(requestId)
+          this.#cancelledRequestId = requestId
+          this.#cancellation = this.#api.abortTurn(requestId)
+          void this.#cancellation.catch(() => undefined)
           controller.close()
         }
 
@@ -190,7 +207,20 @@ class ElectronChatTransport implements ChatTransport<MicoUIMessage> {
             thinkingEffort,
             permissionMode
           }
-          if (options.trigger === 'regenerate-message') request.retry = true
+          if (options.trigger === 'regenerate-message') {
+            const retryRunId = this.#getRetryRunId()
+            if (!retryRunId) {
+              stop?.()
+              controller.error(
+                new Error(
+                  'Recovery details are unavailable. Reopen this conversation before retrying.'
+                )
+              )
+              return
+            }
+            request.retry = true
+            request.retryRunId = retryRunId
+          }
           void this.#api.startTurn(request).catch(() => {
             if (!active) return
 

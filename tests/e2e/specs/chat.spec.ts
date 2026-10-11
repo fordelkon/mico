@@ -109,14 +109,24 @@ test('user stops a streamed reply when reading partial output, then another mess
   )
 })
 
-test('user retries a failed reply when the provider recovers, then the user message is not duplicated', async ({
+test('user retries a failed reply when the app restarts, then the user message is not duplicated', async ({
   app,
   provider
-}) => {
+}, testInfo) => {
   provider.enqueue({ type: 'error', status: 401 })
   await composer(app.window).fill('Recover this request')
   await app.window.getByRole('button', { name: 'Send message' }).click()
   await expect(app.window.getByRole('alert')).toBeVisible()
+  await expect(app.window.getByRole('button', { name: 'Try again' })).toBeVisible()
+  const title = await app.window.locator('.conversation-row__title').first().innerText()
+  await app.relaunch()
+  await app.window
+    .getByLabel('Sidebar', { exact: true })
+    .getByRole('button', { name: title, exact: true })
+    .click()
+  await expect(app.window.getByRole('alert')).toBeVisible()
+  await expect(app.window.getByRole('button', { name: 'Try again' })).toBeVisible()
+  await app.window.screenshot({ path: testInfo.outputPath('failed-401-restored.png') })
   provider.enqueue({ type: 'text', text: 'Recovered answer.' })
   await app.window.getByRole('button', { name: 'Try again' }).click()
   await waitForReply(app.window, assistantMessages(app.window).last())
@@ -125,4 +135,39 @@ test('user retries a failed reply when the provider recovers, then the user mess
     app.window.getByTestId('answer-content').filter({ hasText: 'Recover this request' })
   ).toHaveCount(1)
   await expect(assistantMessages(app.window).last()).toContainText('Recovered answer.')
+  await app.window.screenshot({ path: testInfo.outputPath('failed-401-recovered.png') })
+})
+
+test('user stops a response when waiting to retry, then only the next message reaches the provider', async ({
+  app,
+  provider
+}, testInfo) => {
+  const rejected = provider.enqueue({ type: 'error', status: 503, retryAfter: '4' })
+  await composer(app.window).fill('Stop this retry')
+  await app.window.getByRole('button', { name: 'Send message' }).click()
+  await rejected.closed
+  const retryDeadline = Date.now() + 4_000
+  await expect(
+    app.window.getByRole('status').filter({ hasText: 'Connection interrupted.' })
+  ).toBeVisible()
+  await app.window.screenshot({ path: testInfo.outputPath('retry-after-wait.png') })
+  await app.window.getByRole('button', { name: 'Stop response' }).click()
+  await expect(app.window.getByRole('button', { name: 'Stop response' })).toBeHidden()
+  await expect(composer(app.window)).toBeEditable()
+  provider.enqueue({ type: 'text', text: 'The next message completed.' })
+  await expect(await sendUserMessage(app.window, 'Continue after cancelled retry')).toContainText(
+    'The next message completed.'
+  )
+  // Observe real requests past the original deadline; an immediate count cannot prove cancellation.
+  await expect
+    .poll(() => ({
+      deadlinePassed: Date.now() >= retryDeadline,
+      cancelledRequests: provider.requests.filter(
+        (request) =>
+          request.messages.findLast(({ role }) => role === 'user')?.content === 'Stop this retry'
+      ).length
+    }))
+    .toEqual({ deadlinePassed: true, cancelledRequests: 1 })
+  expect(provider.requests).toHaveLength(2)
+  await app.window.screenshot({ path: testInfo.outputPath('retry-after-stopped-next-turn.png') })
 })

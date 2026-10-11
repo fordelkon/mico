@@ -52,6 +52,7 @@ type LoadEventRow = {
   run_id: string
   kind:
     | 'assistant_output_finalized'
+    | 'assistant_output_snapshot'
     | 'agent_step_recorded'
     | 'tool_trace_recorded'
     | 'tool_trace_summary_recorded'
@@ -166,7 +167,30 @@ function assembleTranscript(rows: LoadEventRow[]): VisibleMessage[] {
   for (const row of rows) {
     if (row.kind === 'tool_trace_summary_recorded') parseToolTraceSummaryPayload(row.payload_json)
   }
+  const outputRuns = new Set(
+    rows
+      .filter(
+        (row) =>
+          row.kind === 'assistant_output_finalized' || row.kind === 'assistant_output_snapshot'
+      )
+      .map((row) => row.run_id)
+  )
+  const fallbackRuns = new Set<string>()
   return rows.flatMap((row) => {
+    if (
+      row.kind === 'tool_trace_recorded' &&
+      !outputRuns.has(row.run_id) &&
+      !fallbackRuns.has(row.run_id)
+    ) {
+      fallbackRuns.add(row.run_id)
+      return [
+        {
+          role: 'assistant' as const,
+          parts: activityPartsByRun.get(row.run_id) ?? [],
+          metadata: { completionState: 'stopped' as const }
+        }
+      ]
+    }
     if (
       row.kind === 'agent_step_recorded' ||
       row.kind === 'tool_trace_recorded' ||
@@ -174,7 +198,8 @@ function assembleTranscript(rows: LoadEventRow[]): VisibleMessage[] {
     )
       return []
     const message = parseMessagePayload(row.payload_json).message
-    if (row.kind !== 'assistant_output_finalized') return [message]
+    if (row.kind !== 'assistant_output_finalized' && row.kind !== 'assistant_output_snapshot')
+      return [message]
     // Finalized outputs that embed their tool traces already carry the exact
     // stream order; event reassembly only fills legacy or interrupted runs.
     if (message.parts.some((part) => part.type === 'tool-trace')) return [message]

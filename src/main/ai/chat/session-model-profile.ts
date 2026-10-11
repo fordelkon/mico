@@ -1,16 +1,15 @@
 import { createHash } from 'node:crypto'
 
 import {
-  resolveThinkingSelection,
   type ChatProvider,
   type ChatProviderConfiguration,
-  type ModelReasoningCapabilities
+  type ModelReasoningCapabilities,
+  resolveThinkingSelection
 } from '@mico/ai-providers'
 import type { ExecutionProfileSnapshot } from '@shared/data/schemas/session'
-
+import type { SessionRuntimeService } from '../sessions/session-runtime-service'
 import type { ChatProviderResolver } from './chat-provider-resolver'
 import { NoModelSelectedError } from './turn-failure'
-import type { SessionRuntimeService } from '../sessions/session-runtime-service'
 
 type SessionModelProfileDependencies = {
   resolveProvider: ChatProviderResolver
@@ -67,6 +66,29 @@ class SessionModelProfile {
     const provider = this.#resolveProvider(modelEntryId)
     if (!provider) throw new NoModelSelectedError()
     return { provider, configuration, modelEntryId }
+  }
+
+  resolveForProfile(profile: ExecutionProfileSnapshot): SessionModelSelection {
+    const configuration = this.#getChatConfigurationForModelEntry?.(profile.modelEntryId)
+    if (!configuration)
+      throw new NoModelSelectedError(
+        'The original model is unavailable. Restore its provider settings before retrying this turn.'
+      )
+    const current = this.toProfile(configuration, profile.modelEntryId, profile.thinkingEffort)
+    if (
+      current.providerId !== profile.providerId ||
+      current.modelId !== profile.modelId ||
+      current.configurationDigest !== profile.configurationDigest
+    )
+      throw new NoModelSelectedError(
+        'The original provider configuration changed. Restore its endpoint and model settings before retrying this turn.'
+      )
+    const provider = this.#resolveProvider(profile.modelEntryId)
+    if (!provider)
+      throw new NoModelSelectedError(
+        'The original model is unavailable. Restore its provider settings before retrying this turn.'
+      )
+    return { provider, configuration, modelEntryId: profile.modelEntryId }
   }
 
   getCapabilities(sessionId?: string): Promise<ModelReasoningCapabilities | null> {
@@ -140,4 +162,4 @@ async function resolveEffectiveThinkingEffort(
   }
 }
 
-export { SessionModelProfile, resolveEffectiveThinkingEffort }
+export { resolveEffectiveThinkingEffort, SessionModelProfile }

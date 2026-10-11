@@ -44,6 +44,7 @@ function createTransport(getThinkingEffort: () => ThinkingSelection = () => 'def
   const api = new FakeChatAPI()
   const transport = new ElectronChatTransport(api, {
     sessionId: 'conversation-1',
+    getRetryRunId: () => 'failed-run',
     getThinkingEffort
   })
   return { api, transport }

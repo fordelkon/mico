@@ -171,6 +171,8 @@ if (gotTheLock) {
       await startup
       services?.tray.beginQuit()
       await services?.mainWindow.prepareToQuit()
+      services?.turnExecutor.dispose()
+      await services?.turnExecutor.drain()
     },
     dispose: () => {
       try {

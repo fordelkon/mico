@@ -25,6 +25,10 @@ type ToolRegistryOptions = ToolPermissionOptions & {
   authorizedSkillIds?: readonly string[]
 }
 type ToolExecution = { result: ChatProviderToolResultPart; trace: ToolExecutionTrace }
+type ToolExecutionCallbacks = {
+  onExecutionStarted?: (call: ToolCall, startedAt: number) => void
+  onExecutionSettled?: (execution: ToolExecution) => void
+}
 
 // A UTF-16 slice may encode to up to four bytes per code unit. Keep each IPC
 // fragment safely below the shared 64 KiB payload ceiling while preserving all
@@ -70,12 +74,73 @@ class ToolRegistry {
   async execute(
     call: ToolCall,
     signal: AbortSignal,
-    onOutputDelta?: (delta: ToolOutputDeltaData) => void
+    onOutputDelta?: (delta: ToolOutputDeltaData) => void,
+    callbacks?: ToolExecutionCallbacks
   ): Promise<ToolExecution> {
     const startedAt = Date.now()
     const snapshot = { ...call, input: freezeInput(call.input) }
-    const result = await this.executeCall(snapshot, signal, onOutputDelta)
-    return {
+    const hookContext = { ...snapshot, cwd: this.#cwd, signal }
+    const hooks = this.#options.hooks ?? {}
+    signal.throwIfAborted()
+    const tool = this.#tools.get(call.toolName)
+    let prepared: Awaited<ReturnType<RegisteredAgentTool['prepare']>> | undefined
+    let result: ChatProviderToolResultPart | undefined
+    try {
+      if (!tool) result = this.errorResult(call, `Tool "${call.toolName}" is unavailable.`)
+      else {
+        prepared = await tool.prepare(snapshot.input, {
+          cwd: this.#cwd,
+          signal,
+          onOutputDelta: (delta: ToolOutputDelta) => {
+            for (let offset = 0; offset < delta.delta.length; offset += MAX_OUTPUT_DELTA_CHARS)
+              onOutputDelta?.({
+                toolCallId: call.toolCallId,
+                toolName: call.toolName,
+                stream: delta.stream,
+                delta: delta.delta.slice(offset, offset + MAX_OUTPUT_DELTA_CHARS)
+              })
+          }
+        })
+        const askReason = await runPreToolUse(hooks, hookContext)
+        await authorizeTool(
+          snapshot,
+          this.#cwd,
+          signal,
+          prepared.operation,
+          this.#options,
+          askReason
+        )
+        signal.throwIfAborted()
+      }
+    } catch (error) {
+      if (signal.aborted) throw error
+      result = this.errorResult(
+        call,
+        error instanceof Error ? error.message : 'Tool validation failed.'
+      )
+    }
+    if (!result && prepared) {
+      callbacks?.onExecutionStarted?.(snapshot, Date.now())
+      try {
+        const output = await prepared.execute()
+        result = {
+          type: 'tool-result',
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          output: output.output,
+          isError: false
+        }
+      } catch (error) {
+        // An interrupted side effect has no known result; leave its durable start unsettled.
+        if (signal.aborted) throw error
+        result = this.errorResult(
+          call,
+          error instanceof Error ? error.message : 'Tool execution failed.'
+        )
+      }
+    }
+    if (!result) throw new Error('Tool execution produced no result.')
+    const execution: ToolExecution = {
       result,
       trace: {
         toolCallId: snapshot.toolCallId,
@@ -87,54 +152,10 @@ class ToolRegistry {
         finishedAt: Date.now()
       }
     }
-  }
-
-  private async executeCall(
-    call: ToolCall,
-    signal: AbortSignal,
-    onOutputDelta?: (delta: ToolOutputDeltaData) => void
-  ): Promise<ChatProviderToolResultPart> {
-    signal.throwIfAborted()
-    const tool = this.#tools.get(call.toolName)
-    if (!tool) return this.errorResult(call, `Tool "${call.toolName}" is unavailable.`)
-    // Neither hooks nor an approval host may change the operation after validation.
-    const snapshot = call
-    const hookContext = { ...snapshot, cwd: this.#cwd, signal }
-    const hooks = this.#options.hooks ?? {}
-    try {
-      signal.throwIfAborted()
-      const prepared = await tool.prepare(snapshot.input, {
-        cwd: this.#cwd,
-        signal,
-        onOutputDelta: (delta: ToolOutputDelta) => {
-          if (!delta.delta) return
-          for (let offset = 0; offset < delta.delta.length; offset += MAX_OUTPUT_DELTA_CHARS)
-            onOutputDelta?.({
-              toolCallId: call.toolCallId,
-              toolName: call.toolName,
-              stream: delta.stream,
-              delta: delta.delta.slice(offset, offset + MAX_OUTPUT_DELTA_CHARS)
-            })
-        }
-      })
-      const askReason = await runPreToolUse(hooks, hookContext)
-      await authorizeTool(snapshot, this.#cwd, signal, prepared.operation, this.#options, askReason)
-      signal.throwIfAborted()
-      const result = await prepared.execute()
-      await runPostToolUse(hooks, { ...hookContext, output: result.output, isError: false })
-      return {
-        toolCallId: call.toolCallId,
-        toolName: call.toolName,
-        output: result.output,
-        isError: false,
-        type: 'tool-result'
-      }
-    } catch (error) {
-      if (signal.aborted) throw error
-      const output = error instanceof Error ? error.message : 'Tool execution failed.'
-      await runPostToolUse(hooks, { ...hookContext, output, isError: true })
-      return this.errorResult(call, output)
-    }
+    // Durability failures escape without becoming fabricated tool observations.
+    callbacks?.onExecutionSettled?.(execution)
+    await runPostToolUse(hooks, { ...hookContext, output: result.output, isError: result.isError })
+    return execution
   }
 
   /**
@@ -146,21 +167,29 @@ class ToolRegistry {
   async executeBatch(
     calls: readonly ToolCall[],
     signal: AbortSignal,
-    onOutputDelta?: (delta: ToolOutputDeltaData) => void
+    onOutputDelta?: (delta: ToolOutputDeltaData) => void,
+    callbacks?: ToolExecutionCallbacks
   ): Promise<ToolExecution[]> {
     const results: ToolExecution[] = []
     for (const batch of partitionCalls(calls, (call) => this.isConcurrencySafe(call))) {
       if (batch.isConcurrencySafe) {
         signal.throwIfAborted()
-        await Promise.all(
+        const settlements = await Promise.allSettled(
           batch.calls.map(async (call) => {
-            results[call.index] = await this.execute(call.toolCall, signal, onOutputDelta)
+            results[call.index] = await this.execute(
+              call.toolCall,
+              signal,
+              onOutputDelta,
+              callbacks
+            )
           })
         )
+        const rejected = settlements.find((outcome) => outcome.status === 'rejected')
+        if (rejected?.status === 'rejected') throw rejected.reason
       } else {
         for (const { index, toolCall } of batch.calls) {
           signal.throwIfAborted()
-          results[index] = await this.execute(toolCall, signal, onOutputDelta)
+          results[index] = await this.execute(toolCall, signal, onOutputDelta, callbacks)
         }
       }
     }
@@ -206,4 +235,4 @@ function partitionCalls(
   }, [])
 }
 
-export { type ToolCall, type ToolExecution, ToolRegistry }
+export { type ToolCall, type ToolExecution, type ToolExecutionCallbacks, ToolRegistry }

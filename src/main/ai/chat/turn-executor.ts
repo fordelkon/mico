@@ -20,11 +20,15 @@ type ActiveTurn = {
   ownerId: string
   requestId: string
   terminal: boolean
+  canPersist: boolean
 }
 
 type TurnExecutorOptions = {
   profiles: SessionModelProfile
-  runtime?: Pick<SessionRuntimeService, 'beginTurn' | 'renameSessionIfCurrentTitle'>
+  runtime?: Pick<
+    SessionRuntimeService,
+    'beginTurn' | 'renameSessionIfCurrentTitle' | 'getRetryProfile'
+  >
   toolHooks?: ToolHooks
   maxAssistantTextChars?: number
   maxAttempts?: number
@@ -36,26 +40,12 @@ const DEFAULT_RETRY_DELAY_MS = 1_000
 // The same ceiling must bound persisted text and renderer deltas so either process cannot grow alone.
 const DEFAULT_MAX_ASSISTANT_TEXT_CHARS = 256 * 1024
 
-function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted || delayMs === 0) return Promise.resolve()
-
-  return new Promise((resolve) => {
-    const timeoutId = setTimeout(resolve, delayMs)
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timeoutId)
-        resolve()
-      },
-      { once: true }
-    )
-  })
-}
-
 class TurnExecutor {
   private readonly permissions = new PermissionRequests()
   private readonly titleGenerator: TitleGenerator
   private readonly activeTurns = new Map<string, ActiveTurn>()
+  private readonly executions = new Map<Promise<void>, ActiveTurn>()
+  private isDisposed = false
   private readonly maxAttempts: number
   private readonly maxAssistantTextChars: number
   private readonly retryDelayMs: number
@@ -80,7 +70,9 @@ class TurnExecutor {
     this.retryDelayMs = retryDelayMs
     this.titleGenerator = new TitleGenerator({
       renameIfCurrentTitle: (sessionId, currentTitle, title) =>
-        runtime?.renameSessionIfCurrentTitle(sessionId, currentTitle, title) ?? null
+        this.isDisposed
+          ? null
+          : (runtime?.renameSessionIfCurrentTitle(sessionId, currentTitle, title) ?? null)
     })
   }
 
@@ -89,7 +81,11 @@ class TurnExecutor {
     emit: (event: TurnStreamEvent) => void,
     onTitleUpdated?: (update: SessionTitleUpdate) => void
   ): void {
-    this.abortTurn({ ownerId, requestId: request.requestId })
+    if (this.isDisposed)
+      throw new Error('The application is shutting down. New turns cannot start.')
+    for (const turn of this.executions.values()) {
+      if (turn.ownerId === ownerId && turn.requestId === request.requestId) this.cancelTurn(turn)
+    }
 
     const key = this.getTurnKey(ownerId, request.requestId)
     const turn = {
@@ -99,15 +95,27 @@ class TurnExecutor {
       handle: null,
       ownerId,
       requestId: request.requestId,
-      terminal: false
+      terminal: false,
+      canPersist: true
     }
     this.activeTurns.set(key, turn)
-    void this.execute({ key, request, turn, emit, onTitleUpdated })
+    const execution = this.execute({ key, request, turn, emit, onTitleUpdated })
+    this.executions.set(execution, turn)
+    void execution.then(
+      () => this.executions.delete(execution),
+      (error) => {
+        this.executions.delete(execution)
+        console.error('Failed to settle chat turn', error)
+      }
+    )
   }
 
-  abortTurn({ ownerId, requestId }: { ownerId: string; requestId: string }): void {
-    const turn = this.activeTurns.get(this.getTurnKey(ownerId, requestId))
-    if (turn) this.cancelTurn(turn)
+  async abortTurn({ ownerId, requestId }: { ownerId: string; requestId: string }): Promise<void> {
+    const matching = [...this.executions].filter(
+      ([, turn]) => turn.ownerId === ownerId && turn.requestId === requestId
+    )
+    for (const [, turn] of matching) this.cancelTurn(turn)
+    await Promise.all(matching.map(([execution]) => execution))
   }
 
   abortAllTurns(ownerId: string): void {
@@ -122,7 +130,26 @@ class TurnExecutor {
     this.permissions.respond(ownerId, response)
   }
 
+  async drain(timeoutMs = 5_000): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        Promise.allSettled(this.executions.keys()),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            console.warn('Chat shutdown drain timed out; unresolved tool outcomes remain unknown.')
+            resolve()
+          }, timeoutMs)
+        })
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+      for (const turn of this.executions.values()) turn.canPersist = false
+    }
+  }
+
   dispose(): void {
+    this.isDisposed = true
     for (const turn of this.activeTurns.values()) {
       this.cancelTurn(turn)
     }
@@ -141,9 +168,14 @@ class TurnExecutor {
     emit: (event: TurnStreamEvent) => void
     onTitleUpdated?: (update: SessionTitleUpdate) => void
   }): Promise<void> {
-    let receivedChunk = false
     try {
-      const selection = this.profiles.resolveForSession(request.sessionId)
+      const isRetry = request.retry === true || request.retryRunId !== undefined
+      const retryProfile = isRetry
+        ? this.runtime?.getRetryProfile(request.sessionId, request.retryRunId)
+        : undefined
+      const selection = retryProfile
+        ? this.profiles.resolveForProfile(retryProfile)
+        : this.profiles.resolveForSession(request.sessionId)
       const provider = selection.provider
       if (!provider) throw new NoModelSelectedError()
 
@@ -153,11 +185,13 @@ class TurnExecutor {
       if (this.runtime) {
         const { configuration, modelEntryId } = selection
         if (!configuration || !modelEntryId) throw new NoModelSelectedError()
-        if (!request.retry) {
+        if (!isRetry) {
           effectiveThinkingEffort = await resolveEffectiveThinkingEffort(
             provider,
             requestedThinkingEffort
           )
+          turn.controller.signal.throwIfAborted()
+          if (!turn.canPersist) throw new Error('Turn setup cannot continue after shutdown.')
           this.profiles.persistSessionProfile(
             request.sessionId,
             this.profiles.toProfile(configuration, modelEntryId, requestedThinkingEffort)
@@ -168,13 +202,16 @@ class TurnExecutor {
           requestId: request.requestId,
           userMessage: request.userMessage,
           profile: this.profiles.toProfile(configuration, modelEntryId, effectiveThinkingEffort),
-          retry: request.retry === true
+          retry: isRetry,
+          retryRunId: request.retryRunId
         })
         turn.handle = handle
         effectiveThinkingEffort = handle.profile.thinkingEffort
       }
 
-      const context = await prepareTurnContext(request.userMessage, handle)
+      turn.controller.signal.throwIfAborted()
+      const context = await prepareTurnContext(request.userMessage, handle, turn.controller.signal)
+      turn.controller.signal.throwIfAborted()
       const { cwd, skills, authorizedSkillIds } = context
       if (handle?.shouldGenerateTitle)
         this.titleGenerator.maybeGenerate({
@@ -208,75 +245,66 @@ class TurnExecutor {
               )
           })
         : undefined
-      const messages = context.messages(registry?.definitions)
+      const messages = context.history
 
-      for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
-        try {
-          const runnerInput: Parameters<ToolAgentRunner['run']>[0] = {
-            provider,
-            messages,
-            thinkingEffort: effectiveThinkingEffort,
-            signal: turn.controller.signal,
-            emit: (chunk) => {
-              if (turn.controller.signal.aborted) return
-              receivedChunk = true
-              const visibleChunk = turn.assembler.observeChunk(chunk)
-              if (visibleChunk)
-                emit({ type: 'chunk', requestId: request.requestId, chunk: visibleChunk })
-            }
+      {
+        const runnerInput: Parameters<ToolAgentRunner['run']>[0] = {
+          provider,
+          messages,
+          prepareMessages: (history) => context.messages(history, registry?.definitions),
+          maxAttempts: this.maxAttempts,
+          retryDelayMs: this.retryDelayMs,
+          onRetry: (event) => emit({ type: 'retry', requestId: request.requestId, ...event }),
+          thinkingEffort: effectiveThinkingEffort,
+          signal: turn.controller.signal,
+          emit: (chunk) => {
+            if (turn.controller.signal.aborted) return
+            const visibleChunk = turn.assembler.observeChunk(chunk)
+            if (visibleChunk)
+              emit({ type: 'chunk', requestId: request.requestId, chunk: visibleChunk })
           }
-          if (registry) runnerInput.registry = registry
-          if (handle) {
-            runnerInput.onStep = (step) => handle.recordStep(step)
-            runnerInput.onToolResult = (trace) => {
-              turn.assembler.recordTrace(trace)
-              handle.recordTrace(trace)
-            }
-          }
-          await new ToolAgentRunner().run(runnerInput)
-
-          if (!turn.controller.signal.aborted) {
-            if (handle) {
-              const assistant = turn.assembler.buildMessage('complete')
-              if (assistant) handle.complete(assistant)
-            }
-            // A completed turn is durable before its UI gains completion-only actions.
-            emit({
-              type: 'chunk',
-              requestId: request.requestId,
-              chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
-            })
-            this.emitTerminal(turn, { type: 'finish', requestId: request.requestId })
-          }
-          return
-        } catch (error) {
-          const providerError =
-            error instanceof Error ? error : new Error('Unknown chat provider error')
-          const canRetry =
-            !turn.controller.signal.aborted &&
-            !receivedChunk &&
-            attempt < this.maxAttempts &&
-            toTurnFailure(providerError).retryable
-
-          if (!canRetry) throw providerError
-
-          const retryDelayMs = this.retryDelayMs * 2 ** (attempt - 1)
-          emit({
-            type: 'retry',
-            requestId: request.requestId,
-            attempt: attempt + 1,
-            maxAttempts: this.maxAttempts,
-            retryDelayMs
-          })
-          await waitForRetry(retryDelayMs, turn.controller.signal)
         }
+        if (registry) runnerInput.registry = registry
+        if (handle) {
+          const persist = (action: () => void): void => {
+            if (turn.canPersist) action()
+          }
+          runnerInput.journal = {
+            recordModelStep: (step) => persist(() => handle.recordModelStep(step)),
+            recordToolExecutionStarted: (execution) => {
+              turn.controller.signal.throwIfAborted()
+              if (!turn.canPersist) throw new Error('Tool execution cannot start after shutdown.')
+              handle.recordToolExecutionStarted(execution)
+            },
+            recordToolExecutionSettled: (execution) =>
+              persist(() => handle.recordToolExecutionSettled(execution))
+          }
+          runnerInput.onStep = (step) => persist(() => handle.recordStep(step))
+          runnerInput.onToolResult = (trace) => turn.assembler.recordTrace(trace)
+        }
+        await new ToolAgentRunner().run(runnerInput)
+
+        if (!turn.controller.signal.aborted) {
+          if (handle) {
+            const assistant = turn.assembler.buildMessage('complete')
+            if (assistant) handle.complete(assistant)
+          }
+          // A completed turn is durable before its UI gains completion-only actions.
+          emit({
+            type: 'chunk',
+            requestId: request.requestId,
+            chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
+          })
+          this.emitTerminal(turn, { type: 'finish', requestId: request.requestId })
+        }
+        return
       }
     } catch (error) {
       if (!turn.controller.signal.aborted) {
         const { failure } = toTurnFailure(
           error instanceof Error ? error : new Error('Unknown chat provider error')
         )
-        turn.handle?.fail(failure)
+        if (turn.canPersist) turn.handle?.fail(failure, turn.assembler.buildMessage('stopped'))
         this.emitTerminal(turn, {
           type: 'error',
           requestId: request.requestId,
@@ -284,6 +312,7 @@ class TurnExecutor {
         })
       }
     } finally {
+      if (turn.controller.signal.aborted && turn.canPersist) this.cancelPersistedRun(turn)
       if (this.activeTurns.get(key) === turn) this.activeTurns.delete(key)
     }
   }
@@ -301,7 +330,6 @@ class TurnExecutor {
   private cancelTurn(turn: ActiveTurn): void {
     if (turn.terminal) return
     turn.controller.abort()
-    this.cancelPersistedRun(turn)
     this.emitTerminal(turn, { type: 'cancelled', requestId: turn.requestId })
   }
 

@@ -44,7 +44,7 @@ describe('Anthropic-compatible provider', () => {
   it('user sees Messages on a versioned root when streaming starts, then it stays', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+      .mockImplementation(async () => new Response('event: message_stop\ndata: {}\n\n'))
     const provider = createChatProvider(
       providerConfig({ baseUrl: 'https://gateway.example.com/proxy/v2' }),
       streamDependencies(fetch)
@@ -86,7 +86,7 @@ describe('Anthropic-compatible provider', () => {
   it('user gets tool history replayed when a chat resumes, then results carry is_error', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+      .mockImplementation(async () => new Response('event: message_stop\ndata: {}\n\n'))
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
     await collect(
@@ -175,9 +175,9 @@ describe('Anthropic-compatible provider', () => {
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
-    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toThrow(
-      'incomplete tool call'
-    )
+    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toMatchObject({
+      kind: 'incomplete_stream'
+    })
   })
 
   it('user gets a rejected stream when a tool call is cut off, then the error says why', async () => {
@@ -190,17 +190,17 @@ describe('Anthropic-compatible provider', () => {
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
-    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toThrow(
-      'incomplete tool call'
-    )
+    await expect(collect(await provider.stream(streamInput('Read.')))).rejects.toMatchObject({
+      kind: 'incomplete_stream'
+    })
   })
 
-  it('user sees a normal finish when the endpoint sends [DONE], then only text streams', async () => {
+  it('user sees a normal finish when the endpoint sends message_stop, then only text streams', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(
         new Response(
-          'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"Done."}}\n\ndata: [DONE]\n\n'
+          'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"Done."}}\n\nevent: message_stop\ndata: {}\n\n'
         )
       )
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
@@ -218,7 +218,7 @@ describe('Anthropic-compatible provider', () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 401, statusText: 'Unauthorized' }))
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+      .mockImplementation(async () => new Response('event: message_stop\ndata: {}\n\n'))
     const provider = createChatProvider(
       providerConfig({ baseUrl: 'https://example.com', apiKey: 'provider-key', modelId: 'model' }),
       streamDependencies(fetch)
@@ -267,7 +267,7 @@ describe('Anthropic-compatible provider', () => {
   it('user gets no thinking field when thinking is disabled, then the request omits it', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+      .mockImplementation(async () => new Response('event: message_stop\ndata: {}\n\n'))
     const provider = createChatProvider(providerConfig(), streamDependencies(fetch))
 
     await collect(await provider.stream(streamInput()))
@@ -324,7 +324,7 @@ describe('Anthropic-compatible provider', () => {
   it('user gets adaptive thinking when a model is unknown, then the request probes it', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+      .mockImplementation(async () => new Response('event: message_stop\ndata: {}\n\n'))
     const provider = createChatProvider(
       providerConfig({ modelId: 'third-party-reasoner' }),
       streamDependencies(fetch)
@@ -341,7 +341,7 @@ describe('Anthropic-compatible provider', () => {
       const fetch = vi
         .fn<typeof globalThis.fetch>()
         .mockResolvedValueOnce(new Response('', { status }))
-        .mockResolvedValue(new Response('event: message_stop\ndata: {}\n\n'))
+        .mockImplementation(async () => new Response('event: message_stop\ndata: {}\n\n'))
       const provider = createChatProvider(
         providerConfig({
           baseUrl: 'https://gateway.example',

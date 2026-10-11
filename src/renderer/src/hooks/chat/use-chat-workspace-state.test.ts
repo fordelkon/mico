@@ -38,6 +38,13 @@ class FakeChatAPI implements ChatAPI {
     load: async () => ({
       id: 'session-1',
       title: 'Saved chat',
+      recovery: {
+        runId: 'failed-run',
+        turnId: 'turn',
+        status: 'failed' as const,
+        failure: { code: 'provider_error' as const, message: 'Offline' },
+        canRetry: true
+      },
       defaultProfile: null,
       createdAt: 1,
       updatedAt: 2,
@@ -108,6 +115,23 @@ function exposeApi(chat: FakeChatAPI): void {
 function renderWorkspaceState(configure?: (api: FakeChatAPI) => void) {
   const api = new FakeChatAPI()
   configure?.(api)
+  const load = api.sessions.load
+  api.sessions.load = async (id) => {
+    const loaded = await load(id)
+    return {
+      ...loaded,
+      recovery:
+        loaded.recovery === undefined
+          ? {
+              runId: 'failed-run',
+              turnId: 'turn',
+              status: 'failed' as const,
+              failure: { code: 'provider_error' as const, message: 'Offline' },
+              canRetry: true
+            }
+          : loaded.recovery
+    }
+  }
   exposeApi(api)
   const rendered = renderHook(() => useChatWorkspaceState())
   return { api, ...rendered }
@@ -122,6 +146,201 @@ afterEach(() => {
 })
 
 describe('useChatWorkspaceState', () => {
+  it('user deletes a responding conversation when cancellation is pending, then sending stays blocked through deletion', async () => {
+    const stopped = Promise.withResolvers<void>()
+    const deleted = Promise.withResolvers<void>()
+    const { api, result } = renderWorkspaceState((api) => {
+      api.abortTurn = () => stopped.promise
+      api.sessions.delete = () => deleted.promise
+    })
+    act(() => void result.current.responses.sendMessage({ text: 'First', documents: [] }))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    let deleting!: Promise<void>
+    act(() => {
+      deleting = result.current.deleteConversation('session-new')
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
+      ).toBe(false)
+    })
+    await act(async () => {
+      stopped.resolve()
+      await stopped.promise
+    })
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
+      ).toBe(false)
+    })
+    expect(api.startedRequests).toHaveLength(1)
+    await act(async () => {
+      deleted.resolve()
+      await deleting
+    })
+    expect(result.current.session.activeConversation).toBeNull()
+  })
+  it('user starts a new response after one cancellation confirmation when another returns late, then the new response stays active', async () => {
+    const first = Promise.withResolvers<void>()
+    const late = Promise.withResolvers<void>()
+    let aborts = 0
+    const { api, result } = renderWorkspaceState((api) => {
+      api.abortTurn = async () => {
+        aborts += 1
+        if (aborts === 1) throw new Error('IPC unavailable')
+        await (aborts === 2 ? first.promise : late.promise)
+      }
+      const load = api.sessions.load
+      api.sessions.load = async (id) => ({ ...(await load(id)), recovery: null })
+    })
+    act(() => void result.current.responses.sendMessage({ text: 'First', documents: [] }))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() => result.current.responses.stopResponse())
+    await waitFor(() => expect(result.current.responses.response.status).toBe('error'))
+    act(() => result.current.session.selectConversation('session-new'))
+    await waitFor(() => expect(aborts).toBe(2))
+    act(() => result.current.session.selectConversation('session-new'))
+    await waitFor(() => expect(aborts).toBe(3))
+    await act(async () => {
+      first.resolve()
+      await first.promise
+    })
+    await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'New request', documents: [] })
+      ).toBe(true)
+    })
+    await waitFor(() => expect(api.startedRequests).toHaveLength(2))
+    await act(async () => {
+      late.resolve()
+      await late.promise
+    })
+    expect(result.current.responses.response.status).toBe('submitted')
+    expect(result.current.session.activeChat?.messages.at(-1)).toMatchObject({
+      role: 'user',
+      parts: [{ type: 'text', text: 'New request' }]
+    })
+  })
+
+  it('user reopens after failed cancellation acknowledgement when confirmation succeeds, then sending is unlocked', async () => {
+    let aborts = 0
+    const { api, result } = renderWorkspaceState((api) => {
+      api.abortTurn = async () => {
+        aborts += 1
+        if (aborts === 1) throw new Error('IPC unavailable')
+      }
+      const load = api.sessions.load
+      api.sessions.load = async (id) => ({ ...(await load(id)), recovery: null })
+    })
+    act(() => void result.current.responses.sendMessage({ text: 'First', documents: [] }))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() => result.current.responses.stopResponse())
+    await waitFor(() => expect(result.current.responses.response.status).toBe('error'))
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
+      ).toBe(false)
+    })
+    act(() => result.current.session.selectConversation('session-new'))
+    await waitFor(() => expect(aborts).toBe(2))
+    await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
+      ).toBe(true)
+    })
+  })
+
+  it('user sends again when an earlier retry load returns, then new messages remain active', async () => {
+    const deferred = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['load']>>>()
+    let loads = 0
+    const { api, result } = renderWorkspaceState((api) => {
+      const load = api.sessions.load
+      api.sessions.load = async (id) => {
+        loads += 1
+        if (loads === 2) return deferred.promise
+        return load(id)
+      }
+    })
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.responses.response.status).toBe('error'))
+    act(() => result.current.responses.retryResponse())
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() => api.emit({ type: 'finish', requestId: api.startedRequests[0].requestId }))
+    await waitFor(() => expect(loads).toBe(2))
+    await act(async () => {
+      await result.current.responses.sendMessage({ text: 'New prompt', documents: [] })
+    })
+    await act(async () => {
+      deferred.resolve({
+        id: 'session-1',
+        title: 'Saved',
+        defaultProfile: null,
+        createdAt: 1,
+        updatedAt: 1,
+        lastActivityAt: 1,
+        recovery: null,
+        messages: [{ role: 'assistant', parts: [{ type: 'text', text: 'Old restored reply' }] }]
+      })
+    })
+    await waitFor(() => expect(api.startedRequests).toHaveLength(2))
+    expect(result.current.responses.response.status).toBe('submitted')
+    expect(result.current.session.activeChat?.messages.at(-1)?.parts).toEqual([
+      { type: 'text', text: 'New prompt' }
+    ])
+  })
+  it('user retries when error recovery loading fails, then cached reselect restores saved messages', async () => {
+    let loads = 0
+    const { api, result } = renderWorkspaceState((api) => {
+      const load = api.sessions.load
+      api.sessions.load = async (id) => {
+        loads += 1
+        if (loads === 2) throw new Error('Storage unavailable')
+        const saved = await load(id)
+        return loads > 2
+          ? {
+              ...saved,
+              recovery: null,
+              messages: [
+                { role: 'user', parts: [{ type: 'text', text: 'Saved prompt' }] },
+                { role: 'assistant', parts: [{ type: 'text', text: 'Durable answer' }] }
+              ]
+            }
+          : saved
+      }
+    })
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.responses.response.status).toBe('error'))
+    act(() => result.current.responses.retryResponse())
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() =>
+      api.emit({
+        type: 'error',
+        requestId: api.startedRequests[0].requestId,
+        message: 'Retry failed'
+      })
+    )
+    await waitFor(() =>
+      expect(result.current.responses.response).toMatchObject({ status: 'error', canRetry: false })
+    )
+    await waitFor(() => expect(loads).toBe(2))
+    expect(result.current.responses.response).toMatchObject({
+      message: expect.stringContaining('reload')
+    })
+    await waitFor(() =>
+      expect(result.current.responses.response).toMatchObject({ status: 'error', canRetry: false })
+    )
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    expect(result.current.session.activeChat?.messages.at(-1)?.parts).toEqual([
+      { type: 'text', text: 'Durable answer', state: 'done' }
+    ])
+    expect(loads).toBe(3)
+  })
   it('user navigates when first-send creation is delayed, then the new response stays in the background', async () => {
     const pending = Promise.withResolvers<Awaited<ReturnType<SessionsAPI['create']>>>()
     const { api, result } = renderWorkspaceState((api) => {
@@ -669,6 +888,40 @@ describe('useChatWorkspaceState', () => {
     await waitFor(() => expect(api.startedRequests[0]?.thinkingEffort).toBe('default'))
   })
 
+  it('user sends after stopping when cancellation is still settling, then the draft remains unsent until acknowledgement', async () => {
+    let acknowledge!: () => void
+    const pending = new Promise<void>((resolve) => {
+      acknowledge = resolve
+    })
+    const { api, result } = renderWorkspaceState((api) => {
+      api.abortTurn = () => pending
+    })
+    act(() => void result.current.responses.sendMessage({ text: 'First', documents: [] }))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() => result.current.responses.stopResponse())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.responses.response.status).toBe('settling')
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
+      ).toBe(false)
+    })
+    expect(api.startedRequests).toHaveLength(1)
+    await act(async () => {
+      acknowledge()
+      await pending
+    })
+    await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    await act(async () => {
+      expect(
+        await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
+      ).toBe(true)
+    })
+    await waitFor(() => expect(api.startedRequests).toHaveLength(2))
+  })
+
   it('user starts a new session when no chat is selected, then the message uses it', async () => {
     const { api, result } = renderWorkspaceState()
 
@@ -866,14 +1119,14 @@ describe('useChatWorkspaceState', () => {
     api.emit({
       type: 'error',
       requestId: api.startedRequests[0].requestId,
-      message: 'The chat provider could not complete the response.'
+      message: 'Offline'
     })
 
     await waitFor(() =>
-      expect(result.current.responses.response).toEqual({
+      expect(result.current.responses.response).toMatchObject({
         status: 'error',
         conversationId,
-        message: 'The chat provider could not complete the response.'
+        message: 'Offline'
       })
     )
 

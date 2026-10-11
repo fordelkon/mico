@@ -166,13 +166,16 @@ function useChatWorkspaceState(): ChatWorkspace {
         removeConversation(conversationId)
         closeSessionIfActive(conversationId)
       } catch (error) {
+        updateSession(conversationId, (instance) => {
+          instance.deleting = false
+        })
         throw new Error(
           'Could not delete this conversation. It remains in your history. Try deleting it again.',
           { cause: error }
         )
       }
     },
-    [closeSessionIfActive, prepareForDeletion, removeConversation, removeSession]
+    [closeSessionIfActive, prepareForDeletion, removeConversation, removeSession, updateSession]
   )
 
   const response: ChatResponseState = activeSession

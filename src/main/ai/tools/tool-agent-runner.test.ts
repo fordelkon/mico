@@ -1,9 +1,10 @@
-import { writeFile } from 'node:fs/promises'
+import { access, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import {
   type ChatProvider,
   type ChatProviderStreamInput,
+  ProviderError,
   type ProviderStreamPart,
   providerFinish
 } from '@mico/ai-providers'
@@ -50,6 +51,139 @@ function createRunInput(
 
 describe('ToolAgentRunner', () => {
   afterEach(() => removeTemporaryPaths())
+
+  it('user receives an unknown legacy finish when the stream ends, then completion is rejected', async () => {
+    await expect(
+      new ToolAgentRunner().run(
+        createRunInput(
+          // SAFETY: exercises a legacy finish category received at the runtime boundary.
+          createScriptedProvider([
+            [JSON.parse('{"type":"finish","finishReason":"unknown"}') as UIMessageChunk]
+          ]),
+          'Answer'
+        )
+      )
+    ).rejects.toThrow('provider')
+  })
+
+  it('user exceeds context when requesting a response, then history stays intact and no request is reissued', async () => {
+    const requests: ChatProviderStreamInput[] = []
+    const provider: ChatProvider = {
+      getModelCapabilities: async () => null,
+      stream: async (input) => {
+        requests.push(input)
+        throw new ProviderError('context_overflow')
+      }
+    }
+    const journal: NonNullable<RunnerInput['journal']> = {
+      recordModelStep: () => undefined,
+      recordToolExecutionStarted: () => undefined,
+      recordToolExecutionSettled: () => undefined
+    }
+    await expect(
+      new ToolAgentRunner().run(
+        createRunInput(provider, 'request', {
+          messages: [
+            { role: 'user', parts: [{ type: 'text', text: 'old'.repeat(1000) }] },
+            { role: 'assistant', parts: [{ type: 'text', text: 'old answer' }] },
+            { role: 'user', parts: [{ type: 'text', text: 'request' }] }
+          ],
+          journal,
+          prepareMessages: (history) => [
+            { role: 'system', parts: [{ type: 'text', text: 'ephemeral system' }] },
+            ...history,
+            { role: 'user', parts: [{ type: 'text', text: 'fresh guidance' }] }
+          ]
+        })
+      )
+    ).rejects.toThrow('context limit')
+    expect(requests).toHaveLength(1)
+    expect(JSON.stringify(requests[0].messages)).toContain('old answer')
+    expect(requests[0].messages.at(-1)).toMatchObject({
+      parts: [{ type: 'text', text: 'fresh guidance' }]
+    })
+  })
+
+  it('user retries after a tool completes when the next model request fails, then the tool runs once', async () => {
+    const cwd = await createTemporaryWorkspace('mico-retry-tool-')
+    await writeFile(join(cwd, 'a.txt'), 'contents')
+    let requests = 0
+    const traces: string[] = []
+    const provider: ChatProvider = {
+      getModelCapabilities: async () => null,
+      stream: async () => {
+        requests += 1
+        if (requests === 1)
+          return streamFrom([
+            {
+              type: 'tool-input-available',
+              toolCallId: 'a',
+              toolName: 'Read',
+              input: { file_path: 'a.txt' },
+              dynamic: true
+            }
+          ])
+        if (requests === 2) throw new TypeError('fetch failed')
+        return streamFrom([{ type: 'text-delta', id: 'answer', delta: 'done' }])
+      }
+    }
+    const result = await new ToolAgentRunner().run(
+      createRunInput(provider, 'Read the file', {
+        registry: ToolRegistry.forWorkspace(cwd),
+        retryDelayMs: 0,
+        onToolResult: (trace) => traces.push(trace.toolCallId)
+      })
+    )
+    expect(result.assistantText).toBe('done')
+    expect(traces).toEqual(['a'])
+    expect(requests).toBe(3)
+  })
+
+  it('user receives malformed tool arguments when the model finishes a call, then a failed pair is replayed without execution', async () => {
+    const cwd = await createTemporaryWorkspace('mico-malformed-tool-')
+    const requests: ChatProviderStreamInput[] = []
+    const provider = createScriptedProvider(
+      [
+        [
+          {
+            type: 'tool-input-error',
+            toolCallId: 'bad',
+            toolName: 'Write',
+            input: { file_path: 'output.txt', content: 'must not execute', invalid: true },
+            errorText: 'Invalid JSON arguments.'
+          }
+        ],
+        [{ type: 'text-delta', id: 'answer', delta: 'corrected' }]
+      ],
+      requests
+    )
+    const result = await new ToolAgentRunner().run(
+      createRunInput(provider, 'Write safely', {
+        registry: ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' })
+      })
+    )
+    await expect(access(join(cwd, 'output.txt'))).rejects.toThrow('ENOENT')
+    expect(result.assistantText).toBe('corrected')
+    expect(requests[1].messages).toEqual([
+      { role: 'user', parts: [{ type: 'text', text: 'Write safely' }] },
+      {
+        role: 'assistant',
+        parts: [{ type: 'tool-call', toolCallId: 'bad', toolName: 'Write', argumentsJson: '{}' }]
+      },
+      {
+        role: 'tool',
+        parts: [
+          {
+            type: 'tool-result',
+            toolCallId: 'bad',
+            toolName: 'Write',
+            output: expect.stringContaining('Invalid JSON'),
+            isError: true
+          }
+        ]
+      }
+    ])
+  })
 
   it('user sees reasoning and text when no tools are called, then the turn completes', async () => {
     const onStep = vi.fn<NonNullable<RunnerInput['onStep']>>()
@@ -429,7 +563,7 @@ describe('ToolAgentRunner', () => {
     )
 
     expect(result.assistantText).toBe('done')
-    expect(events).toEqual(['stream-complete', 'step', 'tool', 'step'])
+    expect(events).toEqual(['stream-complete', 'tool', 'step', 'step'])
   })
 
   it('user gets a completed answer when the output limit is hit, then the run resumes', async () => {

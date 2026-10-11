@@ -1,9 +1,26 @@
 import { APICallError } from '@ai-sdk/provider'
+import { ProviderError } from '@mico/ai-providers'
 import { describe, expect, it } from 'vitest'
 
 import { AgentBudgetError, toTurnFailure } from './turn-failure'
 
 describe('toTurnFailure', () => {
+  it.each([401, 403])(
+    'user receives structured authentication failure when status is %s, then credentials guidance is shown',
+    (status) => {
+      expect(toTurnFailure(new ProviderError('http', { status }))).toEqual({
+        failure: {
+          code: 'provider_error',
+          message:
+            'Authentication failed for this provider. Check the API key and account permissions.'
+        },
+        retryable: false
+      })
+    }
+  )
+  it('user receives quota failure when billing is exhausted, then no automatic retry occurs', () => {
+    expect(toTurnFailure(new ProviderError('quota', { status: 429 })).retryable).toBe(false)
+  })
   it('user sees a connection remedy when the fetch fails, then details stay generic', () => {
     expect(toTurnFailure(new TypeError('fetch failed'))).toEqual({
       failure: {

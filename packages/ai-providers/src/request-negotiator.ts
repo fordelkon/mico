@@ -1,4 +1,5 @@
 ﻿import type { ThinkingSelection } from './contracts'
+import { responseHasContextOverflow } from './provider-error'
 import { isOptimisticThinkingEffort } from './thinking-preferences'
 
 /**
@@ -15,6 +16,7 @@ type RequestVariant = {
 
 type NegotiatedRequest = {
   /** The optimistic thinking selection, or null when the request never carries thinking. */
+  signal?: AbortSignal
   thinkingEffort: ThinkingSelection | null
   attempt: (variant: RequestVariant) => Promise<Response>
 }
@@ -48,13 +50,22 @@ function createRequestNegotiator(options: {
       useFallbackThinking: thinkingFallbackRejected,
       useFallbackAuth: authRejected
     }
+    request.signal?.throwIfAborted()
     let response = await request.attempt(variant)
     if (response.status === 401 && options.supportsFallbackAuth && !authRejected) {
       authRejected = true
       variant.useFallbackAuth = true
+      request.signal?.throwIfAborted()
+      void response.body?.cancel().catch(() => undefined)
       response = await request.attempt(variant)
     }
     if ((response.status === 400 || response.status === 422) && variant.includeThinking) {
+      try {
+        if (await responseHasContextOverflow(response, request.signal)) return response
+      } catch (cause) {
+        void response.body?.cancel().catch(() => undefined)
+        throw cause
+      }
       if (options.supportsFallbackThinking && !thinkingFallbackRejected) {
         thinkingFallbackRejected = true
         variant.useFallbackThinking = true
@@ -64,6 +75,8 @@ function createRequestNegotiator(options: {
       } else {
         return response
       }
+      request.signal?.throwIfAborted()
+      void response.body?.cancel().catch(() => undefined)
       response = await request.attempt(variant)
     }
     return response

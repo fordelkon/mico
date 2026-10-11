@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { expect, test } from '../fixtures/local-provider.fixture'
-import { assistantMessages, composer, sendUserMessage } from '../utils/chat'
+import { assistantMessages, composer, sendUserMessage, waitForReply } from '../utils/chat'
 
 test('user inspects file changes and a running command when tools execute, then details remain readable through completion', async ({
   app,
@@ -155,6 +155,74 @@ console.error('Diagnostic output')
   await expect(update).toHaveAttribute('aria-expanded', 'false')
   await expect(diff).toBeHidden()
   await app.window.screenshot({ path: testInfo.outputPath('tool-details-collapsed.png') })
+})
+
+test('user edits a file when the provider temporarily fails, then recovery preserves the committed edit', async ({
+  app,
+  provider
+}, testInfo) => {
+  await writeFile(join(app.workspaceDir, 'recovery.txt'), 'TOKEN')
+  // Only the OS picker is replaced; selection, permissions, and file operations remain real.
+  await app.electronApp.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
+  }, app.workspaceDir)
+  await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
+  await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
+  await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
+  await app.window.getByRole('button', { name: 'Tool permissions' }).click()
+  await app.window.getByRole('menuitemradio', { name: 'Accept edits' }).click()
+  provider.enqueue({
+    type: 'tool',
+    name: 'Read',
+    id: 'read-before-recovery',
+    input: { file_path: 'recovery.txt' }
+  })
+  provider.enqueue({
+    type: 'tool',
+    name: 'Edit',
+    id: 'committed-edit',
+    input: { file_path: 'recovery.txt', old_string: 'TOKEN', new_string: 'TOKEN_UPDATED' }
+  })
+  const rejected = provider.enqueue({ type: 'error', status: 503, retryAfter: '3' })
+  const recovered = provider.enqueue({ type: 'text', text: 'The committed edit was preserved.' })
+  await composer(app.window).fill('Read recovery.txt and update its token once.')
+  await app.window.getByRole('button', { name: 'Send message' }).click()
+  const failedRequest = await rejected.received
+  expect(failedRequest.messages).toContainEqual(
+    expect.objectContaining({
+      role: 'tool',
+      tool_call_id: 'committed-edit',
+      content: 'Successfully replaced 1 occurrence(s) in recovery.txt.'
+    })
+  )
+  expect(await readFile(join(app.workspaceDir, 'recovery.txt'), 'utf8')).toBe('TOKEN_UPDATED')
+  await expect(
+    app.window.getByRole('status').filter({ hasText: 'Connection interrupted.' })
+  ).toBeVisible()
+  await app.window.screenshot({ path: testInfo.outputPath('committed-edit-retrying.png') })
+  const resumedRequest = await recovered.received
+  expect(
+    resumedRequest.messages.filter(
+      ({ role, tool_call_id }) => role === 'tool' && tool_call_id === 'committed-edit'
+    )
+  ).toEqual([
+    expect.objectContaining({ content: 'Successfully replaced 1 occurrence(s) in recovery.txt.' })
+  ])
+  await waitForReply(app.window, assistantMessages(app.window).last())
+  await expect(assistantMessages(app.window).last()).toContainText(
+    'The committed edit was preserved.'
+  )
+  await expect(
+    app.window.getByRole('region', { name: 'Agent activity', exact: true }).getByRole('status')
+  ).toHaveText('Read 1 file · Updated 1 file')
+  await expect(
+    app.window
+      .getByTestId('answer-content')
+      .filter({ hasText: 'Read recovery.txt and update its token once.' })
+  ).toHaveCount(1)
+  expect(await readFile(join(app.workspaceDir, 'recovery.txt'), 'utf8')).toBe('TOKEN_UPDATED')
+  expect(provider.requests).toHaveLength(4)
+  await app.window.screenshot({ path: testInfo.outputPath('committed-edit-recovered.png') })
 })
 
 // The only native stub is the OS folder picker; the selected directory is real.

@@ -81,13 +81,13 @@ asserts `app.isPackaged` to reject accidentally testing the development binary.
 | --- | --- |
 | Launch and composer | Window opens, editable composer, Shift+Enter preserves an unsent multiline draft |
 | Appearance | Dark theme survives application restart |
-| Chat | Two completed turns, partial stream versus completion, stop then send, provider failure then retry |
-| Persistence | Completed answer and conversation title survive restart |
+| Chat | Two completed turns, partial stream versus completion, stop then send, authentication failure and retry across restart, stop during Retry-After waiting |
+| Persistence | Completed answer and conversation title survive restart; partial answer and failure survive clean EOF without a native completion marker |
 | Sessions | Rename and delete remain effective after restart |
 | Native Quit | Pending provider URL edit survives Quit and relaunch before debounce saves |
 | Workspaces | Add a real temporary directory through the settings flow |
 | Navigation | Search from workspace settings returns to the conversation with renamed workspace labels in sidebar and composer |
-| Tools | Real file creation, tool result replay, transcript and file after restart, failed file read |
+| Tools | Real file creation, tool result replay, transcript and file after restart, failed file read, committed edit retained through transient provider failure |
 | Real providers | Optional OpenAI-compatible and Anthropic-compatible completed replies |
 
 The local regression replaces only the external model with a loopback HTTP server.
@@ -119,7 +119,10 @@ OS boundary; directory management remains real.
 
 Queue the next provider response before sending. A held stream is released by an
 explicit test action after checking partial output, not by a sleep. For stop
-scenarios, wait for the HTTP connection to close. Protocol scenarios may assert
+scenarios, wait for the HTTP connection to close. During retry waiting, observe
+foreground requests past the original Retry-After deadline to prove cancellation.
+The response controller's `close()` ends HTTP without a native completion marker;
+`finish()` sends a successful terminal marker. Protocol scenarios may assert
 the real application sends the executed tool result back to the provider.
 
 Use `app.window` after `app.relaunch()`; derived `mainWindow` and `electronApp`

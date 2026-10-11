@@ -8,6 +8,9 @@ import {
 import { providerDescriptors, type ChatProviderDescriptor } from './provider-registry'
 import { discoverModels } from './discovery'
 import { testChatProvider } from './testing'
+import { ProviderError, throwNormalizedTransportError, safeProviderFetch } from './provider-error'
+export { ProviderError } from './provider-error'
+export type { ProviderErrorKind, ProviderErrorOptions } from './provider-error'
 export { resolveThinkingSelection } from './reasoning'
 
 const defaultDependencies: ChatProviderDependencies = {
@@ -23,7 +26,12 @@ function createChatProvider(
   // configuration union, so the entry matches configuration's provider; the
   // wide descriptor type is the correlated-union access TS cannot infer.
   const descriptor = providerDescriptors[configuration.provider] as ChatProviderDescriptor
-  return withProviderFinish(descriptor.createProvider(configuration, dependencies))
+  return withProviderFinish(
+    descriptor.createProvider(configuration, {
+      ...dependencies,
+      fetch: safeProviderFetch(dependencies.fetch)
+    })
+  )
 }
 
 function withProviderFinish(provider: ChatProvider): ChatProvider {
@@ -33,13 +41,15 @@ function withProviderFinish(provider: ChatProvider): ChatProvider {
       const stream = await provider.stream(input)
       return (async function* () {
         let receivedFinish = false
-        for await (const part of stream) {
-          if (isProviderFinish(part)) receivedFinish = true
-          yield part
+        try {
+          for await (const part of stream) {
+            if (isProviderFinish(part)) receivedFinish = true
+            yield part
+          }
+        } catch (error) {
+          throwNormalizedTransportError(error)
         }
-        // Adapters own native failure mapping; this wrapper only supplies the
-        // successful-stop default for protocols without a richer terminal event.
-        if (!receivedFinish) yield providerFinish({ reason: 'stop' })
+        if (!receivedFinish) throw new ProviderError('incomplete_stream')
       })()
     }
   }

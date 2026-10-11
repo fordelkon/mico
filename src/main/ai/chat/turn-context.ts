@@ -11,13 +11,18 @@ type PreparedTurnContext = {
   cwd: string | null
   skills: SkillSnapshot | undefined
   authorizedSkillIds: readonly string[]
-  messages: (tools?: readonly ChatProviderTool[]) => ChatProviderMessage[]
+  history: ChatProviderMessage[]
+  messages: (
+    history: readonly ChatProviderMessage[],
+    tools?: readonly ChatProviderTool[]
+  ) => ChatProviderMessage[]
 }
 
 /** Prepares source lifetimes once, so automatic retries share accepted context. */
 async function prepareTurnContext(
   userMessage: ChatMessage,
-  handle: TurnRunHandle | null
+  handle: TurnRunHandle | null,
+  signal?: AbortSignal
 ): Promise<PreparedTurnContext> {
   const cwd = handle?.cwd ?? null
   const skills = cwd ? await createSkillSnapshot(cwd) : undefined
@@ -44,17 +49,19 @@ async function prepareTurnContext(
         ]
       : []
   const projectInstructions = cwd ? await loadProjectInstructions(cwd) : null
+  signal?.throwIfAborted()
   if (handle && accepted === undefined) handle.recordContext(contextMessages)
   const replay = handle?.replayMessages ?? [toProviderContext(userMessage)]
   return {
     cwd,
     skills,
     authorizedSkillIds: invocation ? [invocation.data.skillId] : [],
-    messages: (tools) => {
+    history: [...replay, ...contextMessages],
+    messages: (history, tools) => {
       const system = cwd ? createProjectAgentInstructions(cwd, tools, skills) : null
       return [
         ...(system ? [textMessage('system', system)] : []),
-        ...replay,
+        ...history,
         // Fresh guidance stays ephemeral; accepted skill content already lives in replay.
         ...(projectInstructions
           ? [
@@ -63,8 +70,7 @@ async function prepareTurnContext(
                 `Context for the current user request; does not replace that request.\n\n${projectInstructions}`
               )
             ]
-          : []),
-        ...contextMessages
+          : [])
       ]
     }
   }

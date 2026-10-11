@@ -224,15 +224,38 @@ const readFile: ChatProviderTool = {
 
 Calls are emitted as executable `tool-input-available` chunks only after the
 provider's native completion boundary and successful JSON parsing. Malformed
-completed arguments emit `tool-input-error`; incomplete native calls fail the
-stream instead of being silently dropped. Handle either outcome before
-continuing the conversation.
+completed arguments emit `tool-input-error`. A native Responses output limit
+retains its length finish and continuation even during partial tool arguments;
+those arguments never become executable calls. Incomplete calls without this
+native limit fail the stream. Handle these outcomes before continuing the conversation.
 
 OpenAI Responses, OpenAI-compatible, and Anthropic-compatible adapters expose
 the same five thinking preferences: off, low, medium, high, and extra-high.
 They optimistically map a preference to their native request field. If an
 endpoint rejects that field with a 400 or 422 response, the adapter retries
 once without it and remembers that fallback for the rest of the app session.
+
+## Provider failures and completion
+
+`ProviderError`, exported from the package root, carries a safe `message` and
+`kind`: `http`, `rate_limit`, `quota`, `context_overflow`, `transport`,
+`incomplete_stream`, or `provider`. HTTP failures preserve `status` and valid
+`Retry-After` metadata as `retryAfterMs` and `retryAt` (Unix milliseconds).
+Raw provider payloads and upstream error messages/causes are never retained.
+Context overflow requires an explicit recognized error code or a conservative
+context-limit message; a 400 or 413 status alone is insufficient. Explicit
+context-limit failures do not trigger thinking-parameter negotiation. Error
+bodies are inspected for at most one second and 16 KiB; unread connections
+are cancelled without delaying classification. Caller cancellation interrupts
+inspection and never triggers a fallback request.
+
+A stream succeeds only after native completion: Chat Completions requires a
+nonempty `finish_reason`; `[DONE]` alone is insufficient. Anthropic requires `message_stop`,
+Responses requires `response.completed` or `response.incomplete`, and Ollama
+requires `done: true`. Native output limits remain `provider-finish` length
+signals; a failed response or premature EOF throws instead of synthesizing a
+successful finish. Caller cancellation remains an abort, while fetch network
+TypeErrors and timeouts become safe `transport` failures.
 
 ## Provider testing
 

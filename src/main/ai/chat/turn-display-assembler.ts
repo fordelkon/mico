@@ -4,9 +4,7 @@ import { toDisplayToolTrace } from '../sessions/tool-trace-presentation'
 import type { ToolExecutionTrace } from '../tools/tool-contract'
 
 type Chain<T> = { readonly value: T; readonly previous: Chain<T> | undefined }
-type DisplayPart =
-  | { type: 'text' | 'reasoning'; key: string }
-  | { type: 'tool'; toolCallId: string }
+type DisplayPart = { type: 'text' | 'reasoning'; key: string } | { type: 'tool'; key: string }
 
 const TRUNCATION_MARKER = '…'
 
@@ -19,6 +17,8 @@ class TurnDisplayAssembler {
   #sequence: Chain<DisplayPart> | undefined
   readonly #segments = new Map<string, Chain<string>>()
   readonly #traces = new Map<string, ToolExecutionTrace>()
+  readonly #toolPositions = new Map<string, string>()
+  #toolCount = 0
 
   constructor(maxLength: number) {
     this.#maxLength = maxLength
@@ -35,9 +35,11 @@ class TurnDisplayAssembler {
       this.#appendPart('reasoning', chunk.id, '')
     } else if (chunk.type === 'reasoning-delta') {
       this.#appendPart('reasoning', chunk.id, chunk.delta)
-    } else if (chunk.type === 'tool-input-available') {
+    } else if (chunk.type === 'tool-input-available' || chunk.type === 'tool-input-error') {
+      const key = `${++this.#toolCount}:${chunk.toolCallId}`
+      this.#toolPositions.set(chunk.toolCallId, key)
       this.#sequence = {
-        value: { type: 'tool', toolCallId: chunk.toolCallId },
+        value: { type: 'tool', key },
         previous: this.#sequence
       }
     }
@@ -45,13 +47,14 @@ class TurnDisplayAssembler {
   }
 
   recordTrace(trace: ToolExecutionTrace): void {
-    this.#traces.set(trace.toolCallId, trace)
+    const key = this.#toolPositions.get(trace.toolCallId)
+    if (key) this.#traces.set(key, trace)
   }
 
   buildMessage(completionState: 'complete' | 'stopped'): ChatMessage | undefined {
     const parts = ordered(this.#sequence).flatMap<ChatMessage['parts'][number]>((part) => {
       if (part.type === 'tool') {
-        const trace = this.#traces.get(part.toolCallId)
+        const trace = this.#traces.get(part.key)
         return trace ? [toDisplayToolTrace(trace)] : []
       }
       const text = ordered(this.#segments.get(part.key)).join('')

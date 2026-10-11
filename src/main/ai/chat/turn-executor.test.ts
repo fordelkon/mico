@@ -481,7 +481,9 @@ describe('TurnExecutor', () => {
   it('user sees the transcript persisted when the run finishes, then both messages are stored', async () => {
     const { runtime, session } = await createSession('Session')
     const recorded = collectEvents()
-    const service = createConfiguredExecutor(async () => streamFrom([textChunk]), runtime)
+    const service = createConfiguredExecutor(async () => streamFrom([textChunk]), runtime, {
+      getChatConfigurationForModelEntry: () => configuration
+    })
 
     service.startTurn(
       { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
@@ -701,14 +703,20 @@ describe('TurnExecutor', () => {
       sessionId: session.id,
       requestId: 'request-0',
       userMessage: request.userMessage,
-      profile: savedProfile
+      profile: new SessionModelProfile({ resolveProvider: () => null }).toProfile(
+        configuration,
+        'ollama:qwen3',
+        'default'
+      )
     })
     runtime.finishRun(failed.runId, {
       status: 'failed',
       failure: { code: 'provider_error', message: 'Failed' }
     })
     const recorded = collectEvents()
-    const service = createConfiguredExecutor(async () => streamFrom([textChunk]), runtime)
+    const service = createConfiguredExecutor(async () => streamFrom([textChunk]), runtime, {
+      getChatConfigurationForModelEntry: () => configuration
+    })
 
     service.startTurn(
       {
@@ -742,7 +750,8 @@ describe('TurnExecutor', () => {
       () => undefined
     )
     await providerStarted.promise
-    service.abortTurn({ ownerId: 'window-1', requestId: request.requestId })
+    void service.abortTurn({ ownerId: 'window-1', requestId: request.requestId })
+    await service.drain()
 
     expect(runtime.loadSession(session.id).messages).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
@@ -765,7 +774,8 @@ describe('TurnExecutor', () => {
       recorded.emit
     )
     await recorded.firstChunk
-    service.abortTurn({ ownerId: 'window-1', requestId: request.requestId })
+    void service.abortTurn({ ownerId: 'window-1', requestId: request.requestId })
+    await service.drain()
 
     expect(runtime.loadSession(session.id).messages).toEqual([
       request.userMessage,
@@ -870,8 +880,8 @@ describe('TurnExecutor', () => {
     )
     await streamsStarted.promise
 
-    service.abortTurn({ ownerId: 'window-1', requestId: 'request-1' })
-    service.abortTurn({ ownerId: 'window-1', requestId: 'request-1' })
+    void service.abortTurn({ ownerId: 'window-1', requestId: 'request-1' })
+    void service.abortTurn({ ownerId: 'window-1', requestId: 'request-1' })
 
     expect(signals.get('1')?.aborted).toBe(true)
     expect(signals.get('2')?.aborted).toBe(false)
@@ -995,6 +1005,30 @@ describe('TurnExecutor', () => {
         message: "Couldn't connect to the API endpoint. Check the API URL, network, VPN, or proxy."
       }
     ])
+  })
+
+  it('user sees partial output when a persisted stream fails, then the stopped snapshot survives', async () => {
+    const { runtime, session } = await createSession('Session')
+    const recorded = collectEvents()
+    const service = createConfiguredExecutor(
+      async () => ({
+        async *[Symbol.asyncIterator]() {
+          yield textChunk
+          throw new TypeError('fetch failed')
+        }
+      }),
+      runtime
+    )
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await recorded.terminal
+    expect(runtime.loadSession(session.id).messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Hi' }],
+      metadata: { completionState: 'stopped' }
+    })
   })
 
   it('user gets the requested thinking effort when starting a turn, then it reaches the provider', async () => {
@@ -1224,8 +1258,9 @@ describe('TurnExecutor', () => {
       }
     )
     await partialReceived.promise
-    service.abortTurn({ ownerId: 'window-1', requestId: request.requestId })
+    void service.abortTurn({ ownerId: 'window-1', requestId: request.requestId })
     await streamStopped.promise
+    await service.drain()
 
     expect(runtime.loadSession(session.id).messages.at(-1)).toMatchObject({
       role: 'assistant',

@@ -50,6 +50,9 @@ async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncIterable<SseE
     const event = parseFrame(buffer)
     if (event) yield event
   } finally {
+    // Native completion can stop consumption before EOF; release the connection
+    // without allowing cleanup failures to replace the primary result.
+    void reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }
 }

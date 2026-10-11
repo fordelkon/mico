@@ -228,6 +228,7 @@ function useActiveSession(options: {
       setReasoningCapabilities(null)
       const existing = sessions.getSession(conversationId)
       if (existing) {
+        if (existing.recoveryNeedsRefresh) void sessions.refreshRecovery(conversationId)
         setPermissionModeState(existing.permissionMode)
         setActiveSession({ conversationId, chat: existing.chat, project: existing.project })
         thinkingEffortRef.current = existing.thinkingEffort ?? 'default'
@@ -260,7 +261,8 @@ function useActiveSession(options: {
               modelEntryId: persisted.defaultProfile?.modelEntryId ?? null,
               thinkingEffort: persisted.defaultProfile?.thinkingEffort ?? null
             },
-            project
+            project,
+            persisted.recovery
           )
           setPermissionModeState(instance.permissionMode)
           thinkingEffortRef.current = instance.thinkingEffort ?? 'default'
