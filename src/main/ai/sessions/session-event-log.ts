@@ -247,8 +247,10 @@ class SessionEventLog {
     return ContextPayloadSchema.parse(JSON.parse(row.payload_json)).messages
   }
 
-  getReplayMessages(run: RunRow, throughSequence = 0): ChatProviderMessage[] {
+  getReplayMessages(run: RunRow): ChatProviderMessage[] {
     const runId = run.id
+    // Checkpoint-pinned replay is assembled by session-replay.ts; this legacy
+    // assembly always replays the full raw history from the session start.
     // SAFETY: this fixed query returns only accepted-run identity columns. An accepted run joins
     // history where its terminal event occurred, not where its user turn was created, preserving
     // the actual conversation order after a late retry.
@@ -270,10 +272,10 @@ class SessionEventLog {
            ON terminal.run_id = accepted_run.id
           AND terminal.kind IN ('run_completed', 'run_cancelled')
           AND terminal.session_sequence < current_run.started_sequence
-          AND terminal.session_sequence > ?
+          AND terminal.session_sequence > 0
          ORDER BY terminal.session_sequence`
       )
-      .all(runId, runId, throughSequence) as Array<{ id: string; turn_id: string }>
+      .all(runId, runId) as Array<{ id: string; turn_id: string }>
     const messages: ChatProviderMessage[] = []
     for (const prior of priorRuns) {
       messages.push(toProviderReplayContext(this.getTurnUserMessage(prior.turn_id)))
