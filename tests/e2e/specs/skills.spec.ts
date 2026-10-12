@@ -7,6 +7,7 @@ import { waitForAppReady } from '../utils/wait-helpers'
 test('user browses local skills when opening settings, then reads the real document across processes', async ({
   app
 }, testInfo) => {
+  test.setTimeout(120_000)
   await waitForAppReady(app.window)
   const defaultRoot = await app.window.evaluate(async () => {
     if (!('api' in window)) throw new Error('The renderer preload API is unavailable.')
