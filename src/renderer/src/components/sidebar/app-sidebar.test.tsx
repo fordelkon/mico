@@ -26,14 +26,22 @@ const sidebarProps = {
   settingsActive: false
 }
 
+let platform: 'darwin' | 'win32' | 'linux' = 'darwin'
 let apiDescriptor: PropertyDescriptor | undefined
 
 describe('AppSidebar', () => {
   beforeEach(() => {
+    platform = 'darwin'
     apiDescriptor = Object.getOwnPropertyDescriptor(window, 'api')
     Object.defineProperty(window, 'api', {
       configurable: true,
-      value: { windowControls: { platform: 'darwin' } }
+      value: {
+        windowControls: {
+          get platform() {
+            return platform
+          }
+        }
+      }
     })
   })
 
@@ -179,20 +187,32 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('button', { name: 'Saved project chat' })).toBeVisible()
   })
 
-  it('user sees command shortcuts when holding the meta key, then they hide on release', () => {
-    renderSidebar()
+  it.each([
+    { platform: 'darwin', key: 'Meta', modifier: { metaKey: true }, hint: '⌘' },
+    { platform: 'win32', key: 'Alt', modifier: { altKey: true }, hint: 'Alt' },
+    { platform: 'linux', key: 'Meta', modifier: { metaKey: true }, hint: '⌘' }
+  ] as const)(
+    'user sees shortcuts when holding $key on $platform, then they hide on release',
+    ({ platform: currentPlatform, key, modifier, hint }) => {
+      platform = currentPlatform
+      renderSidebar()
 
-    fireEvent.keyDown(window, { key: 'Meta', metaKey: true })
+      fireEvent.keyDown(window, { key, ...modifier })
 
-    expect(screen.getByText('⌘ 1')).toBeVisible()
-    expect(screen.getByText('⌘ 2')).toBeVisible()
-    expect(screen.queryAllByRole('button', { name: 'More actions' })).toHaveLength(0)
+      expect(screen.getByText(`${hint} 1`)).toBeVisible()
+      expect(screen.getByText(`${hint} 2`)).toBeVisible()
+      expect(screen.queryAllByRole('button', { name: 'More actions' })).toHaveLength(0)
 
-    fireEvent.keyUp(window, { key: 'Meta' })
+      fireEvent.keyDown(window, { key: 'a', ...modifier })
+      fireEvent.keyUp(window, { key: 'a', ...modifier })
+      expect(screen.getByText(`${hint} 1`)).toBeVisible()
 
-    expect(screen.queryByText('⌘ 1')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'More actions' })).toHaveLength(2)
-  })
+      fireEvent.keyUp(window, { key })
+
+      expect(screen.queryByText(`${hint} 1`)).not.toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: 'More actions' })).toHaveLength(2)
+    }
+  )
 
   it('user selects a conversation when pressing its command shortcut, then it opens', () => {
     const onSelectConversation =
@@ -202,6 +222,45 @@ describe('AppSidebar', () => {
     fireEvent.keyDown(window, { key: '2', metaKey: true })
 
     expect(onSelectConversation).toHaveBeenCalledWith('conversation-2')
+  })
+
+  it('user leaves the window when holding Alt on Windows, then shortcut hints hide', () => {
+    platform = 'win32'
+    renderSidebar()
+
+    fireEvent.keyDown(window, { key: 'Alt', altKey: true })
+    expect(screen.getByText('Alt 1')).toBeVisible()
+
+    fireEvent.blur(window)
+
+    expect(screen.queryByText('Alt 1')).not.toBeInTheDocument()
+  })
+
+  it('user selects a chat when pressing Alt+2 on Windows, then that conversation opens', () => {
+    platform = 'win32'
+    const onSelectConversation =
+      vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>()
+    renderSidebar({ onSelectConversation })
+
+    fireEvent.keyDown(window, { key: '2', altKey: true })
+
+    expect(onSelectConversation).toHaveBeenCalledWith('conversation-2')
+  })
+
+  it.each([
+    { name: 'Win+2', modifiers: { metaKey: true } },
+    { name: 'Ctrl+2', modifiers: { ctrlKey: true } },
+    { name: 'Ctrl+Alt+2', modifiers: { altKey: true, ctrlKey: true } },
+    { name: 'Shift+Alt+2', modifiers: { altKey: true, shiftKey: true } },
+    { name: 'Win+Alt+2', modifiers: { altKey: true, metaKey: true } }
+  ])('user presses $name when on Windows, then no conversation opens', ({ modifiers }) => {
+    platform = 'win32'
+    const onSelectConversation = vi.fn<AppSidebarProps['onSelectConversation']>()
+    renderSidebar({ onSelectConversation })
+
+    fireEvent.keyDown(window, { key: '2', ...modifiers })
+
+    expect(onSelectConversation).not.toHaveBeenCalled()
   })
 
   it('user receives a status change for another conversation when rows are stable, then unchanged titles are not read again', () => {

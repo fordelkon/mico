@@ -217,6 +217,9 @@ function ConversationRowComponent({
     '--conversation-row-title-duration': `${(titleOverflow / TITLE_SCROLL_SPEED_PX_PER_SECOND) * 1000}ms`
   }
 
+  const shortcutLabel =
+    shortcutNumber !== undefined && window.api.windowControls.platform === 'win32' ? 'Alt' : '⌘'
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={editing || deleting}>
@@ -276,7 +279,9 @@ function ConversationRowComponent({
                 <span className="conversation-row__title">{conversation.title}</span>
               </span>
               {shortcutNumber !== undefined && (
-                <Kbd className="conversation-row__shortcut">⌘ {shortcutNumber}</Kbd>
+                <Kbd className="conversation-row__shortcut">
+                  {shortcutLabel} {shortcutNumber}
+                </Kbd>
               )}
             </SidebarMenuButton>
           )}

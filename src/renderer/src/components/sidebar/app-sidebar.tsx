@@ -120,11 +120,17 @@ function AppSidebar({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onNewChat])
 
+  // Windows reserves Win+digit for the taskbar, so conversation shortcuts use Alt.
   React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.metaKey) setCommandKeyPressed(true)
+    const isWindows = window.api.windowControls.platform === 'win32'
+    const modifierHeld = (event: KeyboardEvent): boolean =>
+      isWindows ? event.altKey : event.metaKey
 
-      if (!event.metaKey || !/^[1-9]$/.test(event.key)) return
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      setCommandKeyPressed(modifierHeld(event))
+
+      const otherModifierHeld = isWindows && (event.ctrlKey || event.shiftKey || event.metaKey)
+      if (!modifierHeld(event) || otherModifierHeld || !/^[1-9]$/.test(event.key)) return
 
       const conversation = conversations[Number(event.key) - 1]
       if (!conversation) return
@@ -133,7 +139,10 @@ function AppSidebar({
       handleConversationSelection(conversation.id)
     }
     const handleKeyUp = (event: KeyboardEvent): void => {
-      if (event.key === 'Meta' || !event.metaKey) setCommandKeyPressed(false)
+      const modifierReleased = isWindows
+        ? event.key === 'Alt' || !event.altKey
+        : event.key === 'Meta' || !event.metaKey
+      if (modifierReleased) setCommandKeyPressed(false)
     }
     const handleWindowBlur = (): void => setCommandKeyPressed(false)
 

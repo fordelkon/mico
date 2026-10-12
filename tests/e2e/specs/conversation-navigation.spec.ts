@@ -3,6 +3,61 @@ import { basename } from 'node:path'
 import { expect, test } from '../fixtures/local-provider.fixture'
 import { assistantMessages, composer, sendUserMessage } from '../utils/chat'
 
+test('user holds the platform shortcut when switching chats, then hints and saved drafts follow selection', async ({
+  app,
+  provider
+}, testInfo) => {
+  await app.window.emulateMedia({ reducedMotion: 'reduce' })
+  const sidebar = app.window.getByLabel('Sidebar', { exact: true })
+  const renameRow = async (currentTitle: string, newTitle: string): Promise<void> => {
+    const row = sidebar.locator('.conversation-row').filter({ hasText: currentTitle })
+    await row.hover()
+    await row.getByRole('button', { name: 'More actions' }).click()
+    await app.window.getByRole('menuitem', { name: 'Rename', exact: true }).click()
+    await app.window.getByLabel('Conversation title').fill(newTitle)
+    await app.window.getByLabel('Conversation title').press('Enter')
+  }
+
+  provider.enqueue({ type: 'text', text: 'First saved answer.' })
+  await sendUserMessage(app.window, 'First conversation')
+  await renameRow('E2E conversation', 'Alpha chat')
+  await composer(app.window).fill('Alpha follow-up')
+  await app.window.getByRole('button', { name: 'New chat', exact: true }).click()
+  provider.enqueue({ type: 'text', text: 'Second saved answer.' })
+  await sendUserMessage(app.window, 'Second conversation')
+  await renameRow('E2E conversation', 'Beta chat')
+  await composer(app.window).fill('Beta follow-up')
+
+  const modifier = process.platform === 'win32' ? 'Alt' : 'Meta'
+  const hint = process.platform === 'win32' ? 'Alt' : '⌘'
+  const alphaHint = sidebar
+    .locator('.conversation-row')
+    .filter({ hasText: 'Alpha chat' })
+    .locator('.conversation-row__shortcut')
+  const betaHint = sidebar
+    .locator('.conversation-row')
+    .filter({ hasText: 'Beta chat' })
+    .locator('.conversation-row__shortcut')
+  await app.window.keyboard.down(modifier)
+  await expect(alphaHint).toHaveText(new RegExp(`^${hint} [1-9]$`))
+  await expect(betaHint).toHaveText(new RegExp(`^${hint} [1-9]$`))
+  const alphaDigit = (await alphaHint.innerText()).trim().split(' ').at(-1)
+  const betaDigit = (await betaHint.innerText()).trim().split(' ').at(-1)
+  await app.window.keyboard.press(`${alphaDigit}`)
+  await expect(composer(app.window)).toHaveValue('Alpha follow-up')
+  await expect(assistantMessages(app.window).getByTestId('answer-content').last()).toContainText(
+    'First saved answer.'
+  )
+  await app.window.screenshot({ path: testInfo.outputPath('conversation-shortcuts.png') })
+  await app.window.keyboard.up(modifier)
+  await expect(sidebar.getByText(`${hint} ${alphaDigit}`, { exact: true })).toHaveCount(0)
+  await app.window.keyboard.press(`${modifier}+${betaDigit}`)
+  await expect(composer(app.window)).toHaveValue('Beta follow-up')
+  await expect(assistantMessages(app.window).getByTestId('answer-content').last()).toContainText(
+    'Second saved answer.'
+  )
+})
+
 test('user opens a chat from settings search when a workspace is renamed, then navigation shows its new name', async ({
   app,
   provider
