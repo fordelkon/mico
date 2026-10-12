@@ -1,5 +1,6 @@
 import { expect, test } from '../fixtures/local-provider.fixture'
 import { assistantMessages, composer, waitForReply } from '../utils/chat'
+import { editKeys } from '../utils/edit-keys'
 import { waitForAppReady } from '../utils/wait-helpers'
 
 /** Exercises the paste handler with synthetic clipboard data in Electron. */
@@ -39,14 +40,14 @@ test('user pastes a long text when drafting, then the token collapses, undoes na
 
   // Native undo/redo covers the capture transaction, and the exact unique
   // label re-associates the full payload after any undo/redo order.
-  await input.press('Control+z')
+  await input.press(editKeys.undo)
   await expect(input).toHaveValue('')
-  await input.press('Control+y')
+  await input.press(editKeys.redo)
   await expect(input).toHaveValue(label)
 
   // Copying a selection that touches the token delivers the full payload.
-  await input.press('Control+a')
-  await input.press('Control+c')
+  await input.press(editKeys.selectAll)
+  await input.press(editKeys.copy)
   const clipboardText = await app.electronApp.evaluate(({ clipboard }) => clipboard.readText())
   expect(clipboardText).toBe(longText)
 
@@ -138,7 +139,7 @@ test('user edits a paste token label when drafting, then sending is blocked unti
   // repair lands on the broken label again, still without payload loss.
   await app.window.getByRole('button', { name: 'Restore pasted text' }).click()
   await expect(input).toHaveValue(label)
-  await input.press('Control+z')
+  await input.press(editKeys.undo)
   const repairedUndo = await input.inputValue()
   expect(repairedUndo).not.toBe(label)
   await app.window.getByRole('button', { name: 'Restore pasted text' }).click()

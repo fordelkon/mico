@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { WindowApiType } from '../../../src/preload/api'
 import { expect, test } from '../fixtures/local-provider.fixture'
 import { composer } from '../utils/chat'
+import { editKeys } from '../utils/edit-keys'
 import { waitForAppReady } from '../utils/wait-helpers'
 
 /** Reads the composer's mirror handoff state at the real browser boundary. */
@@ -74,24 +75,24 @@ test('user edits an invocation when drafting, then completion, atomic deletion, 
   expect(mirror.mirrorColor).not.toBe('rgba(0, 0, 0, 0)')
 
   // Native undo/redo covers the completion transaction exactly like typing.
-  await input.press('Control+z')
+  await input.press(editKeys.undo)
   await expect(input).toHaveValue('$rev')
-  await input.press('Control+y')
+  await input.press(editKeys.redo)
   await expect(input).toHaveValue('$review ')
 
   // A collapsed Backspace behind the trailing separator keeps native behavior;
-  // Ctrl+Backspace removes the whole token without a "$" leftover.
+  // word deletion removes the whole token without a "$" leftover.
   await input.press('Backspace')
   await expect(input).toHaveValue('$review')
-  await input.press('Control+Backspace')
+  await input.press(editKeys.deleteWord)
   await expect(input).toHaveValue('')
-  await input.press('Control+z')
+  await input.press(editKeys.undo)
   await expect(input).toHaveValue('$review')
-  await input.press('Control+z')
+  await input.press(editKeys.undo)
   await expect(input).toHaveValue('$review ')
-  await input.press('Control+z')
+  await input.press(editKeys.undo)
   await expect(input).toHaveValue('$rev')
-  await input.press('Control+y')
+  await input.press(editKeys.redo)
   await expect(input).toHaveValue('$review ')
 
   // Synthetic composition signals exercise the IME mirror handoff; a real OS
