@@ -1,16 +1,15 @@
-import type { Chat } from '@ai-sdk/react'
 import * as React from 'react'
 
-import type { Conversation, MicoUIMessage } from '@renderer/types/chat'
+import type { Conversation } from '@renderer/types/chat'
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import type { PermissionMode } from '@shared/ai/permissions'
 
-import type { ChatSessionsStore, ChatSession } from './chat-session-instances'
+import type { ChatSessionsStore, ConversationTranscriptSource } from './chat-session-instances'
 
 type ActiveChatSession = {
   conversationId: string
-  chat: Chat<MicoUIMessage>
+  transcript: ConversationTranscriptSource
   project: WorkspaceProject | null
 }
 
@@ -19,7 +18,7 @@ type ChatActiveSessionSlice = {
   /** The conversation record of the active session, looked up from the workspace list. */
   activeConversation: Conversation | null
   activeSession: ActiveChatSession | null
-  activeChat: Chat<MicoUIMessage> | null
+  transcript: ConversationTranscriptSource | null
   permissionMode: PermissionMode
   setPermissionMode: (mode: PermissionMode) => void
   thinkingEffort: ThinkingSelection
@@ -39,10 +38,6 @@ type ChatActiveSessionSlice = {
   /** Leaves any active session behind and starts an empty draft, optionally bound to a project. */
   startNewChat: (project?: WorkspaceProject) => void
   selectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
-  /** Creates a session for the current draft; activates it only if navigation has not changed. */
-  createNewSession: () => Promise<ChatSession>
-  /** Clears the active session when its conversation is deleted. */
-  closeSessionIfActive: (conversationId: string) => void
 }
 
 function resolvePendingProject(
@@ -54,11 +49,15 @@ function resolvePendingProject(
     : (projects.find(({ isDefault }) => isDefault) ?? null)
 }
 
-function useActiveSession(options: {
-  sessions: ChatSessionsStore
-}): Omit<ChatActiveSessionSlice, 'activeConversation'> {
+function useActiveSession(options: { sessions: ChatSessionsStore }): Omit<
+  ChatActiveSessionSlice,
+  'activeConversation'
+> & {
+  createNewSession: () => Promise<Conversation>
+  closeSessionIfActive: (conversationId: string) => void
+} {
   const { sessions } = options
-  const { updateSession } = sessions
+  const { setRequestConfig } = sessions
   const thinkingEffortRef = React.useRef<ThinkingSelection>('default')
   const activationRef = React.useRef<{ revision: number; conversationId: string | null }>({
     revision: 0,
@@ -72,7 +71,7 @@ function useActiveSession(options: {
     React.useState<ModelReasoningCapabilities | null>(null)
   const [thinkingEffort, setThinkingEffortState] = React.useState<ThinkingSelection>('default')
   const selectedModelEntryId = activeSession
-    ? (sessions.getSession(activeSession.conversationId)?.modelEntryId ?? null)
+    ? (sessions.getSession(activeSession.conversationId)?.requestConfig.modelEntryId ?? null)
     : null
   const [activationError, setActivationError] = React.useState<string | null>(null)
   const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(null)
@@ -104,9 +103,7 @@ function useActiveSession(options: {
         modelEntryId
       })
       if (modelUpdatesRef.current.get(activeSession.conversationId) !== revision) return
-      sessions.updateSession(activeSession.conversationId, (instance) => {
-        instance.modelEntryId = modelEntryId
-      })
+      sessions.setRequestConfig(activeSession.conversationId, { modelEntryId })
       setActiveSession((current) =>
         current?.conversationId === activeSession.conversationId ? { ...current } : current
       )
@@ -119,9 +116,7 @@ function useActiveSession(options: {
     (mode: PermissionMode): void => {
       setPermissionModeState(mode)
       if (activeSession)
-        sessions.updateSession(activeSession.conversationId, (instance) => {
-          instance.permissionMode = mode
-        })
+        sessions.setRequestConfig(activeSession.conversationId, { permissionMode: mode })
     },
     [activeSession, sessions]
   )
@@ -145,12 +140,9 @@ function useActiveSession(options: {
         : 'none'
       thinkingEffortRef.current = next
       setThinkingEffortState(next)
-      if (conversationId)
-        updateSession(conversationId, (instance) => {
-          instance.thinkingEffort = next
-        })
+      if (conversationId) setRequestConfig(conversationId, { thinkingEffort: next })
     },
-    [conversationId, updateSession]
+    [conversationId, setRequestConfig]
   )
 
   const refreshCapabilities = React.useCallback(
@@ -177,9 +169,7 @@ function useActiveSession(options: {
       thinkingEffortRef.current = next
       setThinkingEffortState(next)
       if (activeSession) {
-        sessions.updateSession(activeSession.conversationId, (instance) => {
-          instance.thinkingEffort = next
-        })
+        sessions.setRequestConfig(activeSession.conversationId, { thinkingEffort: next })
         void window.api.sessions
           .setThinkingEffort({ sessionId: activeSession.conversationId, thinkingEffort: next })
           .catch(() => undefined)
@@ -234,10 +224,14 @@ function useActiveSession(options: {
       setReasoningCapabilities(null)
       const existing = sessions.getSession(conversationId)
       if (existing) {
-        if (existing.recoveryNeedsRefresh) void sessions.refreshRecovery(conversationId)
-        setPermissionModeState(existing.permissionMode)
-        setActiveSession({ conversationId, chat: existing.chat, project: existing.project })
-        thinkingEffortRef.current = existing.thinkingEffort ?? 'default'
+        sessions.refreshRecoveryIfStale(conversationId)
+        setPermissionModeState(existing.requestConfig.permissionMode)
+        setActiveSession({
+          conversationId,
+          transcript: existing.transcript,
+          project: existing.project
+        })
+        thinkingEffortRef.current = existing.requestConfig.thinkingEffort ?? 'default'
         setThinkingEffortState(thinkingEffortRef.current)
         if (focus) focusComposer()
         return
@@ -265,17 +259,18 @@ function useActiveSession(options: {
             persisted.messages,
             {
               modelEntryId: persisted.defaultProfile?.modelEntryId ?? null,
-              thinkingEffort: persisted.defaultProfile?.thinkingEffort ?? null
+              thinkingEffort: persisted.defaultProfile?.thinkingEffort ?? null,
+              permissionMode: 'default'
             },
             project,
             persisted.recovery
           )
-          setPermissionModeState(instance.permissionMode)
-          thinkingEffortRef.current = instance.thinkingEffort ?? 'default'
+          setPermissionModeState(instance.requestConfig.permissionMode)
+          thinkingEffortRef.current = instance.requestConfig.thinkingEffort ?? 'default'
           setThinkingEffortState(thinkingEffortRef.current)
           setActiveSession({
             conversationId: persisted.id,
-            chat: instance.chat,
+            transcript: instance.transcript,
             project: instance.project
           })
           if (focus) focusComposer()
@@ -288,7 +283,7 @@ function useActiveSession(options: {
     [focusComposer, sessions]
   )
 
-  const createNewSession = React.useCallback(async (): Promise<ChatSession> => {
+  const createNewSession = React.useCallback(async (): Promise<Conversation> => {
     const activation = activationRef.current
     const project = resolvePendingProject(projects, selectedProjectId)
     const thinkingEffort = thinkingEffortRef.current
@@ -307,22 +302,22 @@ function useActiveSession(options: {
       [],
       {
         modelEntryId: null,
-        thinkingEffort
+        thinkingEffort,
+        permissionMode
       },
       project
     )
-    instance.permissionMode = permissionMode
-    if (activationRef.current !== activation) return instance
+    if (activationRef.current !== activation) return conversation
     activationRef.current = { revision: activation.revision + 1, conversationId: conversation.id }
     setActivationError(null)
     setReasoningCapabilities(null)
     setActiveSession({
       conversationId: conversation.id,
-      chat: instance.chat,
+      transcript: instance.transcript,
       project: instance.project
     })
     setSelectedProjectId(null)
-    return instance
+    return conversation
   }, [permissionMode, projects, selectedProjectId, sessions])
 
   const closeSessionIfActive = React.useCallback((conversationId: string): void => {
@@ -346,7 +341,7 @@ function useActiveSession(options: {
   return React.useMemo(
     () => ({
       activeSession,
-      activeChat: activeSession?.chat ?? null,
+      transcript: activeSession?.transcript ?? null,
       permissionMode,
       setPermissionMode,
       thinkingEffort,

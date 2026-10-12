@@ -1,6 +1,6 @@
 import { Button } from '@mico/ui'
 import type { ToolPermissionData } from '@shared/ai/permissions'
-import { toolLabel } from '@shared/ai/tool-presentation'
+import { getToolPresentation, toolLabel } from '@shared/ai/tool-presentation'
 import {
   getToolTracePresentation,
   type ToolTraceInput,
@@ -53,16 +53,6 @@ type ToolActivityState =
 const MAX_SUMMARY_CHARACTERS = 2_000
 const MAX_COMMAND_CHARACTERS = 120
 const COMPACT_OUTPUT_LINES = 5
-const KNOWN_TOOL_NAMES = new Set([
-  'Bash',
-  'Edit',
-  'Glob',
-  'Grep',
-  'Read',
-  'Write',
-  'LoadSkill',
-  'ReadSkillResource'
-])
 const ToolOutputSchema = z.union([
   z.string(),
   z.object({ output: z.string() }).transform(({ output }) => output),
@@ -344,18 +334,15 @@ function getBashActionVerb(state: ToolActivityState): string {
 }
 
 function ToolIcon({ toolName }: { toolName: string }): React.JSX.Element {
-  const Icon =
-    {
-      Bash: TerminalIcon,
-      Edit: FilePenLineIcon,
-
-      Glob: SearchIcon,
-      Grep: SearchIcon,
-      Read: FileSearchIcon,
-      LoadSkill: BookOpenIcon,
-      ReadSkillResource: FileSearchIcon,
-      Write: FilePlus2Icon
-    }[toolName] ?? WrenchIcon
+  const Icon = {
+    command: TerminalIcon,
+    edit: FilePenLineIcon,
+    search: SearchIcon,
+    read: FileSearchIcon,
+    skill: BookOpenIcon,
+    write: FilePlus2Icon,
+    tool: WrenchIcon
+  }[getToolPresentation(toolName).iconKind]
   return <Icon aria-hidden="true" className="size-3.5" />
 }
 
@@ -425,19 +412,9 @@ function useElapsedSeconds(active: boolean): number {
 /** A timeline summary uses the same validated input as the tool row. */
 function getToolActivityLabel(part: ToolActivityPart): string {
   const input = ToolTraceInputSchema.safeParse(part.input)
-  const action = {
-    Read: 'Reading',
-    LoadSkill: 'Loading skill',
-    ReadSkillResource: 'Reading skill resource',
-    Write: 'Writing',
-    Edit: 'Updating',
-
-    Glob: 'Searching',
-    Grep: 'Searching',
-    Bash: 'Running'
-  }[part.toolName]
+  const action = getToolPresentation(part.toolName).activityLabel
   const target = input.success ? describeTool(part.toolName, input.data).detail : null
-  return [action ?? toolLabel(part.toolName), target].filter(Boolean).join(' ')
+  return [action, target].filter(Boolean).join(' ')
 }
 
 /** Compact invocation with opt-in details; failures remain visible for recovery. */
@@ -473,7 +450,7 @@ function ToolTrace({
     'output' in part ? part.output : part.errorText
   )
   const genericDetails =
-    presentation == null && !KNOWN_TOOL_NAMES.has(part.toolName)
+    presentation == null && !getToolPresentation(part.toolName).known
       ? {
           input: formatGenericToolPayload(genericInput.success ? genericInput.data : undefined),
           output: formatGenericToolPayload(genericOutput.success ? genericOutput.data : undefined)

@@ -8,7 +8,7 @@ import {
 } from './components/settings/providers/provider-library'
 import { AppSidebar } from './components/sidebar/app-sidebar'
 import { WindowControls } from './components/window-controls/window-controls'
-import { useChatWorkspaceState } from './hooks/chat/use-chat-workspace-state'
+import { useChatWorkspaceState } from './hooks/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import { selectConversationWithPaperTransition } from '@renderer/utils/conversation-paper-transition'
 import { transitionSettingsPage } from '@renderer/utils/settings-paper-transition'
@@ -107,13 +107,7 @@ function AppContent(): React.JSX.Element {
     >
       <div aria-hidden="true" className="home-workspace__titlebar" />
       <AppSidebar
-        compactingConversationIds={
-          new Set(
-            [...workspace.compactions.states]
-              .filter(([, state]) => state.status === 'pending')
-              .map(([id]) => id)
-          )
-        }
+        compactingConversationIds={workspace.compactions.compactingConversationIds}
         activeConversationId={workspace.session.activeConversation?.id ?? null}
         conversations={workspace.conversations}
         projects={workspace.session.projects}

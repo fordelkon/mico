@@ -1,6 +1,6 @@
 import type { ReasoningUIPart } from 'ai'
 import * as React from 'react'
-import { toolLabel } from '@shared/ai/tool-presentation'
+import { getToolPresentation } from '@shared/ai/tool-presentation'
 
 import { ThinkingTrace } from './tools/thinking-trace'
 import { ToolTraceGroup } from './tools/trace-group'
@@ -24,21 +24,10 @@ type TimelineSegment =
 function completedToolSummary(tools: ToolActivityPart[]): string {
   const summaries = new Map<string, { count: number; unit: string; verb: string }>()
   for (const tool of tools) {
-    const definition = {
-      Bash: { key: 'bash', unit: 'command', verb: 'Ran' },
-      Edit: { key: 'edit', unit: 'file', verb: 'Updated' },
-      Glob: { key: 'search', unit: 'pattern', verb: 'Searched' },
-      Grep: { key: 'search', unit: 'pattern', verb: 'Searched' },
-      Read: { key: 'read', unit: 'file', verb: 'Read' },
-      Write: { key: 'write', unit: 'file', verb: 'Wrote' }
-    }[tool.toolName] ?? {
-      key: tool.toolName,
-      unit: 'call',
-      verb: toolLabel(tool.toolName)
-    }
-    const current = summaries.get(definition.key)
+    const { group, unit, verb } = getToolPresentation(tool.toolName).completedSummary
+    const current = summaries.get(group)
     if (current) current.count += 1
-    else summaries.set(definition.key, { count: 1, unit: definition.unit, verb: definition.verb })
+    else summaries.set(group, { count: 1, unit, verb })
   }
 
   return Array.from(

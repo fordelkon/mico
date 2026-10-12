@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ComposerPasteToken } from '@renderer/hooks/chat/chat-composer-drafts'
+import type { ComposerPasteToken } from './draft/composer-draft-types'
 import {
   createPasteToken,
   expandPasteTokens,

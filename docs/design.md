@@ -37,6 +37,14 @@ Within `conversation`, `journal/` groups event encoding, tool settlements, repla
 
 `main.ts` composes these modules. IPC retains trusted sender validation, typed channel registration, event delivery, and window ownership for pending requests. Shutdown stops compaction before saving renderer drafts, then stops and drains turns and drains compaction before closing storage. Separate internal drain policies retain their persistence and error semantics.
 
+## Renderer Chat Modules
+
+The renderer chat runtime is consumed through `src/renderer/src/hooks/chat/index.ts`. Its workspace interface exposes navigation, request selections, response control, and compaction state. Lifecycle flags, mutable session records, SDK `Chat` instances, and transport cancellation coordination remain internal. Transcript consumers use `useConversationTranscript` with an opaque source; approval and message-list subscriptions retain their independent update cadence. The architecture lint rule rejects private runtime imports and SDK subscriptions outside their owning module, with transport protocol tests retaining their internal SDK seam.
+
+Composer draft ownership is local to `components/chat/composer/draft`. The draft owner captures the submitted key and content before asynchronous work and owns acceptance, failure retention, and sending state. Its editor owns metadata-before-edit ordering and rollback when a native edit is refused; text observation reconciles labels without taking ownership of browser undo and redo. Menu, focus, and visual rendering remain in the composer. Built-in command identity is shared by recognition, completion, and submission without conflating their different queries.
+
+Shared tool presentation owns environment-neutral facts used by multiple views. Renderer icons and running, completed, and disclosure projections remain with their presentation owners; trace persistence and normalization keep their existing contracts.
+
 ## Verify the Changed Contract
 
 ### Owned contracts in src

@@ -19,28 +19,15 @@ import type {
   ThinkingSelection
 } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import {
-  chatComposerDrafts,
-  composerDraftKey,
-  useChatComposerDraft
-} from '@renderer/hooks/chat/chat-composer-drafts'
 import { ArrowUpIcon, ShieldCheckIcon, ShieldIcon, SquareIcon } from 'lucide-react'
 import * as React from 'react'
 import { ChatModelSelector } from './chat-model-selector'
 import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
-import { shouldCapturePastedText } from './composer-paste-capture-policy'
 import { ComposerTokenHighlight } from './composer-token-highlight'
 import { deleteTextareaRange, insertTextareaText } from './composer-edit-commands'
 import { arrowTokenJump, backspaceDeletion, wordBackspaceDeletion } from './composer-editing'
-import {
-  createPasteToken,
-  expandPasteTokens,
-  pasteClipboardText,
-  pasteTokenIssue,
-  reconcilePasteTokens,
-  restorePasteToken
-} from './composer-paste-tokens'
-import { isCompactDraft, tokenizeComposerDraft } from './composer-tokens'
+import { projectComposerDraft } from './draft/composer-draft-model'
+import { composerDraftKey, useChatComposerDraft } from './draft/composer-drafts'
 import { ProjectSelector } from './project-selector'
 import { ThinkingSelector } from './thinking-selector'
 import { useComposerModelSelection } from './use-composer-model-selection'
@@ -142,7 +129,7 @@ function ChatComposer({
   // Drafts live in the renderer-owned store, so switching conversations keeps
   // each draft separate and leaving for Settings keeps the draft alive.
   const draftKey = composerDraftKey(draftConversationId)
-  const [draft, updateDraft] = useChatComposerDraft(draftKey)
+  const [draft, draftActions] = useChatComposerDraft(draftKey)
   // The caret position at the latest edit; the menu opens only while the user
   // is still editing the leading token.
   const [selection, setSelection] = React.useState({ key: draftKey, caret: draft.text.length })
@@ -154,19 +141,8 @@ function ChatComposer({
   // Commands list before skills; the first skill entry starts the skills group.
   const firstSkillIndex = skills.matches.findIndex((item) => item.kind === 'skill')
   const commandCount = firstSkillIndex === -1 ? skills.matches.length : firstSkillIndex
-  // The command uses the session profile; the composer does not require a global model selection.
-  const isCompactCommand = isCompactDraft(draft.text)
-  const canSubmitDraft =
-    isCompactCommand || (hasSelectedModel && Boolean(draft.text.trim() || draft.documents.length))
-  // Paste token markers join the invocation tokens: the mirror paints them and
-  // the atomic-edit rules treat each visible label as one unit.
-  const tokens = [
-    ...tokenizeComposerDraft(draft.text, skills.knownSkillNames),
-    ...draft.pasteTokens
-      .filter((token) => token.state !== 'retired')
-      .map((token) => ({ start: token.start, end: token.end, kind: 'paste' as const }))
-  ].sort((left, right) => left.start - right.start)
-  const damagedPasteToken = draft.pasteTokens.find((token) => token.state === 'damaged')
+  const projection = projectComposerDraft(draft, skills.knownSkillNames)
+  const canSubmitDraft = projection.isCompactCommand || (hasSelectedModel && projection.hasContent)
   const skillMenuId = React.useId()
   const capabilityHintId = React.useId()
   const activeSkillRef = React.useRef<HTMLButtonElement>(null)
@@ -255,111 +231,14 @@ function ChatComposer({
     textarea.style.height = `${textarea.scrollHeight}px`
   }, [draft.text, draftKey])
 
-  const submit = async (): Promise<void> => {
-    if (mode !== 'send' || chatComposerDrafts.getDraft(draftKey).isSending) return
-
-    // Every store write targets the identity captured now, before any await:
-    // the active conversation may change while the send is in flight, and a
-    // late resolution must never erase another conversation's draft.
-    const sentDraftKey = draftKey
-    const submitted = { text: draft.text, documents: draft.documents }
-    // The provider receives the expanded text; the draft itself keeps the
-    // short labels until the send clears it.
-    const sentText = expandPasteTokens(submitted.text, draft.pasteTokens)
-    const sentDocuments = submitted.documents
-
-    // The built-in /compact command runs locally: it is never sent as a message
-    // and never persisted as a skill invocation part.
-    if (isCompactDraft(draft.text)) {
-      if (!onCompact) {
-        updateDraft((current) => ({
-          ...current,
-          sendError: 'Choose an existing conversation before using /compact. Your draft is kept.'
-        }))
-        return
-      }
-      const commandArguments = /^\/compact(?:\s+([\s\S]+))?$/.exec(draft.text.trim())?.[1]
-      if (commandArguments) {
-        updateDraft((current) => ({
-          ...current,
-          sendError:
-            'The /compact command takes no arguments. Send it on its own, or send your text as a normal message.'
-        }))
-        return
-      }
-      if (sentDocuments.length) {
-        updateDraft((current) => ({
-          ...current,
-          sendError:
-            'The /compact command does not support attachments. Remove them or send them as a normal message.'
-        }))
-        return
-      }
-      updateDraft((current) => ({ ...current, sendError: null }))
-      chatComposerDrafts.clearDraft(sentDraftKey)
-      onCompact()
-      return
-    }
-
-    // A token whose label was edited cannot deliver its payload; the error
-    // names the action (undo, repair, or delete) instead of silently dropping
-    // the original text.
-    const pasteIssue = pasteTokenIssue(draft.text, draft.pasteTokens)
-    if (pasteIssue) {
-      updateDraft((current) => ({ ...current, sendError: pasteIssue }))
-      return
-    }
-
-    if (!hasSelectedModel || (!sentText.trim() && !sentDocuments.length)) return
-
-    updateDraft((current) => ({ ...current, isSending: true, sendError: null }))
-    try {
-      const skillInvocation = skills.resolveInvocation(sentText)
-      const content = skillInvocation
-        ? { text: sentText, documents: sentDocuments, skillInvocation }
-        : { text: sentText, documents: sentDocuments }
-      if (await onSend(content)) {
-        // A draft edited while the send was in flight is preserved for retry;
-        // an untouched draft is cleared with its submitted content.
-        chatComposerDrafts.acceptDraft(sentDraftKey, {
-          ...draft,
-          isSending: false,
-          sendError: null
-        })
-      }
-    } catch (cause) {
-      const detail = cause instanceof Error ? ` ${cause.message}` : ''
-      chatComposerDrafts.updateDraft(sentDraftKey, (current) => ({
-        ...current,
-        isSending: false,
-        sendError: `Could not send this message.${detail} Your draft and attachments are kept. Try again.`
-      }))
-    } finally {
-      chatComposerDrafts.updateDraft(sentDraftKey, (current) =>
-        current.isSending ? { ...current, isSending: false } : current
-      )
-    }
-  }
-
-  // Repairs a damaged paste token through one native edit transaction: the
-  // broken text at the token's range is replaced by the exact original label,
-  // which restores the payload association and keeps native undo/redo.
-  const repairDamagedToken = (): void => {
-    const textarea = textareaRef.current
-    if (!textarea || !damagedPasteToken) return
-    const repair = restorePasteToken(draft.text, damagedPasteToken)
-    if (!repair) return
-    const before = textarea.value
-    textarea.focus()
-    textarea.setSelectionRange(repair.start, repair.end)
-    insertTextareaText(damagedPasteToken.displayText)
-    if (textarea.value === before) {
-      updateDraft((current) => ({
-        ...current,
-        sendError:
-          'Could not restore the pasted text in the editor. Undo your edit (Ctrl+Z) or delete the token and paste the text again.'
-      }))
-    }
+  const submit = (): void => {
+    void draftActions.submit({
+      canSend: mode === 'send',
+      hasSelectedModel,
+      onSend,
+      onCompact,
+      resolveInvocation: skills.resolveInvocation
+    })
   }
 
   const selectCompletion = (item: (typeof skills.matches)[number]): void => {
@@ -432,9 +311,9 @@ function ChatComposer({
     if (event.key === 'Backspace' && caretCollapsed && !event.altKey && !event.shiftKey) {
       const deletion =
         event.ctrlKey || event.metaKey
-          ? wordBackspaceDeletion(draft.text, tokens, keyCaret)
+          ? wordBackspaceDeletion(draft.text, projection.tokens, keyCaret)
           : isPlainKey
-            ? backspaceDeletion(tokens, keyCaret)
+            ? backspaceDeletion(projection.tokens, keyCaret)
             : null
       if (deletion && textarea) {
         event.preventDefault()
@@ -443,7 +322,11 @@ function ChatComposer({
       }
     }
     if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && isPlainKey && caretCollapsed) {
-      const jump = arrowTokenJump(tokens, keyCaret, event.key === 'ArrowLeft' ? 'left' : 'right')
+      const jump = arrowTokenJump(
+        projection.tokens,
+        keyCaret,
+        event.key === 'ArrowLeft' ? 'left' : 'right'
+      )
       if (jump !== null && textarea) {
         event.preventDefault()
         textarea.setSelectionRange(jump, jump)
@@ -461,7 +344,7 @@ function ChatComposer({
       canSubmitDraft
     ) {
       event.preventDefault()
-      void submit()
+      submit()
     }
   }
 
@@ -486,7 +369,7 @@ function ChatComposer({
       }}
       onSubmit={(event) => {
         event.preventDefault()
-        void submit()
+        submit()
       }}
     >
       <div className="mx-auto w-full max-w-[50rem]">
@@ -633,21 +516,19 @@ function ChatComposer({
           <ComposerAttachmentList
             disabled={configurationDisabled}
             documents={draft.documents}
-            onDocumentsChange={(documents) =>
-              updateDraft((current) => ({ ...current, documents, sendError: null }))
-            }
+            onDocumentsChange={draftActions.setDocuments}
           />
-          {damagedPasteToken ? (
+          {projection.canRepairPaste ? (
             <div className="flex items-center gap-2 px-2 text-xs">
               <span className="text-destructive" role="alert">
-                {pasteTokenIssue(draft.text, draft.pasteTokens)}
+                {projection.pasteIssue}
               </span>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
                 className="h-7 shrink-0 px-2 text-xs"
-                onClick={repairDamagedToken}
+                onClick={() => draftActions.repair(textareaRef.current)}
               >
                 Restore pasted text
               </Button>
@@ -657,7 +538,7 @@ function ChatComposer({
             <ComposerTokenHighlight
               draft={draft.text}
               hidden={isComposing}
-              tokens={tokens}
+              tokens={projection.tokens}
               textarea={textarea}
             />
             {/* The hint is a static overlay instead of the native placeholder:
@@ -707,14 +588,9 @@ function ChatComposer({
                   key: draftKey,
                   caret: event.target.selectionStart ?? text.length
                 })
-                updateDraft((current) => ({
-                  ...current,
-                  text,
-                  sendError: null,
-                  // Observational only: native undo/redo stays the browser's
-                  // own, and this re-locates, retires, or flags tokens.
-                  pasteTokens: reconcilePasteTokens(current.text, text, current.pasteTokens)
-                }))
+                // Observation keeps native undo/redo with the browser; the
+                // editor re-locates, retires, or flags tokens from this event.
+                draftActions.observe(text)
               }}
               onCompositionStart={() => {
                 compositionRef.current = true
@@ -732,77 +608,9 @@ function ChatComposer({
               }}
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
-              onCopy={(event) => {
-                const textarea = event.currentTarget
-                const expanded = pasteClipboardText(
-                  textarea.value,
-                  draft.pasteTokens,
-                  textarea.selectionStart ?? 0,
-                  textarea.selectionEnd ?? 0
-                )
-                // No token touched: the browser keeps its native copy.
-                if (expanded === null) return
-                event.clipboardData.setData('text/plain', expanded)
-                event.preventDefault()
-              }}
-              onCut={(event) => {
-                const textarea = event.currentTarget
-                const start = textarea.selectionStart ?? 0
-                const end = textarea.selectionEnd ?? 0
-                const expanded = pasteClipboardText(textarea.value, draft.pasteTokens, start, end)
-                if (expanded === null) return
-                event.clipboardData.setData('text/plain', expanded)
-                // Controlling the clipboard cancels the native cut; the
-                // deletion still runs as one native edit transaction so
-                // undo/redo stays intact.
-                event.preventDefault()
-                const before = textarea.value
-                textarea.setSelectionRange(start, end)
-                deleteTextareaRange(textarea, start, end)
-                if (textarea.value === before) {
-                  updateDraft((current) => ({
-                    ...current,
-                    sendError:
-                      'The pasted text was copied, but the editor could not cut it. Your draft is kept. Try cutting again or delete the selected text.'
-                  }))
-                }
-              }}
-              onPaste={(event) => {
-                const clipboard = event.clipboardData
-                // "text" is the historic alias for "text/plain"; some test
-                // DataTransfer polyfills only store the short form.
-                const text = clipboard.getData('text/plain') || clipboard.getData('text')
-                // Reference-sized pastes stay ordinary textarea text — the
-                // exact cursor position, selection replacement, and Ctrl+Z
-                // undo all keep working, and the draft text is what gets sent.
-                if (!shouldCapturePastedText(text)) return
-                const textarea = event.currentTarget
-                const start = textarea.selectionStart ?? textarea.value.length
-                const end = textarea.selectionEnd ?? start
-                const token = createPasteToken(text, draft.pasteTokens, start)
-                event.preventDefault()
-                const before = textarea.value
-                // Metadata lands first, so the capture transaction's input
-                // event re-locates every token against the value it observes.
-                updateDraft((current) => ({
-                  ...current,
-                  pasteTokens: [...current.pasteTokens, token]
-                }))
-                textarea.setSelectionRange(start, end)
-                insertTextareaText(token.displayText)
-                if (textarea.value === before) {
-                  // The browser refused the transaction; roll the metadata
-                  // back instead of leaving a payload that can never appear.
-                  updateDraft((current) => ({
-                    ...current,
-                    pasteTokens: current.pasteTokens.filter(
-                      (entry) => entry.displayText !== token.displayText
-                    ),
-                    sendError:
-                      'Could not collapse this paste in the editor. Try pasting again, or attach the text as a file.'
-                  }))
-                }
-              }}
+              onCopy={draftActions.copy}
+              onCut={draftActions.cut}
+              onPaste={draftActions.paste}
               value={draft.text}
             />
           </div>
@@ -825,9 +633,7 @@ function ChatComposer({
               key={draftKey}
               disabled={configurationDisabled}
               documents={draft.documents}
-              onDocumentsChange={(documents) =>
-                updateDraft((current) => ({ ...current, documents, sendError: null }))
-              }
+              onDocumentsChange={draftActions.setDocuments}
             />
             <div className="chat-composer-footer__generation flex min-w-0 items-center gap-1.5">
               <ChatModelSelector
@@ -915,7 +721,7 @@ function ChatComposer({
                   ? 'Sending message'
                   : mode === 'stop'
                     ? 'Stop response'
-                    : hasSelectedModel || isCompactCommand
+                    : hasSelectedModel || projection.isCompactCommand
                       ? 'Send message'
                       : 'Select an enabled model to send messages'
               }

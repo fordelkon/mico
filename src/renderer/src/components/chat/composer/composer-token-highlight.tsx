@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-import type { ComposerToken } from './composer-tokens'
+import type { ComposerToken } from './draft/composer-draft-types'
 
 type Props = {
   draft: string

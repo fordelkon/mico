@@ -1,19 +1,10 @@
-type ComposerToken = {
-  start: number
-  end: number
-  kind: 'command' | 'skill' | 'paste'
-}
-
-function isCompactDraft(draft: string): boolean {
-  return /^\/compact(?:\s|$)/.test(draft.trim())
-}
+import { readCompactCommand } from './composer-commands'
+import type { ComposerToken } from './draft/composer-draft-types'
 
 function tokenizeComposerDraft(draft: string, skillNames: ReadonlySet<string>): ComposerToken[] {
   const tokens: ComposerToken[] = []
-  if (isCompactDraft(draft)) {
-    const start = draft.length - draft.trimStart().length
-    tokens.push({ start, end: start + '/compact'.length, kind: 'command' })
-  }
+  const command = readCompactCommand(draft)
+  if (command) tokens.push({ start: command.start, end: command.end, kind: 'command' })
 
   // Skill highlighting accepts exactly one `$name` invocation at offset zero;
   // the historic `/skill:` form is plain text. Arguments and
@@ -27,4 +18,4 @@ function tokenizeComposerDraft(draft: string, skillNames: ReadonlySet<string>): 
   return tokens
 }
 
-export { isCompactDraft, tokenizeComposerDraft, type ComposerToken }
+export { tokenizeComposerDraft }

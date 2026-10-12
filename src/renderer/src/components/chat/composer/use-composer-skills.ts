@@ -4,6 +4,7 @@ import {
   type SkillCatalog
 } from '@shared/ai/skills'
 import * as React from 'react'
+import { COMPACT_COMMAND } from './composer-commands'
 
 type CatalogState = {
   projectId: string | undefined
@@ -17,6 +18,7 @@ type ComposerCommandItem = {
   kind: 'command'
   id: string
   name: string
+  token: string
   label: string
   description: string
 }
@@ -48,16 +50,6 @@ function commandArguments(draft: string): string {
  * leading `$` query offers skills only, and `null` means the menu is closed.
  */
 type ComposerQueryMode = 'slash' | 'dollar' | null
-
-// The single built-in command. It is dispatched locally by the composer and is
-// never sent as a message or persisted as a skill invocation part.
-const BUILT_IN_COMMAND: ComposerCommandItem = {
-  kind: 'command',
-  id: 'compact',
-  name: 'compact',
-  label: 'Compact context',
-  description: 'Summarize this conversation to free context space.'
-}
 
 function useComposerSkills(
   projectId: string | null | undefined,
@@ -122,14 +114,14 @@ function useComposerSkills(
   // Built-in commands are independent of the skill catalog: they stay available
   // while skills load, fail, or need a workspace, and only the slash menu
   // offers them — a `$` query selects skills alone.
+  const normalizedQuery = query.toLocaleLowerCase()
   // Matching ignores case and ranks prefix matches first so "$comp" offers
   // "compact"-like names before loose substring hits.
-  const normalizedQuery = query.toLocaleLowerCase()
   const matchesQuery = (name: string): boolean => name.toLocaleLowerCase().includes(normalizedQuery)
   const commandMatches =
     queryMode === 'slash' && offerCompactCommand
-      ? matchesQuery(BUILT_IN_COMMAND.name)
-        ? [BUILT_IN_COMMAND]
+      ? matchesQuery(COMPACT_COMMAND.name)
+        ? [COMPACT_COMMAND]
         : []
       : []
   const skills = (catalog?.skills ?? []).filter((skill) => skill.userInvocable)
@@ -155,7 +147,7 @@ function useComposerSkills(
   const applyCompletion = (item: ComposerMenuItem): ComposerCompletion => {
     // Skill entries always complete to `$name`; the slash menu offers commands
     // only, so no slash skill token exists.
-    const token = item.kind === 'command' ? '/compact' : `$${item.name}`
+    const token = item.kind === 'command' ? COMPACT_COMMAND.token : `$${item.name}`
     const existingSuffix = draft.slice(tokenEnd)
     return {
       text: `${token}${existingSuffix[0] || ' '}`,

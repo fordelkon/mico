@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
 import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
-import { chatComposerDrafts, composerDraftKey } from '@renderer/hooks/chat/chat-composer-drafts'
 import type { PermissionMode } from '@shared/ai/permissions'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
@@ -11,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 import * as React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatComposer } from './chat-composer'
+import { chatComposerDrafts, composerDraftKey } from './draft/composer-drafts'
 import { stubBrowserEditCommands } from './test-helpers/browser-edit-commands'
 
 const skillCatalog = {
@@ -1873,6 +1873,79 @@ describe('ChatComposer', () => {
 
     expect(onSend).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent(/has no original text/)
+  })
+
+  it('user pastes when the browser refuses the edit, then existing payloads survive for retry', async () => {
+    const user = userEvent.setup()
+    const onSend = vi
+      .fn<React.ComponentProps<typeof ChatComposer>['onSend']>()
+      .mockResolvedValue(true)
+    renderWithLibrary(<ChatComposer {...props} onSend={onSend} />)
+    await waitForModelButton('Qwen 3 8B')
+    const textarea = screen.getByRole<HTMLTextAreaElement>('textbox')
+    textarea.focus()
+    await user.paste('a'.repeat(1_000))
+    const label = textarea.value
+    // jsdom has no native editing stack; refusal is supplied at the same
+    // document API seam as the successful edit stub, without changing owner state.
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn<typeof document.execCommand>().mockReturnValue(false)
+    })
+    await user.paste('b'.repeat(1_000))
+    expect(textarea).toHaveValue(label)
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not collapse this paste')
+    expect(chatComposerDrafts.getDraft(composerDraftKey(null)).pasteTokens).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(onSend).toHaveBeenCalledWith({ text: 'a'.repeat(1_000), documents: [] })
+  })
+
+  it('user cuts when the browser refuses deletion, then the clipboard expands and the draft stays', async () => {
+    const user = userEvent.setup()
+    renderWithLibrary(<ChatComposer {...props} />)
+    const textarea = screen.getByRole<HTMLTextAreaElement>('textbox')
+    textarea.focus()
+    const payload = 'a'.repeat(1_000)
+    await user.paste(payload)
+    const label = textarea.value
+    // Reject only the browser edit, leaving the real clipboard and token owner active.
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn<typeof document.execCommand>().mockReturnValue(false)
+    })
+    const setData = vi.fn<(type: string, text: string) => void>()
+    textarea.setSelectionRange(0, label.length)
+    fireEvent.cut(textarea, { clipboardData: { setData, getData: (): string => '' } })
+    expect(setData).toHaveBeenCalledWith('text/plain', payload)
+    expect(textarea).toHaveValue(label)
+    expect(screen.getByRole('alert')).toHaveTextContent('editor could not cut it')
+  })
+
+  it('user repairs when the browser refuses the edit, then damage keeps blocking the send', async () => {
+    const user = userEvent.setup()
+    const onSend = vi
+      .fn<React.ComponentProps<typeof ChatComposer>['onSend']>()
+      .mockResolvedValue(true)
+    renderWithLibrary(<ChatComposer {...props} onSend={onSend} />)
+    await waitForModelButton('Qwen 3 8B')
+    const textarea = screen.getByRole<HTMLTextAreaElement>('textbox')
+    textarea.focus()
+    await user.paste('a'.repeat(1_000))
+    textarea.setSelectionRange(4, 4)
+    await user.keyboard('x')
+    const broken = textarea.value
+    // The browser refuses repair; input reconciliation still runs only on real input events.
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn<typeof document.execCommand>().mockReturnValue(false)
+    })
+    await user.click(screen.getByRole('button', { name: 'Restore pasted text' }))
+    expect(textarea).toHaveValue(broken)
+    expect(
+      screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('Could not restore'))
+    ).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(onSend).not.toHaveBeenCalled()
   })
 
   it('user switches conversations when a paste is captured, then the token keeps its payload', async () => {

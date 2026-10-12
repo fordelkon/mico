@@ -1,10 +1,28 @@
 import { describe, expect, it } from 'vitest'
 
+import { getToolPresentation } from './tool-presentation'
 import {
   getToolTracePresentation,
   ToolTraceInputSchema,
   ToolTraceSourceInputSchema
 } from './tool-trace'
+
+describe('tool presentation', () => {
+  it.each(['Weather', 'toString', '__proto__'])(
+    'user encounters %s when the tool is unfamiliar, then its own identity and generic details remain',
+    (toolName) => {
+      const presentation = getToolPresentation(toolName)
+
+      expect(presentation).toMatchObject({
+        known: false,
+        label: toolName,
+        iconKind: 'tool',
+        activityLabel: toolName,
+        completedSummary: { group: toolName, unit: 'call', verb: toolName }
+      })
+    }
+  )
+})
 
 describe('tool trace interpretation', () => {
   it('user receives overlapping input fields when a tool runs, then canonical fields take precedence', () => {

@@ -1,4 +1,4 @@
-import type { ComposerPasteToken } from '@renderer/hooks/chat/chat-composer-drafts'
+import type { ComposerPasteToken } from './draft/composer-draft-types'
 
 /** Visible, collision-checked IDs keep the textarea and mirror metrically identical. */
 function createPasteToken(

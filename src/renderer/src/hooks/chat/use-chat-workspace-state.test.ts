@@ -1,4 +1,3 @@
-import { useChat } from '@ai-sdk/react'
 import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
@@ -6,7 +5,7 @@ import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useChatWorkspaceState } from './use-chat-workspace-state'
+import { useChatWorkspaceState, useConversationTranscript } from '.'
 
 class FakeChatAPI implements ChatAPI {
   async getSkillCatalog(): Promise<Awaited<ReturnType<ChatAPI['getSkillCatalog']>>> {
@@ -140,7 +139,11 @@ function renderWorkspaceState(configure?: (api: FakeChatAPI) => void) {
     }
   }
   exposeApi(api)
-  const rendered = renderHook(() => useChatWorkspaceState())
+  const rendered = renderHook(() => {
+    const workspace = useChatWorkspaceState()
+    const { messages } = useConversationTranscript(workspace.session.transcript)
+    return { ...workspace, transcriptMessages: messages }
+  })
   return { api, ...rendered }
 }
 
@@ -261,7 +264,7 @@ describe('useChatWorkspaceState', () => {
       await late.promise
     })
     expect(result.current.responses.response.status).toBe('submitted')
-    expect(result.current.session.activeChat?.messages.at(-1)).toMatchObject({
+    expect(result.current.transcriptMessages.at(-1)).toMatchObject({
       role: 'user',
       parts: [{ type: 'text', text: 'New request' }]
     })
@@ -330,7 +333,7 @@ describe('useChatWorkspaceState', () => {
     })
     await waitFor(() => expect(api.startedRequests).toHaveLength(2))
     expect(result.current.responses.response.status).toBe('submitted')
-    expect(result.current.session.activeChat?.messages.at(-1)?.parts).toEqual([
+    expect(result.current.transcriptMessages.at(-1)?.parts).toEqual([
       { type: 'text', text: 'New prompt' }
     ])
   })
@@ -377,7 +380,7 @@ describe('useChatWorkspaceState', () => {
     )
     act(() => result.current.session.selectConversation('session-1'))
     await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
-    expect(result.current.session.activeChat?.messages.at(-1)?.parts).toEqual([
+    expect(result.current.transcriptMessages.at(-1)?.parts).toEqual([
       { type: 'text', text: 'Durable answer', state: 'done' }
     ])
     expect(loads).toBe(3)
@@ -574,7 +577,7 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.session.selectedModelEntryId).toBe('changed')
   })
 
-  it('user retries a background conversation when another is selected, then it uses its own thinking effort', async () => {
+  it('user navigates while a retry starts when efforts differ, then the sending session keeps its effort', async () => {
     const { api, result } = renderWorkspaceState((api) => {
       const load = api.sessions.load
       api.sessions.load = async (id) => ({ ...(await load(id)), id })
@@ -582,13 +585,11 @@ describe('useChatWorkspaceState', () => {
     act(() => result.current.session.selectConversation('first'))
     await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('first'))
     act(() => result.current.session.setThinkingEffort('high'))
-    const background = result.current.session.activeChat
+    act(() => result.current.responses.retryResponse())
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     act(() => result.current.session.selectConversation('second'))
     await waitFor(() => expect(result.current.session.activeSession?.conversationId).toBe('second'))
     act(() => result.current.session.setThinkingEffort('low'))
-    act(() => {
-      void background?.regenerate()
-    })
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     expect(api.startedRequests[0]).toMatchObject({ sessionId: 'first', thinkingEffort: 'high' })
   })
@@ -682,7 +683,7 @@ describe('useChatWorkspaceState', () => {
   it('user submits twice before the next render when a session is open, then only one request starts', async () => {
     const { api, result } = renderWorkspaceState()
     act(() => result.current.session.selectConversation('session-1'))
-    await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
+    await waitFor(() => expect(result.current.session.transcript).not.toBeNull())
 
     await act(async () => {
       const first = result.current.responses.sendMessage({ text: 'First', documents: [] })
@@ -736,7 +737,7 @@ describe('useChatWorkspaceState', () => {
     async ({ existing, text }) => {
       const { api, result } = renderWorkspaceState()
       if (existing) act(() => result.current.session.selectConversation('session-1'))
-      await waitFor(() => expect(Boolean(result.current.session.activeChat)).toBe(existing))
+      await waitFor(() => expect(Boolean(result.current.session.transcript)).toBe(existing))
 
       await act(async () => {
         expect(
@@ -789,9 +790,9 @@ describe('useChatWorkspaceState', () => {
       })
     })
     act(() => result.current.session.selectConversation('session-1'))
-    await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
+    await waitFor(() => expect(result.current.session.transcript).not.toBeNull())
 
-    act(() => void result.current.session.activeChat?.regenerate())
+    act(() => result.current.responses.retryResponse())
 
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
     expect(api.startedRequests[0].userMessage.parts).toEqual([
@@ -821,8 +822,8 @@ describe('useChatWorkspaceState', () => {
       })
       await waitFor(() => expect(result.current.conversations).toHaveLength(1))
       act(() => result.current.session.selectConversation('session-1'))
-      await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
-      const chat = result.current.session.activeChat
+      await waitFor(() => expect(result.current.session.transcript).not.toBeNull())
+      const chat = result.current.session.transcript
 
       await act(async () => {
         const change =
@@ -836,7 +837,7 @@ describe('useChatWorkspaceState', () => {
         )
       })
       expect(result.current.conversations).toMatchObject([{ id: 'session-1', title: 'Saved chat' }])
-      expect(result.current.session.activeChat).toBe(chat)
+      expect(result.current.session.transcript).toBe(chat)
 
       await act(async () => {
         if (operation === 'rename') {
@@ -871,10 +872,10 @@ describe('useChatWorkspaceState', () => {
       })
     })
     act(() => result.current.session.selectConversation('session-1'))
-    await waitFor(() => expect(result.current.session.activeChat).not.toBeNull())
+    await waitFor(() => expect(result.current.session.transcript).not.toBeNull())
 
     act(() => {
-      void result.current.session.activeChat?.regenerate()
+      result.current.responses.retryResponse()
     })
 
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
@@ -920,7 +921,7 @@ describe('useChatWorkspaceState', () => {
     act(() => result.current.session.selectConversation('session-1'))
 
     await waitFor(() =>
-      expect(result.current.session.activeChat?.messages.at(-1)?.parts).toMatchObject([
+      expect(result.current.transcriptMessages.at(-1)?.parts).toMatchObject([
         {
           type: 'dynamic-tool',
           toolCallId: 'call-1',
@@ -979,11 +980,25 @@ describe('useChatWorkspaceState', () => {
     })
     act(() => void result.current.responses.sendMessage({ text: 'First', documents: [] }))
     await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() => {
+      const requestId = api.startedRequests[0].requestId
+      api.emit({ type: 'chunk', requestId, chunk: { type: 'start', messageId: 'partial-answer' } })
+      api.emit({ type: 'chunk', requestId, chunk: { type: 'text-start', id: 'partial-text' } })
+      api.emit({
+        type: 'chunk',
+        requestId,
+        chunk: { type: 'text-delta', id: 'partial-text', delta: 'Partial answer' }
+      })
+      api.emit({ type: 'chunk', requestId, chunk: { type: 'text-end', id: 'partial-text' } })
+    })
+    await waitFor(() => expect(result.current.transcriptMessages.at(-1)?.role).toBe('assistant'))
     act(() => result.current.responses.stopResponse())
     await act(async () => {
       await Promise.resolve()
     })
     expect(result.current.responses.response.status).toBe('settling')
+    expect(result.current.responses.composerMode).toBe('disabled')
+    expect(result.current.responses.isTurnActive).toBe(true)
     await act(async () => {
       expect(
         await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
@@ -995,6 +1010,8 @@ describe('useChatWorkspaceState', () => {
       await pending
     })
     await waitFor(() => expect(result.current.responses.response.status).toBe('idle'))
+    expect(result.current.transcriptMessages.at(-1)?.metadata?.completionState).toBe('stopped')
+    expect(result.current.responses.composerMode).toBe('send')
     await act(async () => {
       expect(
         await result.current.responses.sendMessage({ text: 'Keep draft', documents: [] })
@@ -1125,6 +1142,8 @@ describe('useChatWorkspaceState', () => {
     })
 
     await waitFor(() => expect(result.current.responses.response.status).toBe('streaming'))
+    expect(result.current.responses.isTurnActive).toBe(true)
+    expect(result.current.responses.composerMode).toBe('stop')
     expect(result.current.responses.respondingConversationIds).toBe(respondingConversationIds)
   })
 
@@ -1139,14 +1158,16 @@ describe('useChatWorkspaceState', () => {
 
     const initialRequestId = api.startedRequests[0]?.requestId
     if (!initialRequestId) throw new Error('Sending a message must start a request.')
-    const activeChat = result.current.session.activeChat
-    if (!activeChat) throw new Error('Sending a message must create an active chat.')
+    const source = result.current.session.transcript
+    if (!source) throw new Error('Sending a message must create an active chat.')
     act(() => api.emit({ type: 'finish', requestId: initialRequestId }))
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    const { result: transcript } = renderHook(() => useChat({ chat: activeChat, throttle: 50 }))
+    const { result: transcript } = renderHook(() =>
+      useConversationTranscript(source, { throttleMs: 50 })
+    )
     act(() => void result.current.responses.sendMessage({ text: 'Hello again', documents: [] }))
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
@@ -1179,6 +1200,31 @@ describe('useChatWorkspaceState', () => {
     })
     expect(transcript.current.messages.at(-1)?.parts).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'rapid updates' })])
+    )
+    await act(async () => {
+      api.emit({
+        type: 'chunk',
+        requestId,
+        chunk: {
+          type: 'data-tool-permission',
+          id: 'approval-stream',
+          data: {
+            approvalId: '00000000-0000-4000-8000-000000000001',
+            toolCallId: 'call-stream',
+            toolName: 'Read',
+            cwd: '/workspace',
+            input: { path: 'file.ts' },
+            reason: 'Review this request.',
+            state: 'pending'
+          }
+        }
+      })
+    })
+    expect(result.current.transcriptMessages.at(-1)?.parts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'data-tool-permission' })])
+    )
+    expect(transcript.current.messages.at(-1)?.parts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'data-tool-permission' })])
     )
 
     await act(async () => {
@@ -1369,6 +1415,8 @@ describe('useChatWorkspaceState compaction', () => {
     expect(api.compact).toHaveBeenCalledTimes(1)
     act(() => result.current.session.startNewChat())
     expect(result.current.compactions.states.get('session-1')?.status).toBe('pending')
+    const compactingIds = result.current.compactions.compactingConversationIds
+    expect(compactingIds).toEqual(new Set(['session-1']))
     const acknowledged = Promise.withResolvers<void>()
     api.cancelCompact.mockReturnValue(acknowledged.promise)
     let cancellation!: Promise<void>
@@ -1380,6 +1428,7 @@ describe('useChatWorkspaceState compaction', () => {
       await cancellation
     })
     expect(result.current.compactions.states.get('session-1')?.status).toBe('pending')
+    expect(result.current.compactions.compactingConversationIds).toBe(compactingIds)
     act(() => result.current.session.selectConversation('session-1'))
     await waitFor(() =>
       expect(result.current.session.activeSession?.conversationId).toBe('session-1')
@@ -1397,6 +1446,7 @@ describe('useChatWorkspaceState compaction', () => {
       await started
     })
     expect(result.current.compactions.states.get('session-1')).toEqual({ status: 'cancelled' })
+    expect(result.current.compactions.compactingConversationIds).toEqual(new Set())
     expect(api.cancelCompact).toHaveBeenCalledWith(api.compact.mock.calls[0][0])
     act(() => result.current.session.selectConversation('session-1'))
     await waitFor(() =>

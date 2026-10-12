@@ -1,4 +1,4 @@
-import type { ComposerToken } from './composer-tokens'
+import type { ComposerToken } from './draft/composer-draft-types'
 
 type TextRange = { start: number; end: number }
 

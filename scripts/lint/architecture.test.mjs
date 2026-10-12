@@ -45,7 +45,23 @@ describe('Process imports', () => {
     ['src/main/ai/workspace/example.js', "import '@main/ai/conversation/index'"],
     ['src/main/ai/conversation/example.js', "import '../models/index/../selection'"],
     ['src/main/ai/workspace/example.js', "import '@shared/../main/ai/models'"],
-    ['src/main/example.js', "import '@renderer/../../main/ai/conversation/runtime'"]
+    ['src/main/example.js', "import '@renderer/../../main/ai/conversation/runtime'"],
+    ['src/renderer/src/App.js', "import './hooks/chat/chat-session-instances'"],
+    [
+      'src/renderer/src/components/chat/example.js',
+      "export * from '@renderer/hooks/chat/use-active-session'"
+    ],
+    [
+      'src/renderer/src/components/example.js',
+      "import('../hooks/chat/index/../chat-session-instances')"
+    ],
+    [
+      'src/renderer/src/components/example.js',
+      "require('@renderer/hooks/chat/use-chat-workspace-state')"
+    ],
+    ['src/renderer/src/components/chat/example.js', "import '@ai-sdk/react'"],
+    ['src/renderer/src/components/chat/example.test.js', "import '@ai-sdk/react'"],
+    ['src/renderer/src/components/chat/example.js', "export * from '@ai-sdk/react/subscription'"]
   ])('user checks %s when importing %s, then lint rejects it', (file, code) => {
     const messages = check(file, code)
     expect(messages).toHaveLength(1)
@@ -65,7 +81,15 @@ describe('Process imports', () => {
     ['src/main/ai/conversation/example.js', "import '../workspace'"],
     ['src/main/ai/conversation/example.js', "export * from '../models/index.js'"],
     ['src/main/ai/conversation/example.js', "import './runtime'"],
-    ['src/main/ai/workspace/tools/example.js', "import '../skills/snapshot'"]
+    ['src/main/ai/workspace/tools/example.js', "import '../skills/snapshot'"],
+    ['src/renderer/src/App.js', "import './hooks/chat'"],
+    ['src/renderer/src/components/chat/example.js', "import '@renderer/hooks/chat/index'"],
+    ['src/renderer/src/hooks/chat/example.js', "import './chat-session-instances'"],
+    ['src/renderer/src/hooks/chat/example.test.js', "import '@ai-sdk/react'"],
+    [
+      'src/renderer/src/services/ai-transport/electron-chat-transport.test.js',
+      "import '@ai-sdk/react'"
+    ]
   ])('user checks %s when importing %s, then lint accepts it', (file, code) => {
     expect(check(file, code)).toEqual([])
   })

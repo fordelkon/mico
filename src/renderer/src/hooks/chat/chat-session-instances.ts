@@ -1,4 +1,4 @@
-import { Chat } from '@ai-sdk/react'
+import { Chat, useChat } from '@ai-sdk/react'
 import { ElectronChatTransport } from '@renderer/services/ai-transport/electron-chat-transport'
 import {
   type ChatResponseState,
@@ -68,8 +68,48 @@ function useChatResponses(): ChatResponsesStore {
   return { responses, respondingConversationIds, getResponse, setResponseState, settleResponse }
 }
 
+const transcriptSourceBrand: unique symbol = Symbol('ConversationTranscriptSource')
+
+type ConversationTranscriptSource = {
+  readonly conversationId: string
+  readonly [transcriptSourceBrand]: true
+}
+
+const transcriptChats = new WeakMap<ConversationTranscriptSource, Chat<MicoUIMessage>>()
+const emptyTranscriptChat = new Chat<MicoUIMessage>({ id: 'empty-transcript', messages: [] })
+
+type ConversationTranscript = { messages: readonly MicoUIMessage[] }
+
+/** Each reader retains the SDK's independent message subscription and throttle. */
+function useConversationTranscript(
+  source: ConversationTranscriptSource | null,
+  options?: { throttleMs?: number }
+): ConversationTranscript {
+  const chat = source ? transcriptChats.get(source) : undefined
+  const { messages } = useChat<MicoUIMessage>({
+    chat: chat ?? emptyTranscriptChat,
+    throttle: options?.throttleMs
+  })
+  return { messages }
+}
+
+type SessionRequestConfig = {
+  modelEntryId: string | null
+  thinkingEffort: ThinkingSelection | null
+  permissionMode: PermissionMode
+}
+
+type ChatSessionView = {
+  readonly conversation: Conversation
+  readonly transcript: ConversationTranscriptSource
+  readonly project: WorkspaceProject | null
+  readonly requestConfig: Readonly<SessionRequestConfig>
+}
+
+// SDK instances and lifecycle gates belong exclusively to the session owner.
 type ChatSession = {
   conversation: Conversation
+  transcript: ConversationTranscriptSource
   chat: Chat<MicoUIMessage>
   transport: ElectronChatTransport
   stopping?: Promise<void>
@@ -124,6 +164,20 @@ function toUiMessages(messages: ChatMessage[]): MicoUIMessage[] {
   }))
 }
 
+// The public view of a session instance: no SDK object and no lifecycle flags.
+function toSessionView(instance: ChatSession): ChatSessionView {
+  return {
+    conversation: { ...instance.conversation },
+    transcript: instance.transcript,
+    project: instance.project ? { ...instance.project } : null,
+    requestConfig: {
+      modelEntryId: instance.modelEntryId,
+      thinkingEffort: instance.thinkingEffort,
+      permissionMode: instance.permissionMode
+    }
+  }
+}
+
 type ChatResponseControl = {
   responses: ReadonlyMap<string, ChatResponseUpdate>
   respondingConversationIds: ReadonlySet<string>
@@ -131,7 +185,7 @@ type ChatResponseControl = {
   queueFirstMessage: (conversationId: string, parts: MicoUIMessage['parts']) => void
   stopResponse: (conversationId: string) => void
   retryResponse: (conversationId: string) => void
-  prepareForDeletion: (conversationId: string) => Promise<void>
+  deleteConversation: (conversationId: string) => Promise<void>
 }
 
 type ChatCompactionState =
@@ -142,6 +196,7 @@ type ChatCompactionState =
 
 type ChatCompactionsStore = {
   states: ReadonlyMap<string, ChatCompactionState>
+  compactingConversationIds: ReadonlySet<string>
   startCompaction: (conversationId: string) => Promise<void>
   cancelCompaction: (conversationId: string) => Promise<void>
 }
@@ -150,17 +205,17 @@ type ChatSessionsStore = {
   responseControl: ChatResponseControl
   compactions: ChatCompactionsStore
   contextEstimates: ReadonlyMap<string, number>
-  getSession: (conversationId: string) => ChatSession | undefined
-  removeSession: (conversationId: string) => void
-  refreshRecovery: (conversationId: string) => Promise<void>
+  getSession: (conversationId: string) => ChatSessionView | undefined
+  refreshRecoveryIfStale: (conversationId: string) => void
   createSession: (
     conversation: Conversation,
     messages?: ChatMessage[],
-    selection?: Pick<ChatSession, 'modelEntryId' | 'thinkingEffort'>,
+    selection?: SessionRequestConfig,
     project?: WorkspaceProject | null,
     recovery?: SessionRecovery | null
-  ) => ChatSession
-  updateSession: (conversationId: string, patch: (session: ChatSession) => void) => void
+  ) => ChatSessionView
+  setRequestConfig: (conversationId: string, config: Partial<SessionRequestConfig>) => void
+  updateConversationTitle: (conversationId: string, title: string) => void
 }
 
 function useChatSessions(): ChatSessionsStore {
@@ -191,9 +246,20 @@ function useChatSessions(): ChatSessionsStore {
   const [compactionStates, setCompactionStates] = React.useState<
     ReadonlyMap<string, ChatCompactionState>
   >(() => new Map())
+  const [compactingConversationIds, setCompactingConversationIds] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set())
   const publishCompaction = React.useCallback((id: string, state: ChatCompactionState): void => {
     compactionsRef.current.set(id, state)
     setCompactionStates(new Map(compactionsRef.current))
+    setCompactingConversationIds((current) => {
+      const pending = state.status === 'pending'
+      if (current.has(id) === pending) return current
+      const next = new Set(current)
+      if (pending) next.add(id)
+      else next.delete(id)
+      return next
+    })
   }, [])
   const startCompaction = React.useCallback(
     async (id: string): Promise<void> => {
@@ -251,15 +317,21 @@ function useChatSessions(): ChatSessionsStore {
     [publishCompaction]
   )
 
-  const getSession = React.useCallback(
-    (conversationId: string): ChatSession | undefined => sessionsRef.current.get(conversationId),
-    []
-  )
+  const getSession = React.useCallback((conversationId: string): ChatSessionView | undefined => {
+    const instance = sessionsRef.current.get(conversationId)
+    return instance && toSessionView(instance)
+  }, [])
 
   const removeSession = React.useCallback((conversationId: string): void => {
     sessionsRef.current.delete(conversationId)
-    if (compactionsRef.current.delete(conversationId))
-      setCompactionStates(new Map(compactionsRef.current))
+    const hadCompaction = compactionsRef.current.delete(conversationId)
+    if (hadCompaction) setCompactionStates(new Map(compactionsRef.current))
+    setCompactingConversationIds((current) => {
+      if (!hadCompaction || !current.has(conversationId)) return current
+      const next = new Set(current)
+      next.delete(conversationId)
+      return next
+    })
     contextEstimatesRef.current.delete(conversationId)
     setContextEstimates(new Map(contextEstimatesRef.current))
   }, [])
@@ -273,10 +345,21 @@ function useChatSessions(): ChatSessionsStore {
     []
   )
 
-  const updateSession = React.useCallback(
-    (conversationId: string, patch: (session: ChatSession) => void): void => {
-      const session = sessionsRef.current.get(conversationId)
-      if (session) patch(session)
+  const setRequestConfig = React.useCallback(
+    (conversationId: string, config: Partial<SessionRequestConfig>): void => {
+      const instance = sessionsRef.current.get(conversationId)
+      if (!instance) return
+      if (config.modelEntryId !== undefined) instance.modelEntryId = config.modelEntryId
+      if (config.thinkingEffort !== undefined) instance.thinkingEffort = config.thinkingEffort
+      if (config.permissionMode !== undefined) instance.permissionMode = config.permissionMode
+    },
+    []
+  )
+
+  const updateConversationTitle = React.useCallback(
+    (conversationId: string, title: string): void => {
+      const instance = sessionsRef.current.get(conversationId)
+      if (instance) instance.conversation = { ...instance.conversation, title }
     },
     []
   )
@@ -351,22 +434,24 @@ function useChatSessions(): ChatSessionsStore {
     (
       conversation: Conversation,
       messages: ChatMessage[] = [],
-      selection: Pick<ChatSession, 'modelEntryId' | 'thinkingEffort'> = {
+      selection: SessionRequestConfig = {
         modelEntryId: null,
-        thinkingEffort: null
+        thinkingEffort: null,
+        permissionMode: 'default'
       },
       project: WorkspaceProject | null = null,
       recovery?: SessionRecovery | null
-    ): ChatSession => {
+    ): ChatSessionView => {
+      const conversationId = conversation.id
       const transport = new ElectronChatTransport(window.api.chat, {
-        sessionId: conversation.id,
-        getRetryRunId: () => sessionsRef.current.get(conversation.id)?.recovery?.runId,
+        sessionId: conversationId,
+        getRetryRunId: () => sessionsRef.current.get(conversationId)?.recovery?.runId,
         getThinkingEffort: () =>
-          sessionsRef.current.get(conversation.id)?.thinkingEffort ?? 'default',
+          sessionsRef.current.get(conversationId)?.thinkingEffort ?? 'default',
         getPermissionMode: () =>
-          sessionsRef.current.get(conversation.id)?.permissionMode ?? 'default',
+          sessionsRef.current.get(conversationId)?.permissionMode ?? 'default',
         onStatusChange: (status) => {
-          const currentResponse = getResponse(conversation.id)
+          const currentResponse = getResponse(conversationId)
           if (
             !currentResponse ||
             currentResponse.status === 'error' ||
@@ -377,7 +462,7 @@ function useChatSessions(): ChatSessionsStore {
           if (status.type === 'retrying') {
             onResponseState({
               status: 'retrying',
-              conversationId: conversation.id,
+              conversationId,
               ...status,
               startedAt: Date.now()
             })
@@ -385,55 +470,60 @@ function useChatSessions(): ChatSessionsStore {
             currentResponse.status === 'submitted' ||
             currentResponse.status === 'retrying'
           ) {
-            onResponseState({ status: 'streaming', conversationId: conversation.id })
+            onResponseState({ status: 'streaming', conversationId })
           }
         },
         onContextMeasurement: (measurement) => {
-          setContextEstimate(conversation.id, measurement.estimatedInputTokens)
+          setContextEstimate(conversationId, measurement.estimatedInputTokens)
         }
       })
       const chat = new Chat<MicoUIMessage>({
-        id: conversation.id,
+        id: conversationId,
         messages: toUiMessages(messages),
         transport,
         onFinish: ({ isError }) => {
-          if (!isError && !sessionsRef.current.get(conversation.id)?.stopping)
-            onResponseSettled(conversation.id)
+          if (!isError && !sessionsRef.current.get(conversationId)?.stopping)
+            onResponseSettled(conversationId)
         },
         onError: (error) => {
-          const instance = sessionsRef.current.get(conversation.id)
+          const instance = sessionsRef.current.get(conversationId)
           if (instance?.stopping) return
           onResponseState({
             status: 'error',
-            conversationId: conversation.id,
+            conversationId,
             message: error.message,
             canRetry: false
           })
           // A retried attempt has one terminal refresh owned by its awaited regeneration.
-          if (!instance?.retryInProgress) void refreshRecovery(conversation.id)
+          if (!instance?.retryInProgress) void refreshRecovery(conversationId)
         }
       })
 
+      const transcript: ConversationTranscriptSource = {
+        conversationId,
+        [transcriptSourceBrand]: true
+      }
+      transcriptChats.set(transcript, chat)
       const session: ChatSession = {
         conversation,
+        transcript,
         chat,
         transport,
         project,
-        permissionMode: 'default',
         recovery,
         recoveryRevision: 0,
         ...selection
       }
-      sessionsRef.current.set(conversation.id, session)
+      sessionsRef.current.set(conversationId, session)
       if (recovery)
         onResponseState({
           status: 'error',
-          conversationId: conversation.id,
+          conversationId,
           message: recovery.blockedReason ?? recovery.failure.message,
           canRetry: recovery.canRetry,
           failureCode: recovery.failure.code
         })
-      return session
+      return toSessionView(session)
     },
     [getResponse, onResponseState, onResponseSettled, refreshRecovery, setContextEstimate]
   )
@@ -450,7 +540,7 @@ function useChatSessions(): ChatSessionsStore {
 
   const sendMessage = React.useCallback(
     (conversationId: string, parts: MicoUIMessage['parts']): boolean => {
-      const instance = getSession(conversationId)
+      const instance = sessionsRef.current.get(conversationId)
       const current = getResponse(conversationId)
       if (
         !instance ||
@@ -469,25 +559,25 @@ function useChatSessions(): ChatSessionsStore {
       void instance.chat.sendMessage({ parts })
       return true
     },
-    [getSession, getResponse, onResponseState, setContextEstimate]
+    [getResponse, onResponseState, setContextEstimate]
   )
 
   const queueFirstMessage = React.useCallback(
     (conversationId: string, parts: MicoUIMessage['parts']): void => {
-      const instance = getSession(conversationId)
+      const instance = sessionsRef.current.get(conversationId)
       if (!instance) return
       setContextEstimate(conversationId, null)
       onResponseState({ status: 'submitted', conversationId })
       // The newly active chat must reach subscribers before its first message starts.
       setPendingMessage({ chat: instance.chat, parts })
     },
-    [getSession, onResponseState, setContextEstimate]
+    [onResponseState, setContextEstimate]
   )
 
   const stopResponse = React.useCallback(
     (conversationId: string): void => {
       if (!getResponse(conversationId)) return
-      const instance = getSession(conversationId)
+      const instance = sessionsRef.current.get(conversationId)
       if (!instance) {
         onResponseSettled(conversationId)
         return
@@ -526,13 +616,13 @@ function useChatSessions(): ChatSessionsStore {
         }
       )
     },
-    [getSession, getResponse, onResponseState, onResponseSettled]
+    [getResponse, onResponseState, onResponseSettled]
   )
 
   const retryResponse = React.useCallback(
     (conversationId: string): void => {
       if (getResponse(conversationId)?.status !== 'error') return
-      const instance = getSession(conversationId)
+      const instance = sessionsRef.current.get(conversationId)
       if (
         !instance?.recovery?.canRetry ||
         instance.stopping ||
@@ -566,22 +656,37 @@ function useChatSessions(): ChatSessionsStore {
           void refreshRecovery(conversationId)
         })
     },
-    [getSession, getResponse, onResponseState, refreshRecovery, setContextEstimate]
+    [getResponse, onResponseState, refreshRecovery, setContextEstimate]
   )
 
-  const prepareForDeletion = React.useCallback(
+  const refreshRecoveryIfStale = React.useCallback(
+    (conversationId: string): void => {
+      const instance = sessionsRef.current.get(conversationId)
+      if (!instance?.recoveryNeedsRefresh) return
+      void refreshRecovery(conversationId)
+    },
+    [refreshRecovery]
+  )
+
+  const deleteConversation = React.useCallback(
     async (conversationId: string): Promise<void> => {
       if (compactionsRef.current.get(conversationId)?.status === 'pending')
         throw new Error('Cancel the summary before deleting this conversation.')
-      const instance = getSession(conversationId)
-      if (!instance) return
-      instance.deleting = true
-      if (getResponse(conversationId)) {
-        stopResponse(conversationId)
-        await instance.stopping
+      const instance = sessionsRef.current.get(conversationId)
+      if (instance) instance.deleting = true
+      try {
+        if (instance && getResponse(conversationId)) {
+          stopResponse(conversationId)
+          await instance.stopping
+        }
+        await window.api.sessions.delete(conversationId)
+        removeSession(conversationId)
+      } catch (error) {
+        if (instance) instance.deleting = false
+        throw error
       }
     },
-    [getSession, getResponse, stopResponse]
+    [getResponse, removeSession, stopResponse]
   )
 
   const responseControl = React.useMemo(
@@ -592,7 +697,7 @@ function useChatSessions(): ChatSessionsStore {
       queueFirstMessage,
       stopResponse,
       retryResponse,
-      prepareForDeletion
+      deleteConversation
     }),
     [
       responses,
@@ -601,26 +706,33 @@ function useChatSessions(): ChatSessionsStore {
       queueFirstMessage,
       stopResponse,
       retryResponse,
-      prepareForDeletion
+      deleteConversation
     ]
   )
 
   return {
     getSession,
-    removeSession,
+    refreshRecoveryIfStale,
     createSession,
-    updateSession,
-    refreshRecovery,
+    setRequestConfig,
+    updateConversationTitle,
     responseControl,
     contextEstimates,
-    compactions: { states: compactionStates, startCompaction, cancelCompaction }
+    compactions: {
+      states: compactionStates,
+      compactingConversationIds,
+      startCompaction,
+      cancelCompaction
+    }
   }
 }
 
 export {
   type ChatCompactionState,
   type ChatCompactionsStore,
-  type ChatSession,
+  type ChatSessionView,
   type ChatSessionsStore,
-  useChatSessions
+  type ConversationTranscriptSource,
+  useChatSessions,
+  useConversationTranscript
 }

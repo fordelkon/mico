@@ -37,6 +37,20 @@ function aiModule(filename) {
   return match ? { name: match[1], entry: match[2] } : undefined
 }
 
+function chatRuntime(filename) {
+  const path = relative(root, filename).replaceAll('\\', '/')
+  const match = /^src\/renderer\/src\/hooks\/chat(?:\/(.*))?$/.exec(path)
+  return match ? { entry: match[1] } : undefined
+}
+
+function ownsChatSdk(filename) {
+  const path = relative(root, filename).replaceAll('\\', '/')
+  return (
+    path.startsWith('src/renderer/src/hooks/chat/') ||
+    /^src\/renderer\/src\/services\/ai-transport\/[^/]+\.test\.[jt]s$/.test(path)
+  )
+}
+
 const processImports = {
   meta: {
     type: 'problem',
@@ -46,6 +60,8 @@ const processImports = {
         '{{source}} must not import {{target}}. Use its owning process or package interface.',
       privatePackage: 'Consume workspace packages through their public exports.',
       privateAiModule: 'Consume {{target}} through its public module root.',
+      privateChatRuntime: 'Consume the renderer chat runtime through its public module root.',
+      chatSdk: 'Keep SDK Chat instances and subscriptions inside the renderer chat runtime.',
       aiDirection:
         '{{source}} must not import {{target}}. AI module dependencies must remain acyclic.'
     }
@@ -74,6 +90,14 @@ const processImports = {
         context.report({ node, messageId: 'forbidden', data: { source, target: specifier } })
         return
       }
+      if (
+        source === 'renderer' &&
+        (specifier === '@ai-sdk/react' || specifier.startsWith('@ai-sdk/react/')) &&
+        !ownsChatSdk(context.filename)
+      ) {
+        context.report({ node, messageId: 'chatSdk' })
+        return
+      }
       const resolvedPath = specifier.startsWith('.')
         ? resolve(dirname(context.filename), specifier)
         : specifier.startsWith('@main/')
@@ -83,6 +107,16 @@ const processImports = {
             : specifier.startsWith('@shared/')
               ? resolve(root, 'src/shared', specifier.slice('@shared/'.length))
               : undefined
+      const targetChat = resolvedPath ? chatRuntime(resolvedPath) : undefined
+      if (
+        targetChat &&
+        !chatRuntime(context.filename) &&
+        targetChat.entry &&
+        !/^index(?:\.[cm]?[jt]sx?)?$/.test(targetChat.entry)
+      ) {
+        context.report({ node, messageId: 'privateChatRuntime' })
+        return
+      }
       const targetAi = resolvedPath ? aiModule(resolvedPath) : undefined
       const sourceAi = aiModule(context.filename)
       if (targetAi && sourceAi?.name !== targetAi.name) {

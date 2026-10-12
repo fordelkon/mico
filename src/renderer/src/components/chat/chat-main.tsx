@@ -1,15 +1,14 @@
 import { Button, Spinner, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@mico/ui'
 import type {
   ChatCompactionState,
-  ChatCompactionsStore
-} from '@renderer/hooks/chat/chat-session-instances'
-import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
-import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
-import { isActiveChatResponse } from '@renderer/types/chat'
+  ChatCompactionsStore,
+  ChatActiveSessionSlice,
+  ChatResponseSlice
+} from '@renderer/hooks/chat'
 import { CheckIcon, CircleAlertIcon, CircleMinusIcon } from 'lucide-react'
 import * as React from 'react'
 import { ChatApproval } from './composer/chat-approval'
-import { ChatComposer, type ChatComposerMode } from './composer/chat-composer'
+import { ChatComposer } from './composer/chat-composer'
 import { ProjectSelector } from './composer/project-selector'
 import { EmptyConversation } from './empty-conversation'
 import './chat-main.css'
@@ -125,25 +124,14 @@ function ChatCompactionStatus({
 }
 
 function ChatMain({ session, responses, compactions }: ChatMainProps): React.JSX.Element {
-  const { response } = responses
+  const { isTurnActive: isActiveResponse, composerMode, errorMessage, retry } = responses
   // Hide only the acknowledged state object. A newly published outcome becomes
   // visible even when its message matches an earlier dismissed failure.
   const [dismissedCompactions, setDismissedCompactions] = React.useState<
     ReadonlyMap<string, ChatCompactionState>
   >(() => new Map())
-  const isForActiveConversation =
-    response.status !== 'idle' && session.activeConversation?.id === response.conversationId
-  const isActiveResponse = isActiveChatResponse(response) && isForActiveConversation
   const conversationId = session.activeConversation?.id
   const compactionState = conversationId ? compactions.states.get(conversationId) : undefined
-  const composerMode: ChatComposerMode =
-    compactionState?.status === 'pending'
-      ? 'disabled'
-      : !isActiveChatResponse(response)
-        ? 'send'
-        : isActiveResponse && response.status !== 'settling'
-          ? 'stop'
-          : 'disabled'
   const compactionStatus =
     compactionState &&
     conversationId &&
@@ -160,16 +148,13 @@ function ChatMain({ session, responses, compactions }: ChatMainProps): React.JSX
         onRetry={() => void compactions.startCompaction(conversationId)}
       />
     ) : undefined
-  const errorMessage =
-    response.status === 'error' && isForActiveConversation ? response.message : undefined
-  const retry = response.status === 'retrying' && isForActiveConversation ? response : undefined
   const composer = (
     <ChatComposer
       approval={
-        session.activeConversation && session.activeChat ? (
+        session.activeConversation && session.transcript ? (
           <ChatApproval
             key={session.activeConversation.id}
-            chat={session.activeChat}
+            source={session.transcript}
             isActive={isActiveResponse}
           />
         ) : undefined
@@ -227,7 +212,7 @@ function ChatMain({ session, responses, compactions }: ChatMainProps): React.JSX
             className="chat-paper__conversation flex min-h-0 flex-1"
             key={session.activeConversation.id}
           >
-            {session.activeChat && (
+            {session.transcript && (
               <React.Suspense
                 fallback={
                   <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -236,21 +221,13 @@ function ChatMain({ session, responses, compactions }: ChatMainProps): React.JSX
                 }
               >
                 <SubscribedChatMessageList
-                  chat={session.activeChat}
+                  source={session.transcript}
                   conversationId={session.activeConversation.id}
                   errorMessage={errorMessage}
-                  failureCode={
-                    response.status === 'error' && isForActiveConversation
-                      ? response.failureCode
-                      : undefined
-                  }
+                  failureCode={responses.failureCode}
                   isResponding={isActiveResponse}
                   isThinkingEnabled={session.thinkingEffort !== 'none'}
-                  onRetry={
-                    errorMessage && response.status === 'error' && response.canRetry !== false
-                      ? responses.retryResponse
-                      : undefined
-                  }
+                  onRetry={responses.canRetry ? responses.retryResponse : undefined}
                   retry={retry}
                   status={compactionStatus}
                 />

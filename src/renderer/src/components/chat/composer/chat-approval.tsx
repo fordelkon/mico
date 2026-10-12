@@ -1,19 +1,18 @@
-import { useChat, type Chat } from '@ai-sdk/react'
+import { useConversationTranscript, type ConversationTranscriptSource } from '@renderer/hooks/chat'
 import * as React from 'react'
 
-import type { MicoUIMessage } from '@renderer/types/chat'
 import type { ToolPermissionData } from '@shared/ai/permissions'
 import { ToolPermissionCard } from '../conversation/tools/tool-permission-card'
 
 /** Pending decisions belong to the active turn's composer, outside the transcript scroll area. */
 function ChatApproval({
-  chat,
+  source,
   isActive
 }: {
-  chat: Chat<MicoUIMessage>
+  source: ConversationTranscriptSource
   isActive: boolean
 }): React.JSX.Element | null {
-  const { messages } = useChat<MicoUIMessage>({ chat })
+  const { messages } = useConversationTranscript(source)
   const message = messages.at(-1)
   if (
     !isActive ||

@@ -1,15 +1,19 @@
 import '@testing-library/jest-dom/vitest'
 
-import { Chat } from '@ai-sdk/react'
 import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
-import type { ChatCompactionsStore } from '@renderer/hooks/chat/chat-session-instances'
-import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
-import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
+import {
+  useChatWorkspaceState,
+  type ChatCompactionsStore,
+  type ChatActiveSessionSlice,
+  type ChatResponseSlice
+} from '@renderer/hooks/chat'
+import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { MicoUIMessage } from '@renderer/types/chat'
 import type { ToolPermissionData } from '@shared/ai/permissions'
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatMain } from './chat-main'
@@ -23,7 +27,7 @@ function createSessionSlice(): ChatActiveSessionSlice {
   return {
     activeConversation: { id: 'conversation-1', title: 'New chat' },
     activeSession: null,
-    activeChat: null,
+    transcript: null,
     permissionMode: 'default',
     setPermissionMode: vi.fn<ChatActiveSessionSlice['setPermissionMode']>(),
     thinkingEffort: 'medium',
@@ -42,15 +46,14 @@ function createSessionSlice(): ChatActiveSessionSlice {
     selectProjectForNewChat: vi.fn<(project: WorkspaceProject) => void>(),
     startNewChat: vi.fn<() => void>(),
     selectConversation:
-      vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
-    createNewSession: vi.fn<ChatActiveSessionSlice['createNewSession']>(),
-    closeSessionIfActive: vi.fn<(conversationId: string) => void>()
+      vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>()
   }
 }
 
 function createCompactions(): ChatCompactionsStore {
   return {
     states: new Map(),
+    compactingConversationIds: new Set(),
     startCompaction: vi.fn<ChatCompactionsStore['startCompaction']>(),
     cancelCompaction: vi.fn<ChatCompactionsStore['cancelCompaction']>()
   }
@@ -67,6 +70,9 @@ function createResponseSlice(): ChatResponseSlice {
       startedAt: Date.now()
     },
     respondingConversationIds: new Set(['conversation-1']),
+    isTurnActive: true,
+    composerMode: 'stop',
+    canRetry: false,
     sendMessage:
       vi.fn<(content: Parameters<ChatResponseSlice['sendMessage']>[0]) => Promise<boolean>>(),
     retryResponse: vi.fn<() => void>(),
@@ -106,6 +112,80 @@ function approvalMessage(permissions: ToolPermissionData[]): MicoUIMessage {
   }
 }
 
+async function createTranscriptDriver({ id, messages }: { id: string; messages: MicoUIMessage[] }) {
+  const listeners = new Set<(event: TurnStreamEvent) => void>()
+  let requestId = ''
+  const chat: Pick<ChatAPI, 'startTurn' | 'abortTurn' | 'onTurnEvent'> = {
+    startTurn: async (request) => {
+      requestId = request.requestId
+    },
+    abortTurn: async () => {},
+    onTurnEvent: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    }
+  }
+  const sessions: Pick<SessionsAPI, 'create' | 'list' | 'onTitleUpdated'> = {
+    create: async () => ({
+      id,
+      title: 'New chat',
+      defaultProfile: null,
+      createdAt: 1,
+      updatedAt: 1,
+      lastActivityAt: 1
+    }),
+    list: async () => [],
+    onTitleUpdated: () => () => {}
+  }
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    value: {
+      ...window.api,
+      chat: { ...window.api.chat, ...chat },
+      sessions,
+      workspaces: { list: async () => [] }
+    }
+  })
+  const { result } = renderHook(() => useChatWorkspaceState())
+  await act(async () => {
+    await result.current.responses.sendMessage({ text: 'Request', documents: [] })
+  })
+  await waitFor(() => expect(requestId).not.toBe(''))
+  const emit = (chunk: Extract<TurnStreamEvent, { type: 'chunk' }>['chunk']): void => {
+    for (const listener of listeners) listener({ type: 'chunk', requestId, chunk })
+  }
+  const publish = (updates: MicoUIMessage[]): void => {
+    for (const message of updates) {
+      for (const part of message.parts) {
+        if (part.type === 'data-tool-permission') emit({ ...part, id: part.data.approvalId })
+      }
+    }
+  }
+  await act(async () => {
+    emit({ type: 'start', messageId: 'assistant-approval' })
+    for (const message of messages) {
+      for (const part of message.parts) {
+        if (part.type === 'dynamic-tool' && part.state === 'input-available')
+          emit({
+            type: 'tool-input-available',
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: part.input,
+            dynamic: true
+          })
+      }
+    }
+    publish(messages)
+  })
+  const source = result.current.session.transcript
+  if (!source) throw new Error('Sending a message must create a transcript source.')
+  return { source, publish }
+}
+
+async function createTranscript(input: { id: string; messages: MicoUIMessage[] }) {
+  return (await createTranscriptDriver(input)).source
+}
+
 describe('ChatMain', () => {
   it('user cancels an inline summary when pending, then sending waits for its outcome', async () => {
     const user = userEvent.setup()
@@ -115,14 +195,19 @@ describe('ChatMain', () => {
     ])
     const session = {
       ...createSessionSlice(),
-      activeChat: new Chat<MicoUIMessage>({ id: 'summary-chat', messages: [] })
+      transcript: await createTranscript({ id: 'summary-chat', messages: [] })
     }
     render(
       <ProviderLibraryProvider>
         <ChatMain
           compactions={compactions}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'disabled'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -157,14 +242,19 @@ describe('ChatMain', () => {
       compactions.states = new Map([['conversation-1', state]])
       const session = {
         ...createSessionSlice(),
-        activeChat: new Chat<MicoUIMessage>({ id: 'summary-chat', messages: [] })
+        transcript: await createTranscript({ id: 'summary-chat', messages: [] })
       }
       const { rerender } = render(
         <ProviderLibraryProvider>
           <ChatMain
             compactions={compactions}
             session={session}
-            responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+            responses={{
+              ...createResponseSlice(),
+              response: { status: 'idle' },
+              isTurnActive: false,
+              composerMode: 'send'
+            }}
           />
         </ProviderLibraryProvider>
       )
@@ -177,9 +267,14 @@ describe('ChatMain', () => {
             session={{
               ...session,
               activeConversation: { id: 'conversation-2', title: 'Other chat' },
-              activeChat: new Chat<MicoUIMessage>({ id: 'other-chat', messages: [] })
+              transcript: await createTranscript({ id: 'other-chat', messages: [] })
             }}
-            responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+            responses={{
+              ...createResponseSlice(),
+              response: { status: 'idle' },
+              isTurnActive: false,
+              composerMode: 'send'
+            }}
           />
         </ProviderLibraryProvider>
       )
@@ -201,14 +296,19 @@ describe('ChatMain', () => {
     ])
     const session = {
       ...createSessionSlice(),
-      activeChat: new Chat<MicoUIMessage>({ id: 'summary-retry', messages: [] })
+      transcript: await createTranscript({ id: 'summary-retry', messages: [] })
     }
     render(
       <ProviderLibraryProvider>
         <ChatMain
           compactions={compactions}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -227,7 +327,7 @@ describe('ChatMain', () => {
     ])
     const session = {
       ...createSessionSlice(),
-      activeChat: new Chat<MicoUIMessage>({ id: 'summary-retry-busy', messages: [] })
+      transcript: await createTranscript({ id: 'summary-retry-busy', messages: [] })
     }
     render(
       <ProviderLibraryProvider>
@@ -256,14 +356,19 @@ describe('ChatMain', () => {
     compactions.states = new Map([['conversation-1', failedState]])
     const session = {
       ...createSessionSlice(),
-      activeChat: new Chat<MicoUIMessage>({ id: 'summary-dismiss', messages: [] })
+      transcript: await createTranscript({ id: 'summary-dismiss', messages: [] })
     }
     const view = render(
       <ProviderLibraryProvider>
         <ChatMain
           compactions={compactions}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -277,7 +382,12 @@ describe('ChatMain', () => {
         <ChatMain
           compactions={compactions}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -292,7 +402,12 @@ describe('ChatMain', () => {
         <ChatMain
           compactions={compactions}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -305,14 +420,19 @@ describe('ChatMain', () => {
     compactions.states = new Map([['conversation-1', { status: 'accepted' as const }]])
     const session = {
       ...createSessionSlice(),
-      activeChat: new Chat<MicoUIMessage>({ id: 'summary-accepted', messages: [] })
+      transcript: await createTranscript({ id: 'summary-accepted', messages: [] })
     }
     const view = render(
       <ProviderLibraryProvider>
         <ChatMain
           compactions={compactions}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -326,7 +446,12 @@ describe('ChatMain', () => {
         <ChatMain
           compactions={compactions}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -342,6 +467,8 @@ describe('ChatMain', () => {
           responses={{
             ...createResponseSlice(),
             response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send',
             estimatedInputTokens: 1234
           }}
         />
@@ -414,7 +541,7 @@ describe('ChatMain', () => {
 
   it('user reviews a pending command when messages are visible, then approval controls stay outside the transcript', async () => {
     const session = createSessionSlice()
-    session.activeChat = new Chat<MicoUIMessage>({
+    session.transcript = await createTranscript({
       id: 'chat-approval',
       messages: [approvalMessage([pendingPermission])]
     })
@@ -441,11 +568,11 @@ describe('ChatMain', () => {
       toolCallId: 'bash-next',
       input: { command: 'echo next-demo' }
     }
-    const chat = new Chat<MicoUIMessage>({
+    const chat = await createTranscriptDriver({
       id: 'chat-queue',
       messages: [approvalMessage([pendingPermission, nextPermission])]
     })
-    const session = { ...createSessionSlice(), activeChat: chat }
+    const session = { ...createSessionSlice(), transcript: chat.source }
     render(
       <ProviderLibraryProvider>
         <ChatMain
@@ -459,32 +586,32 @@ describe('ChatMain', () => {
       within(screen.getByRole('group', { name: 'Pending tool approval' })).getByLabelText('Command')
     ).toHaveTextContent('echo approval-demo')
     await act(async () => {
-      chat.messages = [
+      chat.publish([
         approvalMessage([
           pendingPermission,
           nextPermission,
           { ...pendingPermission, state: 'approved' }
         ])
-      ]
+      ])
     })
     expect(
       within(screen.getByRole('group', { name: 'Pending tool approval' })).getByLabelText('Command')
     ).toHaveTextContent('echo next-demo')
     await act(async () => {
-      chat.messages = [
+      chat.publish([
         approvalMessage([
           { ...pendingPermission, state: 'approved' },
           { ...nextPermission, state: 'denied' }
         ])
-      ]
+      ])
     })
     expect(screen.queryByRole('group', { name: 'Pending tool approval' })).not.toBeInTheDocument()
   })
 
-  it('user changes conversations when approval is pending, then only the active turn can show the card', () => {
+  it('user changes conversations when approval is pending, then only the active turn can show the card', async () => {
     const session = {
       ...createSessionSlice(),
-      activeChat: new Chat<MicoUIMessage>({
+      transcript: await createTranscript({
         id: 'chat-switch',
         messages: [approvalMessage([pendingPermission])]
       })
@@ -503,7 +630,7 @@ describe('ChatMain', () => {
           session={{
             ...session,
             activeConversation: { id: 'conversation-2', title: 'Other chat' },
-            activeChat: new Chat<MicoUIMessage>({ id: 'chat-other', messages: [] })
+            transcript: await createTranscript({ id: 'chat-other', messages: [] })
           }}
           responses={responses}
         />
@@ -515,7 +642,12 @@ describe('ChatMain', () => {
         <ChatMain
           compactions={createCompactions()}
           session={session}
-          responses={{ ...responses, response: { status: 'idle' } }}
+          responses={{
+            ...responses,
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )
@@ -594,7 +726,12 @@ describe('ChatMain', () => {
         <ChatMain
           compactions={createCompactions()}
           session={session}
-          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'idle' },
+            isTurnActive: false,
+            composerMode: 'send'
+          }}
         />
       </ProviderLibraryProvider>
     )

@@ -11,7 +11,7 @@ import {
 
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
 import type { TurnFailureCode } from '@shared/ai/turn-failure'
-import { Chat, useChat } from '@ai-sdk/react'
+import { useConversationTranscript, type ConversationTranscriptSource } from '@renderer/hooks/chat'
 import { CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
 
@@ -44,7 +44,7 @@ type ChatMessageListProps = {
   errorMessage?: string
   failureCode?: TurnFailureCode
   isThinkingEnabled?: boolean
-  messages: MicoUIMessage[]
+  messages: readonly MicoUIMessage[]
   isResponding: boolean
   onRetry?: () => void
   retry?: ChatRetryState
@@ -52,7 +52,7 @@ type ChatMessageListProps = {
 }
 
 type SubscribedChatMessageListProps = Omit<ChatMessageListProps, 'messages'> & {
-  chat: Chat<MicoUIMessage>
+  source: ConversationTranscriptSource
 }
 
 type RetryProgressStyle = React.CSSProperties & { '--retry-delay': string }
@@ -193,12 +193,11 @@ function ChatMessageList({
 }
 
 function SubscribedChatMessageList({
-  chat,
+  source,
   ...props
 }: SubscribedChatMessageListProps): React.JSX.Element {
-  const { messages } = useChat<MicoUIMessage>({
-    chat,
-    throttle: STREAMING_UPDATE_THROTTLE_MS
+  const { messages } = useConversationTranscript(source, {
+    throttleMs: STREAMING_UPDATE_THROTTLE_MS
   })
 
   return <ChatMessageList {...props} messages={messages} />

@@ -1,6 +1,8 @@
 import {
   type ChatResponseState,
   IDLE_CHAT_RESPONSE,
+  isActiveChatResponse,
+  type ChatRetryState,
   type MicoUIMessage
 } from '@renderer/types/chat'
 import type { ChatSkillInvocationPart } from '@shared/ai/skills'
@@ -21,6 +23,12 @@ type ChatResponseSlice = {
   response: ChatResponseState
   estimatedInputTokens?: number
   respondingConversationIds: ReadonlySet<string>
+  isTurnActive: boolean
+  composerMode: 'send' | 'stop' | 'disabled'
+  errorMessage?: string
+  failureCode?: Extract<ChatResponseState, { status: 'error' }>['failureCode']
+  retry?: ChatRetryState
+  canRetry: boolean
   sendMessage: (content: ChatSendInput) => Promise<boolean>
   retryResponse: () => void
   stopResponse: () => void
@@ -50,7 +58,7 @@ function useChatWorkspaceState(): ChatWorkspace {
     queueFirstMessage,
     stopResponse: stopSessionResponse,
     retryResponse: retrySessionResponse,
-    prepareForDeletion
+    deleteConversation: deleteSession
   } = sessions.responseControl
   const conversationList = useConversationList()
   const {
@@ -60,9 +68,10 @@ function useChatWorkspaceState(): ChatWorkspace {
     removeConversation,
     touchConversationActivity
   } = conversationList
-  const { getSession, removeSession, updateSession } = sessions
+  const { getSession, updateConversationTitle } = sessions
   const activeSessionSlice = useActiveSession({ sessions })
-  const { activeSession, createNewSession, closeSessionIfActive } = activeSessionSlice
+  const { activeSession, createNewSession, closeSessionIfActive, ...publicSessionSlice } =
+    activeSessionSlice
   const activeConversation = React.useMemo(
     () =>
       activeSession
@@ -71,8 +80,8 @@ function useChatWorkspaceState(): ChatWorkspace {
     [activeSession, conversations]
   )
   const session = React.useMemo(
-    () => ({ ...activeSessionSlice, activeConversation }),
-    [activeConversation, activeSessionSlice]
+    () => ({ ...publicSessionSlice, activeSession, activeConversation }),
+    [activeConversation, activeSession, publicSessionSlice]
   )
   const isCreatingSessionRef = React.useRef(false)
 
@@ -81,11 +90,9 @@ function useChatWorkspaceState(): ChatWorkspace {
       window.api.sessions.onTitleUpdated(({ sessionId, title }) => {
         applyConversationTitle(sessionId, title)
 
-        updateSession(sessionId, (instance) => {
-          instance.conversation = { ...instance.conversation, title }
-        })
+        updateConversationTitle(sessionId, title)
       }),
-    [applyConversationTitle, updateSession]
+    [applyConversationTitle, updateConversationTitle]
   )
 
   const sendMessage = React.useCallback(
@@ -108,7 +115,7 @@ function useChatWorkspaceState(): ChatWorkspace {
 
       isCreatingSessionRef.current = true
       try {
-        const { conversation } = await createNewSession()
+        const conversation = await createNewSession()
         addConversation(conversation)
         queueFirstMessage(conversation.id, parts)
         return true
@@ -146,9 +153,7 @@ function useChatWorkspaceState(): ChatWorkspace {
           title: trimmedTitle
         })
         applyConversationTitle(conversationId, summary.title)
-        updateSession(conversationId, (instance) => {
-          instance.conversation = { ...instance.conversation, title: summary.title }
-        })
+        updateConversationTitle(conversationId, summary.title)
       } catch (error) {
         throw new Error(
           'Could not rename this conversation. Your title was not saved. Try renaming it again.',
@@ -156,36 +161,59 @@ function useChatWorkspaceState(): ChatWorkspace {
         )
       }
     },
-    [applyConversationTitle, updateSession]
+    [applyConversationTitle, updateConversationTitle]
   )
 
   const deleteConversation = React.useCallback(
     async (conversationId: string): Promise<void> => {
       try {
-        await prepareForDeletion(conversationId)
-        await window.api.sessions.delete(conversationId)
-        removeSession(conversationId)
+        await deleteSession(conversationId)
         removeConversation(conversationId)
         closeSessionIfActive(conversationId)
       } catch (error) {
-        updateSession(conversationId, (instance) => {
-          instance.deleting = false
-        })
         throw new Error(
           'Could not delete this conversation. It remains in your history. Try deleting it again.',
           { cause: error }
         )
       }
     },
-    [closeSessionIfActive, prepareForDeletion, removeConversation, removeSession, updateSession]
+    [closeSessionIfActive, deleteSession, removeConversation]
   )
 
   const response: ChatResponseState = activeSession
     ? (responses.get(activeSession.conversationId) ?? IDLE_CHAT_RESPONSE)
     : IDLE_CHAT_RESPONSE
+  const isForActiveConversation =
+    response.status !== 'idle' && activeConversation?.id === response.conversationId
+  const isTurnActive = isActiveChatResponse(response) && isForActiveConversation
+  const compactionState = activeConversation
+    ? sessions.compactions.states.get(activeConversation.id)
+    : undefined
+  const composerMode: ChatResponseSlice['composerMode'] =
+    compactionState?.status === 'pending'
+      ? 'disabled'
+      : !isActiveChatResponse(response)
+        ? 'send'
+        : isTurnActive && response.status !== 'settling'
+          ? 'stop'
+          : 'disabled'
+  const errorMessage =
+    response.status === 'error' && isForActiveConversation ? response.message : undefined
+  const failureCode =
+    response.status === 'error' && isForActiveConversation ? response.failureCode : undefined
+  const retry = response.status === 'retrying' && isForActiveConversation ? response : undefined
+  const canRetry = Boolean(
+    errorMessage && response.status === 'error' && response.canRetry !== false
+  )
   const responseSlice = React.useMemo(
     () => ({
       response,
+      isTurnActive,
+      composerMode,
+      errorMessage,
+      failureCode,
+      retry,
+      canRetry,
       estimatedInputTokens: activeSession
         ? sessions.contextEstimates.get(activeSession.conversationId)
         : undefined,
@@ -196,6 +224,12 @@ function useChatWorkspaceState(): ChatWorkspace {
     }),
     [
       response,
+      isTurnActive,
+      composerMode,
+      errorMessage,
+      failureCode,
+      retry,
+      canRetry,
       respondingConversationIds,
       retryResponse,
       sendMessage,
