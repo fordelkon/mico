@@ -9,14 +9,10 @@ import {
   ipcMain,
   shell
 } from 'electron'
-import type { SessionCompactor } from './ai/chat/session-compactor'
-import type { SessionModelProfile } from './ai/chat/session-model-profile'
-import type { TurnExecutor } from './ai/chat/turn-executor'
-import { TurnSenderGate } from './ai/chat/turn-sender-gate'
-import type { ProviderService } from './ai/providers/provider-service'
-import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
-import { createSkillSnapshot, skillCatalog, skillSettingsCatalog } from './ai/skills'
-import type { WorkspaceService } from './ai/workspaces/workspace-service'
+import type { Conversations } from './ai/conversation'
+import type { Models } from './ai/models'
+import type { Workspaces } from './ai/workspace'
+import { TurnSenderGate } from './ipc/turn-sender-gate'
 import {
   type CodeDocumentPickerDependencies,
   pickCodeDocuments
@@ -34,30 +30,37 @@ type IpcDependencies = CodeDocumentPickerDependencies & {
 }
 
 interface IpcServices {
-  sessionCompactor: Pick<SessionCompactor, 'compact' | 'cancel'>
-  turnExecutor: Pick<
-    TurnExecutor,
-    'abortAllTurns' | 'abortTurn' | 'startTurn' | 'respondToPermission'
-  >
-  modelProfile: Pick<
-    SessionModelProfile,
-    'getCapabilities' | 'updateSessionModelEntry' | 'updateSessionThinkingEffort'
+  conversations: Pick<
+    Conversations,
+    | 'abortAllTurns'
+    | 'abortTurn'
+    | 'startTurn'
+    | 'respondToPermission'
+    | 'getCapabilities'
+    | 'setSessionModelEntry'
+    | 'setSessionThinkingEffort'
+    | 'compact'
+    | 'cancelCompaction'
+    | 'createSession'
+    | 'deleteSession'
+    | 'listSessions'
+    | 'loadSession'
+    | 'renameSession'
   >
   mainWindow: Pick<MainWindowService, 'isTrustedRendererUrl'>
   preference: Pick<
     PreferenceService,
     'getThemeState' | 'setAppearancePreference' | 'setThemePreferences'
   >
-  provider: Pick<
-    ProviderService,
+  models: Pick<
+    Models,
     'addModel' | 'discoverModels' | 'getLibrary' | 'saveLibrary' | 'syncModels' | 'testModel'
   >
-  session: Pick<
-    SessionRuntimeService,
-    'createSession' | 'deleteSession' | 'listSessions' | 'loadSession' | 'renameSession'
-  >
   workspace: Pick<
-    WorkspaceService,
+    Workspaces,
+    | 'skillCatalog'
+    | 'skillSettingsCatalog'
+    | 'readSkillDocument'
     | 'addProject'
     | 'archiveProject'
     | 'getActiveProjectContext'
@@ -70,16 +73,7 @@ interface IpcServices {
 }
 
 function registerIpc(
-  {
-    turnExecutor,
-    sessionCompactor,
-    modelProfile,
-    mainWindow,
-    preference,
-    provider,
-    session,
-    workspace
-  }: IpcServices,
+  { conversations, mainWindow, preference, models, workspace }: IpcServices,
   dependencies: IpcDependencies = {
     getWindow: (webContents) => BrowserWindow.fromWebContents(webContents),
     ipcMain,
@@ -119,16 +113,14 @@ function registerIpc(
     invalidMessage: 'Invalid skill catalog request',
     handle: async ({ projectId }) => {
       if (!projectId) return { skills: [], diagnostics: [] }
-      const context = workspace.getProjectContext(projectId)
-      return skillSettingsCatalog(await createSkillSnapshot(context.rootPath))
+      return workspace.skillSettingsCatalog(projectId)
     }
   })
   register({
     channel: IpcChannel.Skills_ReadDocument,
     invalidMessage: 'Invalid skill document request',
     handle: async ({ projectId, skillId }) => {
-      const context = workspace.getProjectContext(projectId)
-      return (await createSkillSnapshot(context.rootPath)).readDocument(skillId)
+      return workspace.readSkillDocument(projectId, skillId)
     }
   })
 
@@ -191,9 +183,9 @@ function registerIpc(
     handle: (request, { event }) => {
       const ownerId = String(event.sender.id)
       const { emitTurnEvent, emitTitleUpdate } = senderGate.connect(event, (owner) =>
-        turnExecutor.abortAllTurns(owner)
+        conversations.abortAllTurns(owner)
       )
-      turnExecutor.startTurn({ ownerId, request }, emitTurnEvent, emitTitleUpdate)
+      conversations.startTurn({ ownerId, request }, emitTurnEvent, emitTitleUpdate)
     }
   })
   register({
@@ -201,25 +193,36 @@ function registerIpc(
     invalidMessage: 'Invalid skill catalog request',
     handle: async ({ projectId }) => {
       if (!projectId) return { skills: [], diagnostics: [] }
-      const context = workspace.getProjectContext(projectId)
-      return skillCatalog(await createSkillSnapshot(context.rootPath))
+      return workspace.skillCatalog(projectId)
     }
   })
   register({
     channel: IpcChannel.Chat_GetCapabilities,
-    handle: (sessionId) => modelProfile.getCapabilities(sessionId)
+    handle: (sessionId) => conversations.getCapabilities(sessionId)
   })
   register({
     channel: IpcChannel.Chat_RespondToPermission,
     invalidMessage: 'Invalid tool approval response',
     handle: (response, { event }) =>
-      turnExecutor.respondToPermission(String(event.sender.id), response)
+      conversations.respondToPermission(String(event.sender.id), response)
   })
   register({
     channel: IpcChannel.Chat_AbortTurn,
     invalidMessage: 'Invalid turn request',
     handle: (requestId, { event }) =>
-      turnExecutor.abortTurn({ ownerId: String(event.sender.id), requestId })
+      conversations.abortTurn({ ownerId: String(event.sender.id), requestId })
+  })
+  register({
+    channel: IpcChannel.Sessions_SetThinkingEffort,
+    invalidMessage: 'Invalid session thinking effort',
+    handle: ({ sessionId, thinkingEffort }) =>
+      conversations.setSessionThinkingEffort(sessionId, thinkingEffort)
+  })
+  register({
+    channel: IpcChannel.Sessions_SetModelEntry,
+    invalidMessage: 'Invalid session model',
+    handle: ({ sessionId, modelEntryId }) =>
+      conversations.setSessionModelEntry(sessionId, modelEntryId)
   })
 
   const summaries = new Map<string, { ownerId: number; requestId: string }>()
@@ -237,7 +240,7 @@ function registerIpc(
         const cancelOwnedSummaries = (): void => {
           for (const [id, pending] of summaries) {
             if (pending.ownerId !== event.sender.id) continue
-            void sessionCompactor.cancel(id).catch((error: Error) => {
+            void conversations.cancelCompaction(id).catch((error: Error) => {
               console.error(
                 'Could not settle a conversation summary after renderer teardown.',
                 error
@@ -255,7 +258,7 @@ function registerIpc(
         })
       }
       try {
-        return await sessionCompactor.compact(sessionId)
+        return await conversations.compact(sessionId)
       } finally {
         if (summaries.get(sessionId) === operation) summaries.delete(sessionId)
       }
@@ -269,12 +272,12 @@ function registerIpc(
       if (!operation || operation.requestId !== requestId) return
       if (operation.ownerId !== event.sender.id)
         throw new Error('This summary belongs to another window. Cancel it in that window.')
-      await sessionCompactor.cancel(sessionId)
+      await conversations.cancelCompaction(sessionId)
     }
   })
   register({
     channel: IpcChannel.Sessions_List,
-    handle: () => session.listSessions()
+    handle: () => conversations.listSessions()
   })
   register({
     channel: IpcChannel.Sessions_Create,
@@ -284,7 +287,7 @@ function registerIpc(
         ? workspace.getActiveProjectContext(projectId)
         : workspace.getDefaultWorkspaceContext()
 
-      return session.createSession({
+      return conversations.createSession({
         title,
         defaultProfile: null,
         projectId: context.projectId,
@@ -295,29 +298,17 @@ function registerIpc(
   register({
     channel: IpcChannel.Sessions_Delete,
     invalidMessage: 'Invalid session ID',
-    handle: (sessionId) => session.deleteSession(sessionId)
+    handle: (sessionId) => conversations.deleteSession(sessionId)
   })
   register({
     channel: IpcChannel.Sessions_Load,
     invalidMessage: 'Invalid session ID',
-    handle: (sessionId) => session.loadSession(sessionId)
+    handle: (sessionId) => conversations.loadSession(sessionId)
   })
   register({
     channel: IpcChannel.Sessions_Rename,
     invalidMessage: 'Invalid session rename',
-    handle: ({ sessionId, title }) => session.renameSession(sessionId, title)
-  })
-  register({
-    channel: IpcChannel.Sessions_SetThinkingEffort,
-    invalidMessage: 'Invalid session thinking effort',
-    handle: ({ sessionId, thinkingEffort }) =>
-      modelProfile.updateSessionThinkingEffort(sessionId, thinkingEffort)
-  })
-  register({
-    channel: IpcChannel.Sessions_SetModelEntry,
-    invalidMessage: 'Invalid session model',
-    handle: ({ sessionId, modelEntryId }) =>
-      modelProfile.updateSessionModelEntry(sessionId, modelEntryId)
+    handle: ({ sessionId, title }) => conversations.renameSession(sessionId, title)
   })
 
   register({
@@ -359,32 +350,32 @@ function registerIpc(
 
   register({
     channel: IpcChannel.Providers_GetLibrary,
-    handle: () => provider.getLibrary()
+    handle: () => models.getLibrary()
   })
   register({
     channel: IpcChannel.Providers_SaveLibrary,
     invalidMessage: 'Invalid provider library',
-    handle: (library) => provider.saveLibrary(library)
+    handle: (library) => models.saveLibrary(library)
   })
   register({
     channel: IpcChannel.Providers_DiscoverModels,
     invalidMessage: 'Invalid provider configuration',
-    handle: (configuration) => provider.discoverModels(configuration)
+    handle: (configuration) => models.discoverModels(configuration)
   })
   register({
     channel: IpcChannel.Providers_SyncModels,
     invalidMessage: 'Invalid provider models',
-    handle: (request) => provider.syncModels(request)
+    handle: (request) => models.syncModels(request)
   })
   register({
     channel: IpcChannel.Providers_AddModel,
     invalidMessage: 'Invalid provider model',
-    handle: (request) => provider.addModel(request)
+    handle: (request) => models.addModel(request)
   })
   register({
     channel: IpcChannel.Providers_TestModel,
     invalidMessage: 'Invalid provider model test',
-    handle: (request) => provider.testModel(request)
+    handle: (request) => models.testModel(request)
   })
 }
 

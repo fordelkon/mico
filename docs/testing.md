@@ -84,7 +84,7 @@ Never edit source or tests while Vitest is running in the checkout. After an aud
 | Deterministic waiting | `anti-slop/no-sleep-in-tests` — detects named sleep helpers, member timer calls, and member `waitFor` calls with timeout options |
 | Vitest hygiene | `vitest/no-focused-tests`, `no-disabled-tests`, `no-identical-title`, `no-commented-out-tests`, `expect-expect`, `no-conditional-expect`, `no-test-prefixes`, `valid-title` |
 
-The custom rules live in [tools/oxlint/anti-slop](../tools/oxlint/anti-slop). Detection is syntactic and does not prove test value, faithful fakes, complete timer coverage, or typed stubs. Review enforces those standards even when lint passes. Shared test helpers live next to the domain they serve (`src/main/ai/tools/test-helpers.ts`, `packages/ai-providers/src/__tests__/test-helpers.ts`); consolidate repeated setup when it represents the same domain scenario without adding flags for unrelated callers.
+The custom rules live in [tools/oxlint/anti-slop](../tools/oxlint/anti-slop). Detection is syntactic and does not prove test value, faithful fakes, complete timer coverage, or typed stubs. Review enforces those standards even when lint passes. Shared test helpers live next to the domain they serve (`src/main/ai/workspace/tools/test-helpers.ts`, `packages/ai-providers/src/__tests__/test-helpers.ts`); consolidate repeated setup when it represents the same domain scenario without adding flags for unrelated callers.
 
 ## Coverage Gate
 

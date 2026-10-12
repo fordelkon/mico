@@ -1,0 +1,8 @@
+export { Workspaces } from './workspaces'
+export type { WorkspaceTurn, WorkspaceTurnOptions } from './workspaces'
+export type { WorkspaceContext, WorkspaceProject, WorkspacesDependencies } from './catalog'
+export type { ToolHooks } from './tools/hooks'
+export type { ToolApprovalRequest } from './tools/permissions'
+export type { ToolCall, ToolExecutionTrace } from './tools/contract'
+export { MAX_TOOL_RESULT_HISTORY_BYTES } from './tools/contract'
+export type { ToolRegistry, ToolExecution, ToolExecutionCallbacks } from './tools/registry'

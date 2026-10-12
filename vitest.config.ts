@@ -34,6 +34,11 @@ export default defineConfig({
       },
       {
         extends: true,
+        resolve: {
+          alias: {
+            '@main': fileURLToPath(new URL('./src/main', import.meta.url))
+          }
+        },
         test: {
           environment: 'node',
           include: ['src/main/**/*.{test,spec}.ts', 'scripts/lint/*.test.mjs'],

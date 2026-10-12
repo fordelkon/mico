@@ -1,13 +1,8 @@
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { createChatProvider } from '@mico/ai-providers'
 import { app } from 'electron'
-import { createChatProviderResolver } from './ai/chat/chat-provider-resolver'
-import { SessionCompactor } from './ai/chat/session-compactor'
-import { SessionModelProfile } from './ai/chat/session-model-profile'
-import { TurnExecutor } from './ai/chat/turn-executor'
-import { ProviderService } from './ai/providers/provider-service'
-import { SessionRuntimeService } from './ai/sessions/session-runtime-service'
-import { WorkspaceService } from './ai/workspaces/workspace-service'
+import { Conversations } from './ai/conversation'
+import { Models } from './ai/models'
+import { Workspaces } from './ai/workspace'
 import { SessionDatabase } from './data/session-database'
 import { registerIpc } from './ipc'
 import { MainWindowService } from './services/main-window-service'
@@ -18,15 +13,12 @@ import { registerAppQuitHandler } from './services/window-lifecycle'
 
 type MainServices = {
   mainWindow: MainWindowService
-  modelProfile: SessionModelProfile
+  conversations: Conversations
   preference: PreferenceService
-  provider: ProviderService
+  models: Models
   sessionDatabase: SessionDatabase
-  sessionRuntime: SessionRuntimeService
-  sessionCompactor: SessionCompactor
   tray: TrayService
-  turnExecutor: TurnExecutor
-  workspace: WorkspaceService
+  workspace: Workspaces
 }
 
 /**
@@ -37,37 +29,17 @@ type MainServices = {
 async function createMainServices(): Promise<MainServices> {
   const flushProviderDraft = registerProviderDraftFlush()
   const preference = new PreferenceService()
-  const provider = new ProviderService()
+  const models = new Models()
   const sessionDatabase = new SessionDatabase()
-  const workspace = new WorkspaceService()
+  const workspace = new Workspaces()
 
   await preference.initialize()
-  await provider.initialize()
+  await models.initialize()
   await sessionDatabase.initialize()
   await workspace.initialize()
 
-  const sessionRuntime = new SessionRuntimeService({ database: sessionDatabase })
-  sessionRuntime.recoverInterruptedRuns()
-
-  const getChatConfigurationForModelEntry = (
-    modelEntryId: string
-  ): ReturnType<ProviderService['getChatConfigurationForModelEntry']> =>
-    provider.getChatConfigurationForModelEntry(modelEntryId)
-  const modelProfile = new SessionModelProfile({
-    resolveProvider: createChatProviderResolver({
-      createChatProvider,
-      getChatConfigurationForModelEntry
-    }),
-    getChatConfigurationForModelEntry,
-    getSelectedModelEntryId: () => provider.getLibrary().selectedModelId,
-    getSelectedChatConfiguration: () => provider.getSelectedChatConfiguration(),
-    runtime: sessionRuntime
-  })
-  const sessionCompactor = new SessionCompactor({ runtime: sessionRuntime, modelProfile })
-  const turnExecutor = new TurnExecutor({
-    profiles: modelProfile,
-    runtime: sessionRuntime
-  })
+  const conversations = new Conversations({ database: sessionDatabase, models, workspace })
+  conversations.recoverInterruptedRuns()
 
   // The tray is constructed after the window it monitors; the closure defers the
   // reference so the quit behavior reads the final tray instance.
@@ -83,27 +55,21 @@ async function createMainServices(): Promise<MainServices> {
 
   return {
     mainWindow,
-    modelProfile,
+    conversations,
     preference,
-    provider,
+    models,
     sessionDatabase,
-    sessionRuntime,
-    sessionCompactor,
     tray: trayService,
-    turnExecutor,
     workspace
   }
 }
 
 function startApp(services: MainServices): void {
   registerIpc({
-    turnExecutor: services.turnExecutor,
-    modelProfile: services.modelProfile,
+    conversations: services.conversations,
     mainWindow: services.mainWindow,
     preference: services.preference,
-    provider: services.provider,
-    session: services.sessionRuntime,
-    sessionCompactor: services.sessionCompactor,
+    models: services.models,
     workspace: services.workspace
   })
 
@@ -175,30 +141,21 @@ if (gotTheLock) {
     prepareToQuit: async () => {
       await startup
       services?.tray.beginQuit()
-      services?.sessionCompactor.dispose()
+      services?.conversations.stopCompactions()
       try {
         await services?.mainWindow.prepareToQuit()
       } finally {
-        services?.turnExecutor.dispose()
-        try {
-          await services?.turnExecutor.drain()
-        } finally {
-          await services?.sessionCompactor.drain()
-        }
+        await services?.conversations.drain()
       }
     },
     dispose: () => {
       try {
-        services?.turnExecutor.dispose()
+        services?.conversations.dispose()
       } finally {
         try {
-          services?.sessionCompactor.dispose()
+          services?.sessionDatabase.close()
         } finally {
-          try {
-            services?.sessionDatabase.close()
-          } finally {
-            services?.tray.dispose()
-          }
+          services?.tray.dispose()
         }
       }
     }

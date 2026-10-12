@@ -7,12 +7,9 @@ import { IpcChannel } from '@shared/IpcChannel'
 import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import type { SessionCompactor } from './ai/chat/session-compactor'
-import type { SessionModelProfile } from './ai/chat/session-model-profile'
-import type { TurnExecutor } from './ai/chat/turn-executor'
-import type { ProviderService } from './ai/providers/provider-service'
-import type { SessionRuntimeService } from './ai/sessions/session-runtime-service'
-import type { WorkspaceService } from './ai/workspaces/workspace-service'
+import type { Conversations } from './ai/conversation'
+import type { Models } from './ai/models'
+import { Workspaces } from './ai/workspace'
 import { registerIpc } from './ipc'
 import type { MainWindowService } from './services/main-window-service'
 import type { PreferenceService } from './services/preference-service'
@@ -57,15 +54,15 @@ function createHarness() {
     unmaximize: vi.fn<BrowserWindow['unmaximize']>()
   })
   const turnExecutor = {
-    respondToPermission: vi.fn<TurnExecutor['respondToPermission']>(),
-    abortTurn: vi.fn<TurnExecutor['abortTurn']>(),
-    abortAllTurns: vi.fn<TurnExecutor['abortAllTurns']>(),
-    startTurn: vi.fn<TurnExecutor['startTurn']>()
+    respondToPermission: vi.fn<Conversations['respondToPermission']>(),
+    abortTurn: vi.fn<Conversations['abortTurn']>(),
+    abortAllTurns: vi.fn<Conversations['abortAllTurns']>(),
+    startTurn: vi.fn<Conversations['startTurn']>()
   }
   const modelProfile = {
-    getCapabilities: vi.fn<SessionModelProfile['getCapabilities']>(),
-    updateSessionModelEntry: vi.fn<SessionModelProfile['updateSessionModelEntry']>(),
-    updateSessionThinkingEffort: vi.fn<SessionModelProfile['updateSessionThinkingEffort']>()
+    getCapabilities: vi.fn<Conversations['getCapabilities']>(),
+    updateSessionModelEntry: vi.fn<Conversations['setSessionModelEntry']>(),
+    updateSessionThinkingEffort: vi.fn<Conversations['setSessionThinkingEffort']>()
   }
   const mainWindow = {
     isTrustedRendererUrl: vi.fn<MainWindowService['isTrustedRendererUrl']>(() => true)
@@ -76,38 +73,38 @@ function createHarness() {
     setThemePreferences: vi.fn<PreferenceService['setThemePreferences']>()
   }
   const provider = {
-    addModel: vi.fn<ProviderService['addModel']>(),
-    discoverModels: vi.fn<ProviderService['discoverModels']>(),
-    getLibrary: vi.fn<ProviderService['getLibrary']>(),
-    saveLibrary: vi.fn<ProviderService['saveLibrary']>(),
-    syncModels: vi.fn<ProviderService['syncModels']>(),
-    testModel: vi.fn<ProviderService['testModel']>()
+    addModel: vi.fn<Models['addModel']>(),
+    discoverModels: vi.fn<Models['discoverModels']>(),
+    getLibrary: vi.fn<Models['getLibrary']>(),
+    saveLibrary: vi.fn<Models['saveLibrary']>(),
+    syncModels: vi.fn<Models['syncModels']>(),
+    testModel: vi.fn<Models['testModel']>()
   }
   const session = {
-    createSession: vi.fn<SessionRuntimeService['createSession']>(),
-    deleteSession: vi.fn<SessionRuntimeService['deleteSession']>(),
-    listSessions: vi.fn<SessionRuntimeService['listSessions']>(),
-    loadSession: vi.fn<SessionRuntimeService['loadSession']>(),
-    renameSession: vi.fn<SessionRuntimeService['renameSession']>()
+    createSession: vi.fn<Conversations['createSession']>(),
+    deleteSession: vi.fn<Conversations['deleteSession']>(),
+    listSessions: vi.fn<Conversations['listSessions']>(),
+    loadSession: vi.fn<Conversations['loadSession']>(),
+    renameSession: vi.fn<Conversations['renameSession']>()
   }
   const sessionCompactor = {
-    compact: vi.fn<SessionCompactor['compact']>(),
-    cancel: vi.fn<SessionCompactor['cancel']>().mockResolvedValue(undefined)
+    compact: vi.fn<Conversations['compact']>(),
+    cancel: vi.fn<Conversations['cancelCompaction']>().mockResolvedValue(undefined)
   }
-  const workspace = {
-    addProject: vi.fn<WorkspaceService['addProject']>(),
-    archiveProject: vi.fn<WorkspaceService['archiveProject']>(),
-    getActiveProjectContext: vi.fn<WorkspaceService['getActiveProjectContext']>(),
-    getDefaultWorkspaceContext: vi.fn<WorkspaceService['getDefaultWorkspaceContext']>(() => ({
+  const workspace = Object.assign(new Workspaces(), {
+    addProject: vi.fn<Workspaces['addProject']>(),
+    archiveProject: vi.fn<Workspaces['archiveProject']>(),
+    getActiveProjectContext: vi.fn<Workspaces['getActiveProjectContext']>(),
+    getDefaultWorkspaceContext: vi.fn<Workspaces['getDefaultWorkspaceContext']>(() => ({
       kind: 'project' as const,
       projectId: 'default',
       rootPath: '/workspaces/default'
     })),
-    getProjectContext: vi.fn<WorkspaceService['getProjectContext']>(),
-    listProjects: vi.fn<WorkspaceService['listProjects']>(),
-    renameProject: vi.fn<WorkspaceService['renameProject']>(),
-    setDefaultProject: vi.fn<WorkspaceService['setDefaultProject']>()
-  }
+    getProjectContext: vi.fn<Workspaces['getProjectContext']>(),
+    listProjects: vi.fn<Workspaces['listProjects']>(),
+    renameProject: vi.fn<Workspaces['renameProject']>(),
+    setDefaultProject: vi.fn<Workspaces['setDefaultProject']>()
+  })
   const openPath = vi.fn<(fullPath: string) => Promise<string>>().mockResolvedValue('')
   const pickCodeDocuments =
     vi.fn<(window: BrowserWindow) => Promise<{ canceled: boolean; filePaths: string[] }>>()
@@ -118,12 +115,17 @@ function createHarness() {
   registerIpc(
     {
       mainWindow,
-      modelProfile,
       preference,
-      provider,
-      session,
-      sessionCompactor,
-      turnExecutor,
+      models: provider,
+      conversations: {
+        ...turnExecutor,
+        ...session,
+        getCapabilities: modelProfile.getCapabilities,
+        setSessionModelEntry: modelProfile.updateSessionModelEntry,
+        setSessionThinkingEffort: modelProfile.updateSessionThinkingEffort,
+        compact: sessionCompactor.compact,
+        cancelCompaction: sessionCompactor.cancel
+      },
       workspace
     },
     {
@@ -756,7 +758,7 @@ describe('registerIpc session compaction handlers', () => {
 
   it('user cancels from another window when a summary runs, then cancellation is refused', async () => {
     const { handlers, sessionCompactor, event } = createHarness()
-    const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+    const pending = Promise.withResolvers<Awaited<ReturnType<Conversations['compact']>>>()
     sessionCompactor.compact.mockReturnValue(pending.promise)
     const started = handlers.get(IpcChannel.Sessions_Compact)?.(event, request)
     const { event: other } = createEvent({ id: 43 })
@@ -770,7 +772,7 @@ describe('registerIpc session compaction handlers', () => {
 
   it('user repeats a request when a summary runs, then the original task keeps cancellation ownership', async () => {
     const { handlers, sessionCompactor, event } = createHarness()
-    const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+    const pending = Promise.withResolvers<Awaited<ReturnType<Conversations['compact']>>>()
     sessionCompactor.compact.mockReturnValue(pending.promise)
     const started = handlers.get(IpcChannel.Sessions_Compact)?.(event, request)
     await expect(
@@ -796,7 +798,7 @@ describe('registerIpc session compaction handlers', () => {
     async (lifecycle) => {
       const { handlers, sessionCompactor } = createHarness()
       const { event, sender } = createEvent({ id: 101 })
-      const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+      const pending = Promise.withResolvers<Awaited<ReturnType<Conversations['compact']>>>()
       sessionCompactor.compact.mockReturnValue(pending.promise)
       const started = handlers.get(IpcChannel.Sessions_Compact)?.(event, request)
       const listener = sender.on.mock.calls.find(([name]) => name === lifecycle)?.[1]
@@ -812,7 +814,7 @@ describe('registerIpc session compaction handlers', () => {
   it('user closes the owning renderer when cancellation fails, then teardown observes the failure', async () => {
     const { handlers, sessionCompactor } = createHarness()
     const { event, destroyedListeners } = createEvent({ id: 99 })
-    const pending = Promise.withResolvers<Awaited<ReturnType<SessionCompactor['compact']>>>()
+    const pending = Promise.withResolvers<Awaited<ReturnType<Conversations['compact']>>>()
     const failed = Promise.withResolvers<void>()
     sessionCompactor.compact.mockReturnValue(pending.promise)
     sessionCompactor.cancel.mockReturnValue(failed.promise)
