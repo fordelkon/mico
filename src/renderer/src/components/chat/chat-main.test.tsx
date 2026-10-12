@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { Chat } from '@ai-sdk/react'
 import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
+import type { ChatCompactionsStore } from '@renderer/hooks/chat/chat-session-instances'
 import type { ChatActiveSessionSlice } from '@renderer/hooks/chat/use-active-session'
 import type { ChatResponseSlice } from '@renderer/hooks/chat/use-chat-workspace-state'
 import type { MicoUIMessage } from '@renderer/types/chat'
@@ -44,6 +45,14 @@ function createSessionSlice(): ChatActiveSessionSlice {
       vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
     createNewSession: vi.fn<ChatActiveSessionSlice['createNewSession']>(),
     closeSessionIfActive: vi.fn<(conversationId: string) => void>()
+  }
+}
+
+function createCompactions(): ChatCompactionsStore {
+  return {
+    states: new Map(),
+    startCompaction: vi.fn<ChatCompactionsStore['startCompaction']>(),
+    cancelCompaction: vi.fn<ChatCompactionsStore['cancelCompaction']>()
   }
 }
 
@@ -98,10 +107,237 @@ function approvalMessage(permissions: ToolPermissionData[]): MicoUIMessage {
 }
 
 describe('ChatMain', () => {
+  it('user cancels an inline summary when pending, then sending waits for its outcome', async () => {
+    const user = userEvent.setup()
+    const compactions = createCompactions()
+    compactions.states = new Map([
+      ['conversation-1', { status: 'pending', requestId: 'summary-1' }]
+    ])
+    const session = {
+      ...createSessionSlice(),
+      activeChat: new Chat<MicoUIMessage>({ id: 'summary-chat', messages: [] })
+    }
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
+      </ProviderLibraryProvider>
+    )
+    const transcript = await screen.findByLabelText('Messages')
+    expect(within(transcript).getByRole('status')).toHaveTextContent('Summarizing conversation…')
+    expect(screen.getByRole('textbox')).toBeDisabled()
+    await user.click(within(transcript).getByRole('button', { name: 'Cancel summary' }))
+    expect(compactions.cancelCompaction).toHaveBeenCalledWith('conversation-1')
+    expect(within(transcript).getByRole('status')).toHaveTextContent('Summarizing conversation…')
+  })
+
+  it.each([
+    { status: 'accepted' as const, text: 'Context compacted.', role: 'status' },
+    { status: 'cancelled' as const, text: 'Summary cancelled.', role: 'status' },
+    {
+      status: 'failed' as const,
+      message: 'Could not summarize this conversation. Use /compact to try again.',
+      text: 'Use /compact to try again.',
+      role: 'alert'
+    },
+    {
+      status: 'pending' as const,
+      requestId: 'summary-1',
+      error: 'Could not confirm summary cancellation. Try Cancel summary again.',
+      text: 'Try Cancel summary again.',
+      role: 'alert'
+    }
+  ])(
+    'user views summary outcome $status when active, then inline feedback is visible',
+    async (state) => {
+      const compactions = createCompactions()
+      compactions.states = new Map([['conversation-1', state]])
+      const session = {
+        ...createSessionSlice(),
+        activeChat: new Chat<MicoUIMessage>({ id: 'summary-chat', messages: [] })
+      }
+      const { rerender } = render(
+        <ProviderLibraryProvider>
+          <ChatMain
+            compactions={compactions}
+            session={session}
+            responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          />
+        </ProviderLibraryProvider>
+      )
+      const transcript = await screen.findByLabelText('Messages')
+      expect(within(transcript).getByRole(state.role)).toHaveTextContent(state.text)
+      rerender(
+        <ProviderLibraryProvider>
+          <ChatMain
+            compactions={compactions}
+            session={{
+              ...session,
+              activeConversation: { id: 'conversation-2', title: 'Other chat' },
+              activeChat: new Chat<MicoUIMessage>({ id: 'other-chat', messages: [] })
+            }}
+            responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+          />
+        </ProviderLibraryProvider>
+      )
+      expect(screen.queryByText(state.text, { exact: false })).not.toBeInTheDocument()
+    }
+  )
+
+  it('user retries a failed summary when its notice offers retry, then the compaction owner starts a new request', async () => {
+    const user = userEvent.setup()
+    const compactions = createCompactions()
+    compactions.states = new Map([
+      [
+        'conversation-1',
+        {
+          status: 'failed' as const,
+          message: 'Could not summarize this conversation. Use /compact to try again.'
+        }
+      ]
+    ])
+    const session = {
+      ...createSessionSlice(),
+      activeChat: new Chat<MicoUIMessage>({ id: 'summary-retry', messages: [] })
+    }
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
+      </ProviderLibraryProvider>
+    )
+    const transcript = await screen.findByLabelText('Messages')
+    await user.click(within(transcript).getByRole('button', { name: 'Retry summary' }))
+    expect(compactions.startCompaction).toHaveBeenCalledWith('conversation-1')
+  })
+
+  it('user sees retry disabled when a response is still active, then the failed summary stays visible', async () => {
+    const compactions = createCompactions()
+    compactions.states = new Map([
+      [
+        'conversation-1',
+        { status: 'failed' as const, message: 'Could not summarize this conversation.' }
+      ]
+    ])
+    const session = {
+      ...createSessionSlice(),
+      activeChat: new Chat<MicoUIMessage>({ id: 'summary-retry-busy', messages: [] })
+    }
+    render(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{
+            ...createResponseSlice(),
+            response: { status: 'streaming', conversationId: 'conversation-1' }
+          }}
+        />
+      </ProviderLibraryProvider>
+    )
+    const transcript = await screen.findByLabelText('Messages')
+    expect(within(transcript).getByRole('button', { name: 'Retry summary' })).toBeDisabled()
+    expect(within(transcript).getByRole('alert')).toBeVisible()
+  })
+
+  it('user dismisses a failed summary notice when the outcome persists, then it stays hidden until a new attempt', async () => {
+    const user = userEvent.setup()
+    const compactions = createCompactions()
+    const failedState = {
+      status: 'failed' as const,
+      message: 'Could not summarize this conversation. Use /compact to try again.'
+    }
+    compactions.states = new Map([['conversation-1', failedState]])
+    const session = {
+      ...createSessionSlice(),
+      activeChat: new Chat<MicoUIMessage>({ id: 'summary-dismiss', messages: [] })
+    }
+    const view = render(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
+      </ProviderLibraryProvider>
+    )
+    const transcript = await screen.findByLabelText('Messages')
+    await user.click(within(transcript).getByRole('button', { name: 'Dismiss' }))
+    expect(within(transcript).queryByRole('alert')).not.toBeInTheDocument()
+
+    // The acknowledged outcome stays hidden while the owner keeps it published.
+    view.rerender(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
+      </ProviderLibraryProvider>
+    )
+    expect(within(transcript).queryByRole('alert')).not.toBeInTheDocument()
+
+    // A new attempt has its own state and becomes visible again.
+    compactions.states = new Map([
+      ['conversation-1', { status: 'pending' as const, requestId: 'summary-2' }]
+    ])
+    view.rerender(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
+      </ProviderLibraryProvider>
+    )
+    expect(within(transcript).getByRole('status')).toHaveTextContent('Summarizing conversation…')
+  })
+
+  it('user dismisses a settled summary outcome when it is acknowledged, then it stays hidden', async () => {
+    const user = userEvent.setup()
+    const compactions = createCompactions()
+    compactions.states = new Map([['conversation-1', { status: 'accepted' as const }]])
+    const session = {
+      ...createSessionSlice(),
+      activeChat: new Chat<MicoUIMessage>({ id: 'summary-accepted', messages: [] })
+    }
+    const view = render(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
+      </ProviderLibraryProvider>
+    )
+    const transcript = await screen.findByLabelText('Messages')
+    await user.click(within(transcript).getByRole('button', { name: 'Dismiss' }))
+    expect(within(transcript).queryByRole('status')).not.toBeInTheDocument()
+
+    // The acknowledged outcome stays hidden while the owner keeps it published.
+    view.rerender(
+      <ProviderLibraryProvider>
+        <ChatMain
+          compactions={compactions}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
+      </ProviderLibraryProvider>
+    )
+    expect(within(transcript).queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('user views a measured request when it completes, then approximate input stays visible', () => {
     const { rerender } = render(
       <ProviderLibraryProvider>
         <ChatMain
+          compactions={createCompactions()}
           session={createSessionSlice()}
           responses={{
             ...createResponseSlice(),
@@ -114,7 +350,11 @@ describe('ChatMain', () => {
     expect(screen.getByText('Approximate input: 1,234 tokens')).toBeVisible()
     rerender(
       <ProviderLibraryProvider>
-        <ChatMain session={createSessionSlice()} responses={createResponseSlice()} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={createSessionSlice()}
+          responses={createResponseSlice()}
+        />
       </ProviderLibraryProvider>
     )
     expect(screen.queryByText(/Approximate input:/)).not.toBeInTheDocument()
@@ -180,7 +420,11 @@ describe('ChatMain', () => {
     })
     render(
       <ProviderLibraryProvider>
-        <ChatMain session={session} responses={createResponseSlice()} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={session}
+          responses={createResponseSlice()}
+        />
       </ProviderLibraryProvider>
     )
     const approval = screen.getByRole('group', { name: 'Pending tool approval' })
@@ -204,7 +448,11 @@ describe('ChatMain', () => {
     const session = { ...createSessionSlice(), activeChat: chat }
     render(
       <ProviderLibraryProvider>
-        <ChatMain session={session} responses={createResponseSlice()} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={session}
+          responses={createResponseSlice()}
+        />
       </ProviderLibraryProvider>
     )
     expect(
@@ -244,13 +492,14 @@ describe('ChatMain', () => {
     const responses = createResponseSlice()
     const { rerender } = render(
       <ProviderLibraryProvider>
-        <ChatMain session={session} responses={responses} />
+        <ChatMain compactions={createCompactions()} session={session} responses={responses} />
       </ProviderLibraryProvider>
     )
     expect(screen.getByRole('group', { name: 'Pending tool approval' })).toBeVisible()
     rerender(
       <ProviderLibraryProvider>
         <ChatMain
+          compactions={createCompactions()}
           session={{
             ...session,
             activeConversation: { id: 'conversation-2', title: 'Other chat' },
@@ -263,7 +512,11 @@ describe('ChatMain', () => {
     expect(screen.queryByRole('group', { name: 'Pending tool approval' })).not.toBeInTheDocument()
     rerender(
       <ProviderLibraryProvider>
-        <ChatMain session={session} responses={{ ...responses, response: { status: 'idle' } }} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={session}
+          responses={{ ...responses, response: { status: 'idle' } }}
+        />
       </ProviderLibraryProvider>
     )
     expect(screen.queryByRole('group', { name: 'Pending tool approval' })).not.toBeInTheDocument()
@@ -280,7 +533,11 @@ describe('ChatMain', () => {
     }
     render(
       <ProviderLibraryProvider>
-        <ChatMain session={session} responses={createResponseSlice()} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={session}
+          responses={createResponseSlice()}
+        />
       </ProviderLibraryProvider>
     )
     const workspace = screen.getByRole('group', { name: 'Conversation workspace' })
@@ -300,7 +557,11 @@ describe('ChatMain', () => {
   it('user keeps the stop control when a response reconnects, then it stays visible', () => {
     render(
       <ProviderLibraryProvider>
-        <ChatMain session={createSessionSlice()} responses={createResponseSlice()} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={createSessionSlice()}
+          responses={createResponseSlice()}
+        />
       </ProviderLibraryProvider>
     )
 
@@ -312,7 +573,11 @@ describe('ChatMain', () => {
     session.activationError = 'Could not open this conversation. Select it again to retry.'
     render(
       <ProviderLibraryProvider>
-        <ChatMain session={session} responses={createResponseSlice()} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={session}
+          responses={createResponseSlice()}
+        />
       </ProviderLibraryProvider>
     )
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -326,7 +591,11 @@ describe('ChatMain', () => {
 
     render(
       <ProviderLibraryProvider>
-        <ChatMain session={session} responses={createResponseSlice()} />
+        <ChatMain
+          compactions={createCompactions()}
+          session={session}
+          responses={{ ...createResponseSlice(), response: { status: 'idle' } }}
+        />
       </ProviderLibraryProvider>
     )
 

@@ -27,6 +27,13 @@ type SearchPopoverProps = {
   searchPlaceholder: string
   /** Single interactive element that opens the popover. */
   trigger: React.ReactElement
+  /**
+   * Controlled open state; leave unset for the popover to own it. Pair with
+   * `onOpenChange` so callers can react to, or suppress behavior while, the
+   * popover is open.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 /** A searchable popover that focuses its query on open and clears it on close. */
@@ -34,12 +41,15 @@ function SearchPopover({
   align,
   children,
   contentClassName,
+  onOpenChange,
+  open,
   searchLabel,
   searchPlaceholder,
   side,
   trigger
 }: SearchPopoverProps): React.JSX.Element {
-  const [isOpen, setIsOpen] = React.useState(false)
+  const [isOpenState, setIsOpenState] = React.useState(false)
+  const isOpen = open ?? isOpenState
   const [query, setQuery] = React.useState('')
   const searchRef = React.useRef<HTMLInputElement>(null)
 
@@ -50,9 +60,10 @@ function SearchPopover({
     }
   }, [isOpen])
 
-  function handleOpenChange(open: boolean): void {
-    setIsOpen(open)
-    if (!open) setQuery('')
+  function handleOpenChange(next: boolean): void {
+    if (open === undefined) setIsOpenState(next)
+    onOpenChange?.(next)
+    if (!next) setQuery('')
   }
 
   return (

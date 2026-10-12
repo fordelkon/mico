@@ -18,6 +18,7 @@ import { estimatePreparedContextTokens } from '../chat/context-estimator'
 import { ModelStepRetry, type RetryEvent } from '../chat/model-step-retry'
 import { AgentBudgetError } from '../chat/turn-failure'
 import type { TurnRunHandle } from '../sessions/session-runtime-service'
+import { MAX_SKILL_DOCUMENT_BYTES } from '../skills'
 import type { ToolExecutionTrace } from './tool-contract'
 import { type ToolCall, ToolRegistry } from './tool-registry'
 
@@ -371,10 +372,15 @@ class ToolAgentRunner {
 }
 
 function boundToolResultForHistory(result: ChatProviderToolResultPart): ChatProviderToolResultPart {
-  if (Buffer.byteLength(result.output) <= MAX_TOOL_RESULT_HISTORY_BYTES) return result
+  // Skill instructions must reach the model intact, including SKILL.md read as a resource.
+  const maxBytes =
+    result.toolName === 'LoadSkill' || result.toolName === 'ReadSkillResource'
+      ? MAX_SKILL_DOCUMENT_BYTES
+      : MAX_TOOL_RESULT_HISTORY_BYTES
+  if (Buffer.byteLength(result.output) <= maxBytes) return result
   const bytes = Buffer.from(result.output)
   const markerBytes = Buffer.byteLength(TOOL_RESULT_TRUNCATION_MARKER)
-  const contentBytes = MAX_TOOL_RESULT_HISTORY_BYTES - markerBytes
+  const contentBytes = maxBytes - markerBytes
   const headBytes = Math.floor(contentBytes * 0.75)
   const tailBytes = contentBytes - headBytes
   let headEnd = headBytes

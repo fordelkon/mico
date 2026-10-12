@@ -7,7 +7,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from '@mico/ui'
-import { CircleOffIcon, LightbulbIcon } from 'lucide-react'
+import { ChevronDownIcon, CircleOffIcon, LightbulbIcon } from 'lucide-react'
 import * as React from 'react'
 
 import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
@@ -57,12 +57,17 @@ function ThinkingSelector({
       <DropdownMenuTrigger asChild>
         <Button
           aria-label={`Thinking effort: ${labels[selected]}`}
-          className="h-8 gap-1.5 px-2 text-xs font-normal text-text-secondary"
+          className="h-7 min-w-0 shrink gap-1.5 px-2 text-xs font-normal text-text-secondary"
           disabled={disabled}
           type="button"
           variant="ghost"
         >
-          <span>{labels[selected]}</span>
+          <LightbulbIcon aria-hidden="true" className="size-4 shrink-0" />
+          <span className="chat-composer-footer__label truncate">{labels[selected]}</span>
+          <ChevronDownIcon
+            aria-hidden="true"
+            className="chat-composer-footer__chevron size-3.5 text-muted-foreground"
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -84,13 +89,17 @@ function ThinkingSelector({
           />
           <DropdownMenuRadioGroup
             value={value}
-            // SAFETY: Every selectable item is rendered with a canonical thinking-effort value.
-            onValueChange={(selection) => onValueChange(selection as ThinkingSelection)}
+            onValueChange={(selection) => {
+              if (!disabled)
+                // SAFETY: The radio group only offers canonical thinking-effort values.
+                onValueChange(selection as ThinkingSelection)
+            }}
           >
             {reasoningCapabilities.selectableEfforts.map((selection, index) => (
               <DropdownMenuRadioItem
                 {...getItemProps(index)}
                 className="relative z-10 min-h-14 items-start gap-2 rounded-md px-2 py-2 pr-8 hover:bg-transparent focus:bg-transparent"
+                disabled={disabled}
                 key={selection}
                 value={selection}
               >

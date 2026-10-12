@@ -1,4 +1,3 @@
-import type { ChatCompactionsStore } from '@renderer/hooks/chat/chat-session-instances'
 import {
   CommandDialog,
   CommandEmpty,
@@ -41,7 +40,7 @@ import { ConversationNavigation } from './conversation-navigation'
 import './app-sidebar.css'
 
 type AppSidebarProps = {
-  compactions?: ChatCompactionsStore
+  compactingConversationIds?: ReadonlySet<string>
   conversations: Conversation[]
   projects?: WorkspaceProject[]
   activeConversationId: string | null
@@ -70,7 +69,7 @@ function nextAppearancePreference(preference: keyof typeof appearancePreferenceL
 }
 
 function AppSidebar({
-  compactions,
+  compactingConversationIds,
   conversations,
   projects = [],
   activeConversationId,
@@ -229,7 +228,7 @@ function AppSidebar({
               </SidebarMenu>
             ) : (
               <ConversationNavigation
-                compactions={compactions}
+                compactingConversationIds={compactingConversationIds}
                 conversations={conversations}
                 projects={projects}
                 activeConversationId={activeConversationId}

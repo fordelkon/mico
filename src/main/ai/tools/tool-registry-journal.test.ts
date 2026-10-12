@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 import { ToolRegistry } from './tool-registry'
 
-afterEach(removeTemporaryPaths)
+const commandCleanups: Array<() => Promise<void>> = []
+afterEach(async () => {
+  await Promise.all(commandCleanups.splice(0).map((cleanup) => cleanup()))
+  await removeTemporaryPaths()
+})
 describe('Tool execution journal boundary', () => {
   it('user cancels parallel reads when one result arrives, then all started siblings drain', async () => {
     const cwd = await createTemporaryWorkspace('mico-journal-')
@@ -40,29 +44,38 @@ describe('Tool execution journal boundary', () => {
     const starts: string[] = []
     const settlements: string[] = []
     const registry = ToolRegistry.forWorkspace(cwd, { requestApproval: async () => true })
-    await expect(
-      registry.execute(
-        {
-          toolCallId: 'command',
-          toolName: 'Bash',
-          input: {
-            command: 'node -e "process.stdout.write(\'ready\'); setInterval(() => {}, 1000)"'
-          }
-        },
-        controller.signal,
-        () => controller.abort(),
-        {
-          onExecutionStarted: (call) => {
-            starts.push(call.toolCallId)
-          },
-          onExecutionSettled: (execution) => {
-            settlements.push(execution.result.toolCallId)
-          }
+    const pending = registry.execute(
+      {
+        toolCallId: 'command',
+        toolName: 'Bash',
+        input: {
+          command: 'node -e "process.stdout.write(\'ready\'); setInterval(() => {}, 1000)"'
         }
-      )
-    ).rejects.toThrow(/abort/i)
-    expect(starts).toEqual(['command'])
-    expect(settlements).toEqual([])
+      },
+      controller.signal,
+      () => controller.abort(),
+      {
+        onExecutionStarted: (call) => {
+          starts.push(call.toolCallId)
+        },
+        onExecutionSettled: (execution) => {
+          settlements.push(execution.result.toolCallId)
+        }
+      }
+    )
+    const drained = pending.catch(() => undefined)
+    const cleanup = async () => {
+      controller.abort()
+      await drained
+    }
+    commandCleanups.push(cleanup)
+    try {
+      await expect(pending).rejects.toThrow(/abort/i)
+      expect(starts).toEqual(['command'])
+      expect(settlements).toEqual([])
+    } finally {
+      await cleanup()
+    }
   })
   it('user cannot write when durable start fails, then no side effect occurs', async () => {
     const cwd = await createTemporaryWorkspace('mico-journal-')

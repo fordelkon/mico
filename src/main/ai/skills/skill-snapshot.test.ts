@@ -121,6 +121,34 @@ describe('skill snapshots', () => {
     expect(snapshot.diagnostics).toHaveLength(3)
   })
 
+  it('user keeps identical copies in compatibility roots when discovering, then no shadow notice appears', async () => {
+    const { cwd, home } = await workspace()
+    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Shared instructions')
+    await skill(join(home, '.claude/skills'), 'review', validMetadata, 'Shared instructions')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
+    expect(snapshot.diagnostics).toEqual([])
+    expect(await snapshot.load('review')).toContain('Shared instructions')
+  })
+
+  it('user keeps distinct copies when discovering, then the shadow notice remains', async () => {
+    const { cwd, home } = await workspace()
+    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Canonical instructions')
+    await skill(join(home, '.claude/skills'), 'review', validMetadata, 'Compatibility instructions')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        path: join(home, '.claude/skills/review/SKILL.md'),
+        message: expect.stringContaining('shadowed')
+      })
+    ])
+  })
+
   it('user changes a document when discovering, then replacement and alias stay rejected', async () => {
     const { cwd, home } = await workspace()
     const base = await skill(join(home, '.agents/skills'), 'review', validMetadata)
@@ -220,7 +248,7 @@ describe('skill snapshots', () => {
       'bad-flag',
       'name: bad-flag\ndescription: Bad flag\ndisable-model-invocation: "false"'
     )
-    await skill(root, 'large', 'name: large\ndescription: Large', '😀'.repeat(16000))
+    await skill(root, 'large', 'name: large\ndescription: Large', '😀'.repeat(66000))
     await skill(
       root,
       'alias',
@@ -345,6 +373,21 @@ describe('skill snapshots', () => {
     await expect(snapshot.readResource('project-agents:review', 'binary')).rejects.toThrow('UTF-8')
   })
 
+  it('user loads a large skill when discovering, then its instructions stay intact', async () => {
+    const { cwd, home } = await workspace()
+    const body = 'x'.repeat(88 * 1024)
+    const base = await skill(join(cwd, '.agents/skills'), 'review', validMetadata, body)
+    await mkdir(join(cwd, '.claude/skills'), { recursive: true })
+    await symlink(base, join(cwd, '.claude/skills/review'))
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.diagnostics).toEqual([])
+    expect(snapshot.readDocument('project-agents:review').body).toBe(body)
+    expect(await snapshot.loadForUser('project-agents:review')).toContain(body)
+    expect(await snapshot.load('project-agents:review')).toContain(body)
+    expect(await snapshot.readResource('project-agents:review', 'SKILL.md')).toContain(body)
+  })
+
   it('user replaces a skill directory when reading a reference, then the new root is rejected', async () => {
     const { cwd, home } = await workspace()
     const base = await skill(join(cwd, '.agents/skills'), 'review', validMetadata)
@@ -419,31 +462,45 @@ describe('skill snapshots', () => {
       await mkdir(join(outside, 'references'), { recursive: true })
       await writeFile(join(outside, 'references/reference.md'), 'Private reference')
       const snapshot = await createSkillSnapshot(cwd, home)
-      const probe = await open(resource, 'r')
-      const prototype: FileHandle = Object.getPrototypeOf(probe)
-      // The saved method is explicitly rebound with apply to the real handle below.
-      // oxlint-disable-next-line typescript/unbound-method
-      const originalRead = prototype.read
-      const resourceIdentity = await probe.stat()
-      await probe.close()
       let replaced = false
-      // Keep real I/O; intercept its public handle seam only to schedule the filesystem race.
-      vi.spyOn(prototype, 'read').mockImplementation(async function (this: FileHandle, ...args) {
-        const identity = await this.stat()
-        if (
-          !replaced &&
-          identity.ino === resourceIdentity.ino &&
-          identity.dev === resourceIdentity.dev
-        ) {
-          replaced = true
-          const target =
-            replacement === 'file' ? resource : replacement === 'root' ? base : directory
-          await rename(target, `${target}-old`)
-          if (replacement === 'file') await writeFile(target, 'Replacement reference')
-          else await symlink(replacement === 'root' ? outside : join(outside, 'references'), target)
-        }
-        return originalRead.apply(this, args)
-      })
+      if (replacement === 'file') {
+        const probe = await open(resource, 'r')
+        const prototype: FileHandle = Object.getPrototypeOf(probe)
+        // The saved method is explicitly rebound with apply to the real handle below.
+        // oxlint-disable-next-line typescript/unbound-method
+        const originalRead = prototype.read
+        const resourceIdentity = await probe.stat()
+        await probe.close()
+        // Keep real I/O; replace the file during reading to exercise the final path check.
+        vi.spyOn(prototype, 'read').mockImplementation(async function (this: FileHandle, ...args) {
+          const identity = await this.stat()
+          if (
+            !replaced &&
+            identity.ino === resourceIdentity.ino &&
+            identity.dev === resourceIdentity.dev
+          ) {
+            replaced = true
+            await rename(resource, `${resource}-old`)
+            await writeFile(resource, 'Replacement reference')
+          }
+          return originalRead.apply(this, args)
+        })
+      } else {
+        const canonicalResource = await realpath(resource)
+        const originalOpen = filesystem.open
+        // Windows cannot rename ancestors of an open file. Schedule the real replacement
+        // after path identities are captured but before the resource handle is opened.
+        vi.spyOn(filesystem, 'open').mockImplementation(async (path, flags, mode) => {
+          if (!replaced && path === canonicalResource) {
+            replaced = true
+            const target = replacement === 'root' ? base : directory
+            await rename(target, `${target}-old`)
+            await symlink(replacement === 'root' ? outside : join(outside, 'references'), target)
+          }
+          return originalOpen(path, flags, mode)
+        })
+        syncBuiltinESMExports()
+      }
 
       await expect(snapshot.readResource('review', 'references/reference.md')).rejects.toThrow(
         'changed'
@@ -460,5 +517,257 @@ describe('skill snapshots', () => {
 
     expect(snapshot.skills).toEqual([])
     expect(snapshot.diagnostics[0]?.message).toContain('inside the skill directory')
+  })
+
+  it('user has compatibility roots when discovering, then gemini, cursor, github, and skills catalogs register', async () => {
+    const { cwd, home } = await workspace()
+    await skill(
+      join(cwd, '.gemini/skills'),
+      'gemini-skill',
+      'name: gemini-skill\ndescription: Gemini'
+    )
+    await skill(
+      join(cwd, '.cursor/skills'),
+      'cursor-skill',
+      'name: cursor-skill\ndescription: Cursor'
+    )
+    await skill(
+      join(cwd, '.github/skills'),
+      'github-skill',
+      'name: github-skill\ndescription: GitHub'
+    )
+    await skill(join(cwd, 'skills'), 'plain-skill', 'name: plain-skill\ndescription: Plain')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual([
+      'project-gemini:gemini-skill',
+      'project-cursor:cursor-skill',
+      'project-github:github-skill',
+      'project-skills:plain-skill'
+    ])
+    expect(snapshot.diagnostics).toEqual([])
+  })
+
+  it('user has user compatibility roots when discovering, then config, codex, cursor, and gemini catalogs register', async () => {
+    const { cwd, home } = await workspace()
+    await skill(
+      join(home, '.config/agents/skills'),
+      'config-skill',
+      'name: config-skill\ndescription: Config agents'
+    )
+    await skill(join(home, '.codex/skills'), 'codex-skill', 'name: codex-skill\ndescription: Codex')
+    await skill(
+      join(home, '.cursor/skills'),
+      'cursor-skill',
+      'name: cursor-skill\ndescription: Cursor'
+    )
+    await skill(
+      join(home, '.gemini/skills'),
+      'gemini-skill',
+      'name: gemini-skill\ndescription: Gemini'
+    )
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual([
+      'user-config-agents:config-skill',
+      'user-codex:codex-skill',
+      'user-cursor:cursor-skill',
+      'user-gemini:gemini-skill'
+    ])
+    expect(snapshot.diagnostics).toEqual([])
+  })
+
+  it('user nests skills under catalog directories when discovering, then depth-two documents register', async () => {
+    const { cwd, home } = await workspace()
+    await skill(
+      join(home, '.codex/skills/.system'),
+      'imagegen',
+      'name: imagegen\ndescription: Codex system',
+      'Codex system instructions'
+    )
+    await skill(
+      join(cwd, 'skills/.curated'),
+      'curated-skill',
+      'name: curated-skill\ndescription: Curated'
+    )
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual([
+      'project-skills:curated-skill',
+      'user-codex:imagegen'
+    ])
+    expect(await snapshot.load('imagegen')).toContain('Codex system')
+    expect(snapshot.diagnostics).toEqual([])
+  })
+
+  it('user nests a document under a skill directory when discovering, then the catalog stays at one level', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    await skill(root, 'review', validMetadata)
+    await skill(
+      join(root, 'review/nested'),
+      'nested-skill',
+      'name: nested-skill\ndescription: Nested'
+    )
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['project-agents:review'])
+    expect(snapshot.diagnostics).toEqual([])
+  })
+
+  it('user aliases a catalog directory when discovering, then depth-two skills appear once', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    const base = await skill(join(root, 'catalog'), 'review', validMetadata)
+    await symlink(join(root, 'catalog'), join(root, 'alias'))
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['project-agents:review'])
+    expect(snapshot.skills[0]?.baseDirectory).toBe(await realpath(base))
+    expect(snapshot.diagnostics).toEqual([])
+  })
+
+  it('user links an external catalog directory when discovering, then nested skills stay excluded', async () => {
+    const { cwd, home } = await workspace()
+    await skill(join(home), 'catalog', 'name: outside\ndescription: Outside')
+    await skill(join(home, 'catalog/nested'), 'secret', 'name: secret\ndescription: Secret')
+    await mkdir(join(cwd, 'skills'), { recursive: true })
+    await symlink(join(home, 'catalog'), join(cwd, 'skills', 'linked'))
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills).toEqual([])
+    expect(snapshot.diagnostics[0]?.message).toContain('inside the skill directory')
+  })
+
+  it('user links an external directory without a document when discovering, then descent stays inside the root', async () => {
+    const { cwd, home } = await workspace()
+    await skill(join(home, 'outside-catalog/nested'), 'secret', 'name: secret\ndescription: Secret')
+    const root = join(cwd, '.agents/skills')
+    await mkdir(root, { recursive: true })
+    await symlink(join(home, 'outside-catalog'), join(root, 'linked'))
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills).toEqual([])
+    expect(snapshot.diagnostics).toEqual([])
+  })
+
+  it('user omits frontmatter when discovering, then metadata is derived with a diagnostic', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    await mkdir(join(root, 'review.v2'), { recursive: true })
+    await writeFile(
+      join(root, 'review.v2/SKILL.md'),
+      '# Review v2\n\nInstructions without frontmatter.'
+    )
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills[0]).toMatchObject({
+      id: 'project-agents:review.v2',
+      name: 'review.v2',
+      description: '# Review v2',
+      userInvocable: true,
+      disableModelInvocation: false
+    })
+    expect(snapshot.diagnostics).toHaveLength(1)
+    expect(snapshot.diagnostics[0]?.message).toContain('frontmatter')
+    expect(await snapshot.load('review.v2')).toContain('Instructions without frontmatter.')
+  })
+
+  it('user leaves the frontmatter delimiter unclosed when authoring, then the document is rejected instead of derived', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    await skill(root, 'good', 'name: good\ndescription: Valid skill')
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(
+      join(root, 'deploy/SKILL.md'),
+      '---\nname: deploy\ndescription: Deploy the app\n\nDeployment steps without a closing delimiter.'
+    )
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['project-agents:good'])
+    expect(snapshot.diagnostics[0]?.message).toContain('closing --- delimiter')
+  })
+
+  it('user names a directory outside the name pattern when discovering, then the derived document is rejected', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    await skill(root, 'good', 'name: good\ndescription: Valid skill')
+    await mkdir(join(root, 'Review'), { recursive: true })
+    await writeFile(join(root, 'Review/SKILL.md'), 'Instructions without frontmatter.')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['project-agents:good'])
+    expect(snapshot.diagnostics[0]?.message).toContain('Invalid skill metadata')
+  })
+
+  it('user names skills with dots, underscores, and leading digits when discovering, then relaxed names register', async () => {
+    const { cwd, home } = await workspace()
+    const root = join(cwd, '.agents/skills')
+    await skill(root, 'review.v2', 'name: review.v2\ndescription: Dotted')
+    await skill(root, 'my_skill', 'name: my_skill\ndescription: Underscored')
+    await skill(root, '2fast', 'name: 2fast\ndescription: Leading digit')
+    await skill(root, 'bad', 'name: Review\ndescription: Uppercase')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual([
+      'project-agents:2fast',
+      'project-agents:my_skill',
+      'project-agents:review.v2'
+    ])
+    expect(snapshot.diagnostics).toHaveLength(1)
+  })
+
+  it('user keeps byte-identical copies across compatibility roots when discovering, then no shadow notice appears', async () => {
+    const { cwd, home } = await workspace()
+    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Shared instructions')
+    await skill(join(home, '.cursor/skills'), 'review', validMetadata, 'Shared instructions')
+    await skill(join(home, '.gemini/skills'), 'review', validMetadata, 'Shared instructions')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
+    expect(snapshot.diagnostics).toEqual([])
+  })
+
+  it('user keeps divergent copies across compatibility roots when discovering, then each shadow notice remains', async () => {
+    const { cwd, home } = await workspace()
+    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Canonical instructions')
+    await skill(join(home, '.cursor/skills'), 'review', validMetadata, 'Cursor instructions')
+    await skill(join(home, '.gemini/skills'), 'review', validMetadata, 'Gemini instructions')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
+    expect(snapshot.diagnostics.map(({ path }) => path)).toEqual([
+      join(home, '.cursor/skills/review/SKILL.md'),
+      join(home, '.gemini/skills/review/SKILL.md')
+    ])
+  })
+
+  it('user overrides a compatibility root from the workspace when discovering, then the shadow notice remains', async () => {
+    const { cwd, home } = await workspace()
+    await skill(join(home, '.cursor/skills'), 'review', validMetadata, 'User instructions')
+    await skill(join(cwd, '.gemini/skills'), 'review', validMetadata, 'Project instructions')
+
+    const snapshot = await createSkillSnapshot(cwd, home)
+
+    expect(snapshot.skills.map(({ id }) => id)).toEqual(['project-gemini:review'])
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        path: join(home, '.cursor/skills/review/SKILL.md'),
+        message: expect.stringContaining('shadowed')
+      })
+    ])
   })
 })

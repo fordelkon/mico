@@ -1,12 +1,26 @@
 import * as z from 'zod'
 
-const SkillSourceSchema = z.enum(['project-agents', 'project-claude', 'user-agents', 'user-claude'])
+const SkillSourceSchema = z.enum([
+  'project-agents',
+  'project-claude',
+  'project-gemini',
+  'project-cursor',
+  'project-github',
+  'project-skills',
+  'user-agents',
+  'user-claude',
+  'user-config-agents',
+  'user-codex',
+  'user-cursor',
+  'user-gemini'
+])
 const SkillIdSchema = z.string().trim().min(1).max(512)
+// Compatibility with agents that allow dots, underscores, and leading digits.
 const SkillNameSchema = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/)
 const ChatSkillInvocationPartSchema = z.strictObject({
   type: z.literal('data-skill-invocation'),
   data: z.strictObject({

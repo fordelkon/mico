@@ -1177,6 +1177,37 @@ describe('useChatWorkspaceState', () => {
     expect(result.current.responses.response.status).not.toBe('error')
   })
 
+  it('user reopens a failed conversation when the turn fails again, then the failure kind stays named', async () => {
+    const { api, result } = renderWorkspaceState()
+
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() =>
+      expect(result.current.responses.response).toMatchObject({
+        status: 'error',
+        message: 'Offline',
+        canRetry: true,
+        failureCode: 'provider_error'
+      })
+    )
+
+    act(() => void result.current.responses.sendMessage({ text: 'Again', documents: [] }))
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    act(() =>
+      api.emit({
+        type: 'error',
+        requestId: api.startedRequests[0].requestId,
+        message: 'Offline again'
+      })
+    )
+    // The refreshed recovery owns the terminal state and keeps the kind.
+    await waitFor(() =>
+      expect(result.current.responses.response).toMatchObject({
+        status: 'error',
+        failureCode: 'provider_error'
+      })
+    )
+  })
+
   it('user sees the model selection return when reopening a chat, then effort returns', async () => {
     const savedProfile = {
       modelEntryId: 'ollama:qwen3',
@@ -1361,7 +1392,7 @@ describe('useChatWorkspaceState compaction', () => {
     expect(result.current.compactions.states.get('session-new')).toEqual({
       status: 'failed',
       message:
-        'Could not summarize this conversation. IPC unavailable Your messages remain intact. Try Compact context again.'
+        'Could not summarize this conversation. IPC unavailable Your messages remain intact. Use /compact to try again.'
     })
     await act(async () => {
       await result.current.compactions.startCompaction('session-new')

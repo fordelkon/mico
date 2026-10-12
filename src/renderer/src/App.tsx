@@ -92,7 +92,13 @@ function AppContent(): React.JSX.Element {
     >
       <div aria-hidden="true" className="home-workspace__titlebar" />
       <AppSidebar
-        compactions={workspace.compactions}
+        compactingConversationIds={
+          new Set(
+            [...workspace.compactions.states]
+              .filter(([, state]) => state.status === 'pending')
+              .map(([id]) => id)
+          )
+        }
         activeConversationId={workspace.session.activeConversation?.id ?? null}
         conversations={workspace.conversations}
         projects={workspace.session.projects}
@@ -130,7 +136,11 @@ function AppContent(): React.JSX.Element {
             />
           </React.Suspense>
         ) : (
-          <ChatMain session={workspace.session} responses={workspace.responses} />
+          <ChatMain
+            session={workspace.session}
+            responses={workspace.responses}
+            compactions={workspace.compactions}
+          />
         )}
       </SidebarInset>
     </SidebarProvider>

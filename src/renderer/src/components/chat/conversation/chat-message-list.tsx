@@ -10,6 +10,7 @@ import {
 } from '@mico/ui'
 
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
+import type { TurnFailureCode } from '@shared/ai/turn-failure'
 import { Chat, useChat } from '@ai-sdk/react'
 import { CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
@@ -24,14 +25,30 @@ const PENDING_ASSISTANT_MESSAGE = {
   parts: []
 } satisfies MicoUIMessage
 
+/**
+ * Readable headings for the persisted failure vocabulary; the detail message
+ * still names the specific cause. Outcomes without a persisted kind — live
+ * transport errors — stay neutral instead of guessing.
+ */
+const OUTCOME_HEADINGS = {
+  provider_error: 'The model provider request failed',
+  step_limit: 'The model reached its step limit',
+  token_limit: 'The model reached its output token limit',
+  aborted: 'The response was stopped',
+  no_model: 'No model is selected',
+  process_interrupted: 'The app was closed during the response'
+} satisfies Record<TurnFailureCode, string>
+
 type ChatMessageListProps = {
   conversationId: string
   errorMessage?: string
+  failureCode?: TurnFailureCode
   isThinkingEnabled?: boolean
   messages: MicoUIMessage[]
   isResponding: boolean
   onRetry?: () => void
   retry?: ChatRetryState
+  status?: React.ReactNode
 }
 
 type SubscribedChatMessageListProps = Omit<ChatMessageListProps, 'messages'> & {
@@ -40,6 +57,11 @@ type SubscribedChatMessageListProps = Omit<ChatMessageListProps, 'messages'> & {
 
 type RetryProgressStyle = React.CSSProperties & { '--retry-delay': string }
 
+/**
+ * One compact live process row for a scheduled retry; the spinner is real work.
+ * The spoken announcement stays stable while the visible countdown ticks, so
+ * assistive tech hears one retry notice instead of a new one every 250 ms.
+ */
 function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Element {
   const [now, setNow] = React.useState(() => Date.now())
 
@@ -57,10 +79,20 @@ function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Elemen
   }
 
   return (
-    <p
-      className="chat-retry-status flex items-center gap-2 text-sm text-text-tertiary"
-      role="status"
-    >
+    <div className="chat-process-row" data-live="true">
+      <span aria-hidden="true" className="chat-process-row__node">
+        <Spinner className="size-3.5" />
+      </span>
+      <p className="chat-process-row__label">
+        <span aria-hidden="true">
+          {remainingSeconds > 0
+            ? `Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
+            : `Retrying · attempt ${retry.attempt} of ${retry.maxAttempts}.`}
+        </span>
+        <span className="sr-only" role="status">
+          Retrying · attempt {retry.attempt} of {retry.maxAttempts}.
+        </span>
+      </p>
       <span
         aria-hidden="true"
         className="chat-retry-progress"
@@ -68,30 +100,29 @@ function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Elemen
         key={retry.startedAt}
         style={retryProgressStyle}
       />
-      <Spinner aria-hidden="true" />
-      {remainingSeconds > 0
-        ? `Connection interrupted. Retrying in ${remainingSeconds}s · attempt ${retry.attempt} of ${retry.maxAttempts}.`
-        : `Connection interrupted. Retrying · attempt ${retry.attempt} of ${retry.maxAttempts}.`}
-    </p>
+    </div>
   )
 }
 
 function ChatMessageList({
   conversationId,
   errorMessage,
+  failureCode,
   isThinkingEnabled = true,
   messages,
   isResponding,
   onRetry,
-  retry
+  retry,
+  status
 }: ChatMessageListProps): React.JSX.Element {
   const latestMessage = messages.at(-1)
   const hasEmptyAssistantMessage =
     isResponding && latestMessage?.role === 'assistant' && latestMessage.parts.length === 0
-  const showPendingThinking =
-    isThinkingEnabled &&
-    isResponding &&
-    (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
+  // The pending row marks the gap before any content: "Thinking" names the
+  // expected first activity, and a plain "Working" covers thinking-off sessions
+  // so the wait stays visible either way.
+  const showPendingActivity =
+    isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
   const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
 
   return (
@@ -119,9 +150,13 @@ function ChatMessageList({
                   />
                 </MessageScrollerItem>
               ))}
-              {showPendingThinking && (
+              {showPendingActivity && (
                 <MessageScrollerItem messageId="pending-assistant">
-                  <ChatMessage isStreaming message={PENDING_ASSISTANT_MESSAGE} />
+                  <ChatMessage
+                    isStreaming
+                    message={PENDING_ASSISTANT_MESSAGE}
+                    pendingLabel={isThinkingEnabled ? undefined : 'Working'}
+                  />
                 </MessageScrollerItem>
               )}
             </>
@@ -129,7 +164,12 @@ function ChatMessageList({
               <div className="agent-turn-outcome" role="alert">
                 <CircleAlertIcon aria-hidden="true" className="size-4 flex-none" />
                 <div className="min-w-0 flex-1">
-                  <div className="agent-turn-outcome__heading">Stopped</div>
+                  {/* Persisted recovery names the failure kind in the heading;
+                      live transport errors keep the neutral wording, and the
+                      detail message names what actually happened either way. */}
+                  <div className="agent-turn-outcome__heading">
+                    {failureCode ? OUTCOME_HEADINGS[failureCode] : 'Response interrupted'}
+                  </div>
                   <p className="agent-turn-outcome__detail">{errorMessage}</p>
                 </div>
                 {onRetry && (
@@ -140,6 +180,7 @@ function ChatMessageList({
               </div>
             )}
             {retry && <ChatRetryStatus retry={retry} />}
+            {status}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton

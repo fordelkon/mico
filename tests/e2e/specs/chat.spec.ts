@@ -46,6 +46,25 @@ test('user continues a conversation when sending another turn, then each reply f
   await expect(assistantMessages(app.window)).toHaveCount(2)
 })
 
+test('user presses modified Enter when a model is selected, then only plain Enter sends the turn', async ({
+  app,
+  provider
+}) => {
+  const input = composer(app.window)
+  await input.fill('Ctrl draft')
+  await input.press('Control+Enter')
+  await input.press('Meta+Enter')
+  await expect(input).toHaveValue('Ctrl draft')
+  await expect(assistantMessages(app.window)).toHaveCount(0)
+  await expect(app.window.getByRole('button', { name: 'Send message' })).toBeVisible()
+
+  provider.enqueue({ type: 'text', text: 'The plain Enter turn completed.' })
+  await input.press('Enter')
+  await waitForReply(app.window, assistantMessages(app.window).last())
+  expect(provider.requests).toHaveLength(1)
+  await expect(assistantMessages(app.window)).toHaveCount(1)
+})
+
 test('user sees an unfinished reply when the stream pauses, then completion controls wait for the end', async ({
   app,
   provider
@@ -86,13 +105,18 @@ test('user reads fenced code when a reply streams, then blocks fill the message 
         throw new Error('The answer code block is missing.')
       const availableWidth = Math.min(message.getBoundingClientRect().width, 42 * 16)
       const bubbleStyle = getComputedStyle(bubble)
+      // Compare fractional CSS geometry on both sides; clientWidth rounds to
+      // integer pixels on displays with non-integer scaling.
       const contentWidth =
-        bubble.clientWidth -
+        bubble.getBoundingClientRect().width -
+        Number.parseFloat(bubbleStyle.borderLeftWidth) -
+        Number.parseFloat(bubbleStyle.borderRightWidth) -
         Number.parseFloat(bubbleStyle.paddingLeft) -
         Number.parseFloat(bubbleStyle.paddingRight)
       return {
         messageGap: Math.abs(availableWidth - bubble.getBoundingClientRect().width),
-        contentGap: Math.abs(contentWidth - markdown.getBoundingClientRect().width),
+        // CSSOM serializes computed border widths with limited precision.
+        contentGap: Math.abs(contentWidth - markdown.getBoundingClientRect().width) < 0.01 ? 0 : 1,
         blockGap: Math.abs(
           markdown.getBoundingClientRect().width - block.getBoundingClientRect().width
         ),
@@ -177,9 +201,7 @@ test('user stops a response when waiting to retry, then only the next message re
   await app.window.getByRole('button', { name: 'Send message' }).click()
   await rejected.closed
   const retryDeadline = Date.now() + 4_000
-  await expect(
-    app.window.getByRole('status').filter({ hasText: 'Connection interrupted.' })
-  ).toBeVisible()
+  await expect(app.window.getByRole('status').filter({ hasText: 'Retrying' })).toBeVisible()
   await app.window.screenshot({ path: testInfo.outputPath('retry-after-wait.png') })
   await app.window.getByRole('button', { name: 'Stop response' }).click()
   await expect(app.window.getByRole('button', { name: 'Stop response' })).toBeHidden()

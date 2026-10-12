@@ -118,9 +118,8 @@ function ComposerAttachments({
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={open ? 'Close attachment menu' : 'Add attachment'}
-            className="size-8"
             disabled={disabled || picking}
-            size="icon"
+            size="icon-sm"
             type="button"
             variant="ghost"
           >

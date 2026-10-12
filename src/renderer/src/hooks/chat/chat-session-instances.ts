@@ -224,8 +224,8 @@ function useChatSessions(): ChatSessionsStore {
           status: 'failed',
           message:
             error instanceof Error
-              ? `Could not summarize this conversation. ${error.message} Your messages remain intact. Try Compact context again.`
-              : 'Could not summarize this conversation. Your messages remain intact. Try Compact context again.'
+              ? `Could not summarize this conversation. ${error.message} Your messages remain intact. Use /compact to try again.`
+              : 'Could not summarize this conversation. Your messages remain intact. Use /compact to try again.'
         })
       }
     },
@@ -244,7 +244,7 @@ function useChatSessions(): ChatSessionsStore {
         publishCompaction(id, {
           ...latest,
           error:
-            'Could not confirm summary cancellation. Try Cancel again or wait for the summary to finish.'
+            'Could not confirm summary cancellation. Try Cancel summary again or wait for the summary to finish.'
         })
       }
     },
@@ -328,7 +328,8 @@ function useChatSessions(): ChatSessionsStore {
             status: 'error',
             conversationId,
             message: persisted.recovery.blockedReason ?? persisted.recovery.failure.message,
-            canRetry: persisted.recovery.canRetry
+            canRetry: persisted.recovery.canRetry,
+            failureCode: persisted.recovery.failure.code
           })
         else onResponseSettled(conversationId)
       } catch {
@@ -429,7 +430,8 @@ function useChatSessions(): ChatSessionsStore {
           status: 'error',
           conversationId: conversation.id,
           message: recovery.blockedReason ?? recovery.failure.message,
-          canRetry: recovery.canRetry
+          canRetry: recovery.canRetry,
+          failureCode: recovery.failure.code
         })
       return session
     },

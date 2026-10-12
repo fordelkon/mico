@@ -1,4 +1,8 @@
-import type { ChatSkillInvocationPart, SkillCatalog } from '@shared/ai/skills'
+import {
+  ChatSkillInvocationPartSchema,
+  type ChatSkillInvocationPart,
+  type SkillCatalog
+} from '@shared/ai/skills'
 import * as React from 'react'
 
 type CatalogState = {
@@ -9,7 +13,57 @@ type CatalogState = {
   error?: string
 }
 
-function useComposerSkills(projectId: string | null | undefined, draft: string) {
+type ComposerCommandItem = {
+  kind: 'command'
+  id: string
+  name: string
+  label: string
+  description: string
+}
+
+type ComposerSkillItem = {
+  kind: 'skill'
+  id: string
+  name: string
+  description: string
+}
+
+type ComposerMenuItem = ComposerCommandItem | ComposerSkillItem
+
+type ComposerCompletion = {
+  text: string
+  /** Caret after completing: right behind the token and its separating space. */
+  caret: number
+  /** End of the draft range the completion transaction replaces. */
+  replacedEnd: number
+}
+
+/** Everything after the leading invocation token; empty when there is none. */
+function commandArguments(draft: string): string {
+  return /^\$[^\s]*(?:\s([\s\S]*))?$/.exec(draft)?.[1] ?? ''
+}
+
+/**
+ * How the menu was opened: a leading `/` query offers the built-in commands, a
+ * leading `$` query offers skills only, and `null` means the menu is closed.
+ */
+type ComposerQueryMode = 'slash' | 'dollar' | null
+
+// The single built-in command. It is dispatched locally by the composer and is
+// never sent as a message or persisted as a skill invocation part.
+const BUILT_IN_COMMAND: ComposerCommandItem = {
+  kind: 'command',
+  id: 'compact',
+  name: 'compact',
+  label: 'Compact context',
+  description: 'Summarize this conversation to free context space.'
+}
+
+function useComposerSkills(
+  projectId: string | null | undefined,
+  draft: string,
+  { offerCompactCommand, caret }: { offerCompactCommand: boolean; caret: number }
+) {
   const requestedProjectId = projectId ?? undefined
   const [state, setState] = React.useState<CatalogState>({
     projectId: requestedProjectId,
@@ -50,33 +104,105 @@ function useComposerSkills(projectId: string | null | undefined, draft: string) 
       ? state.status
       : 'loading'
   const catalog = requestedProjectId && status === 'ready' ? state.catalog : undefined
-  const query = /^\/(?:skill:)?([^\s]*)$/.exec(draft)?.[1]
-  const isOpen = query !== undefined && dismissedDraft !== draft
+  // Only the leading token can be an invocation. Editing that token opens the
+  // menu without replacing its following arguments or treating inline $ as a
+  // second invocation. A leading `/skill:` prefix is plain text: it opens no
+  // menu and never invokes a skill.
+  const leadingToken = /^([/$][^\s]*)/.exec(draft)?.[1]
+  const slashQuery =
+    leadingToken && !leadingToken.startsWith('/skill:')
+      ? /^\/([^\s]*)$/.exec(leadingToken)?.[1]
+      : undefined
+  const dollarQuery = leadingToken ? /^\$([^\s]*)$/.exec(leadingToken)?.[1] : undefined
+  const queryMode: ComposerQueryMode =
+    slashQuery !== undefined ? 'slash' : dollarQuery !== undefined ? 'dollar' : null
+  const query = slashQuery ?? dollarQuery ?? ''
+  const tokenEnd = leadingToken?.length ?? 0
+  const isOpen = queryMode !== null && caret <= tokenEnd && dismissedDraft !== draft
+  // Built-in commands are independent of the skill catalog: they stay available
+  // while skills load, fail, or need a workspace, and only the slash menu
+  // offers them — a `$` query selects skills alone.
+  // Matching ignores case and ranks prefix matches first so "$comp" offers
+  // "compact"-like names before loose substring hits.
+  const normalizedQuery = query.toLocaleLowerCase()
+  const matchesQuery = (name: string): boolean => name.toLocaleLowerCase().includes(normalizedQuery)
+  const commandMatches =
+    queryMode === 'slash' && offerCompactCommand
+      ? matchesQuery(BUILT_IN_COMMAND.name)
+        ? [BUILT_IN_COMMAND]
+        : []
+      : []
   const skills = (catalog?.skills ?? []).filter((skill) => skill.userInvocable)
-  const matches = skills.filter((skill) => skill.name.includes(query ?? ''))
+  const skillMatches =
+    queryMode === 'dollar' ? skills.filter((skill) => matchesQuery(skill.name)) : []
+  skillMatches.sort((left, right) => {
+    const leftPrefix = left.name.toLocaleLowerCase().startsWith(normalizedQuery) ? 0 : 1
+    const rightPrefix = right.name.toLocaleLowerCase().startsWith(normalizedQuery) ? 0 : 1
+    return leftPrefix - rightPrefix
+  })
+  const matches: ComposerMenuItem[] = [
+    ...commandMatches,
+    ...skillMatches.map((skill): ComposerSkillItem => ({ ...skill, kind: 'skill' }))
+  ]
   const selectedIndex =
     selection.draft === draft ? Math.min(selection.index, Math.max(0, matches.length - 1)) : 0
 
-  const resolveInvocation = (): ChatSkillInvocationPart['data'] | undefined => {
-    if (!draft.startsWith('/skill:')) return undefined
+  const knownSkillNames = new Set(skills.map(({ name }) => name))
+
+  // Completing an entry rewrites only the leading token; the arguments after
+  // it stay untouched. The trailing space separates the token from its
+  // arguments, and the caret lands right after it.
+  const applyCompletion = (item: ComposerMenuItem): ComposerCompletion => {
+    // Skill entries always complete to `$name`; the slash menu offers commands
+    // only, so no slash skill token exists.
+    const token = item.kind === 'command' ? '/compact' : `$${item.name}`
+    const existingSuffix = draft.slice(tokenEnd)
+    return {
+      text: `${token}${existingSuffix[0] || ' '}`,
+      caret: token.length + 1,
+      replacedEnd: tokenEnd + (existingSuffix ? 1 : 0)
+    }
+  }
+
+  const resolveInvocation = (text = draft): ChatSkillInvocationPart['data'] | undefined => {
+    // A leading `$name` invokes a skill only when the name exactly matches an
+    // invocable one; once the catalog is ready, unknown names stay ordinary
+    // text. Until then, a leading $name is ambiguous and requires a retry.
+    // Inline references, a bare $, and any leading / token (including the
+    // historic `/skill:` form) remain ordinary text.
+    const dollarReference = /^\$([^\s]+)(?:\s([\s\S]*))?$/.exec(text)
+    if (!dollarReference) return undefined
     if (status !== 'ready')
-      throw new Error('Skills are unavailable. Retry loading skills before sending this command.')
-    const command = /^\/skill:([^\s]+)(?:\s([\s\S]*))?$/.exec(draft)
-    const skill = skills.find(({ name }) => name === command?.[1])
-    if (!skill)
       throw new Error(
-        `Unknown skill "${command?.[1] ?? ''}". Choose an available skill or remove the command.`
+        'Skills are unavailable. Retry loading skills before sending this invocation.'
       )
-    return { skillId: skill.id, name: skill.name, arguments: command?.[2] ?? '' }
+    const skill = skills.find(({ name: candidate }) => candidate === dollarReference[1])
+    if (!skill) return undefined
+    const invocation = { skillId: skill.id, name: skill.name, arguments: commandArguments(text) }
+    const validated = ChatSkillInvocationPartSchema.safeParse({
+      type: 'data-skill-invocation',
+      data: invocation
+    })
+    if (!validated.success)
+      throw new Error('Skill arguments exceed the 64 KiB limit. Shorten them before sending.')
+    return validated.data.data
   }
 
   return {
     isOpen,
-    status,
-    error: status === 'error' ? state.error : undefined,
-    diagnostics: catalog?.diagnostics ?? [],
+    // The composer styles each open menu by its query mode; the catalog-driven
+    // fields below stay invisible to the slash menu, which offers commands
+    // alone and never depends on the skill catalog.
+    queryMode,
+    status: queryMode === 'dollar' ? status : 'ready',
+    error: queryMode === 'dollar' && status === 'error' ? state.error : undefined,
+    diagnostics: queryMode === 'dollar' ? (catalog?.diagnostics ?? []) : [],
     matches,
+    // Exact invocable names for draft highlighting; empty while loading or on
+    // error so unresolved words simply stay plain text.
+    knownSkillNames,
     selectedIndex,
+    applyCompletion,
     selectIndex: (index: number): void => {
       setSelection({ draft, index })
     },

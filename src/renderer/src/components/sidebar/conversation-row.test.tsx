@@ -29,75 +29,34 @@ afterEach(() => {
 })
 
 describe('ConversationRow', () => {
-  it('user summarizes a settled chat when choosing Compact context, then the action starts', async () => {
+  it('user opens actions when a summary is pending, then deletion waits without sidebar feedback', async () => {
     const user = userEvent.setup()
-    const compact = vi.fn<NonNullable<RowProps['onCompactConversation']>>(async () => {})
     render(
       <SidebarProvider>
         <ConversationRow
-          {...rowProps(
-            { id: 'conversation-1', title: 'Design notes' },
-            { onCompactConversation: compact }
-          )}
+          {...rowProps({ id: 'conversation-1', title: 'Design notes' }, { isCompacting: true })}
         />
       </SidebarProvider>
     )
     await user.click(screen.getByRole('button', { name: 'More actions' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Compact context' }))
-    expect(compact).toHaveBeenCalledWith('conversation-1')
-  })
-
-  it('user opens a summarizing chat menu when pending, then cancellation is available and deletion waits', async () => {
-    const user = userEvent.setup()
-    const cancel = vi.fn<NonNullable<RowProps['onCancelCompaction']>>(async () => {})
-    render(
-      <SidebarProvider>
-        <ConversationRow
-          {...rowProps(
-            { id: 'conversation-1', title: 'Design notes' },
-            {
-              compactionState: { status: 'pending', requestId: 'request-1' },
-              onCancelCompaction: cancel
-            }
-          )}
-        />
-      </SidebarProvider>
-    )
-    const indicator = screen.getByLabelText('Summarizing conversation')
-    expect(indicator).toBeVisible()
-    expect(indicator).toHaveAttribute('aria-busy', 'true')
-    expect(indicator).not.toHaveAttribute('role', 'status')
-    expect(indicator).not.toHaveAttribute('role', 'alert')
-    fireEvent.contextMenu(screen.getByRole('button', { name: 'Design notes' }))
-    expect(await screen.findByRole('menuitem', { name: 'Compact context' })).toHaveAttribute(
-      'aria-disabled',
-      'true'
-    )
+    expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeVisible()
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveAttribute(
       'aria-disabled',
       'true'
     )
-    await user.click(screen.getByRole('menuitem', { name: 'Cancel summary' }))
-    expect(cancel).toHaveBeenCalledWith('conversation-1')
-  })
-
-  it('user sees summary failure when returning to the conversation, then retry guidance is visible', () => {
-    render(
-      <SidebarProvider>
-        <ConversationRow
-          {...rowProps(
-            { id: 'conversation-1', title: 'Design notes' },
-            {
-              compactionState: {
-                status: 'failed',
-                message: 'Summary failed. Try Compact context again.'
-              }
-            }
-          )}
-        />
-      </SidebarProvider>
+    expect(screen.queryByRole('menuitem', { name: 'Compact context' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Cancel summary' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Design notes' }))
+    expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveAttribute(
+      'aria-disabled',
+      'true'
     )
-    expect(screen.getByRole('alert')).toHaveTextContent('Try Compact context again.')
+    expect(screen.queryByRole('menuitem', { name: 'Compact context' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Cancel summary' })).not.toBeInTheDocument()
   })
 
   it('user sees the title animate only when clipped, then short titles stay static', () => {

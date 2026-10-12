@@ -169,7 +169,7 @@ test('user edits a file when the provider temporarily fails, then recovery prese
   await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
   await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
   await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
-  await app.window.getByRole('button', { name: 'Tool permissions' }).click()
+  await app.window.getByRole('button', { name: /^Tool permissions:/ }).click()
   await app.window.getByRole('menuitemradio', { name: 'Accept edits' }).click()
   provider.enqueue({
     type: 'tool',
@@ -196,9 +196,7 @@ test('user edits a file when the provider temporarily fails, then recovery prese
     })
   )
   expect(await readFile(join(app.workspaceDir, 'recovery.txt'), 'utf8')).toBe('TOKEN_UPDATED')
-  await expect(
-    app.window.getByRole('status').filter({ hasText: 'Connection interrupted.' })
-  ).toBeVisible()
+  await expect(app.window.getByRole('status').filter({ hasText: 'Retrying' })).toBeVisible()
   await app.window.screenshot({ path: testInfo.outputPath('committed-edit-retrying.png') })
   const resumedRequest = await recovered.received
   expect(
@@ -238,7 +236,7 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   await expect(app.window.getByRole('button', { name: /^Workspace: project/ })).toBeVisible()
   await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
   await expect(app.window.getByRole('textbox', { name: 'Search workspaces' })).toBeHidden()
-  await app.window.getByRole('button', { name: 'Tool permissions' }).click()
+  await app.window.getByRole('button', { name: /^Tool permissions:/ }).click()
   await app.window.getByRole('menuitemradio', { name: 'Accept edits' }).click()
 
   const write = provider.enqueue({
@@ -311,7 +309,7 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   expect(await readFile(join(app.workspaceDir, 'result.txt'), 'utf8')).toBe('MICO_EDITED_RESULT')
 })
 
-test('user invokes a manual slash skill when following its reference, then details survive restart', async ({
+test('user invokes a manual skill with $ when following its reference, then details survive restart', async ({
   app,
   provider
 }, testInfo) => {
@@ -353,7 +351,7 @@ test('user invokes a manual slash skill when following its reference, then detai
   })
   const answer = provider.enqueue({ type: 'text', text: 'Followed the skill and its reference.' })
   const draft = composer(app.window)
-  await draft.fill('/')
+  await draft.fill('$')
   await expect(app.window.getByRole('option', { name: /^mico-e2e-skill / })).toBeVisible()
   await expect(app.window.getByText('mico-e2e-skill', { exact: true })).toBeVisible()
   const skillDescription = app.window.getByText(description, { exact: true })
@@ -361,7 +359,7 @@ test('user invokes a manual slash skill when following its reference, then detai
   await expect(skillDescription).toHaveCSS('white-space', 'nowrap')
   await expect(skillDescription).toHaveCSS('text-overflow', 'ellipsis')
   await expect(app.window.getByText('Manual only', { exact: true })).toHaveCount(0)
-  const skillMenu = app.window.getByRole('region', { name: 'Skill commands' })
+  const skillMenu = app.window.getByRole('region', { name: 'Commands and skills' })
   const warnings = skillMenu.getByText('12 skill discovery warnings', { exact: true })
   await expect(warnings).toBeVisible()
   await expect(skillMenu.getByText(invalidSkillPaths[0], { exact: true })).toBeHidden()
@@ -378,7 +376,7 @@ test('user invokes a manual slash skill when following its reference, then detai
   await warnings.press('Space')
   await skillMenu.getByRole('button', { name: 'Retry skills', exact: true }).click()
   await expect(warnings).toBeVisible()
-  await expect(draft).toHaveValue('/')
+  await expect(draft).toHaveValue('$')
   await draft.focus()
   await draft.press('Escape')
   await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
@@ -390,7 +388,7 @@ test('user invokes a manual slash skill when following its reference, then detai
   )
   await expect(app.window.locator('html')).toHaveClass(/dark/)
   await draft.fill('')
-  await draft.fill('/')
+  await draft.fill('$')
   await expect(app.window.getByRole('option', { name: /^mico-e2e-skill / })).toBeVisible()
   await draft.focus()
   await expect(draft).toBeFocused()
@@ -399,9 +397,9 @@ test('user invokes a manual slash skill when following its reference, then detai
   ).toBe(true)
   await app.window.screenshot({ path: testInfo.outputPath('skill-menu-dark-narrow.png') })
   await draft.press('Tab')
-  await expect(draft).toHaveValue('/skill:mico-e2e-skill ')
+  await expect(draft).toHaveValue('$mico-e2e-skill ')
   await expect(draft).toBeFocused()
-  await sendUserMessage(app.window, '/skill:mico-e2e-skill follow its reference guide.')
+  await sendUserMessage(app.window, '$mico-e2e-skill follow its reference guide.')
   const resourceRequest = await resource.received
   expect(resourceRequest.messages).toContainEqual(
     expect.objectContaining({ role: 'user', content: expect.stringContaining(skillBody) })

@@ -28,6 +28,25 @@ export const CustomTooltip: Story = {
   }
 }
 
+export const TooltipPlacement: Story = {
+  args: {
+    icon: <HeartIcon />,
+    label: 'Favorite',
+    tooltip: 'Opens below and toward the end edge',
+    tooltipAlign: 'start',
+    tooltipSide: 'bottom'
+  }
+}
+
+export const TooltipSuppressed: Story = {
+  args: {
+    icon: <HeartIcon />,
+    label: 'Favorite',
+    tooltip: 'Never shown while suppressed',
+    tooltipDisabled: true
+  }
+}
+
 export const Sizes: Story = {
   render: () => (
     <div className="flex items-center gap-2">

@@ -1,14 +1,16 @@
 import { realpath } from 'node:fs/promises'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { createBashTool } from './bash-tool'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('bash tool', () => {
-  // Windows taskkill is asynchronous. Retry the workspace removal until its
-  // descendant process has released the cwd rather than racing cleanup.
-  afterEach(() => removeTemporaryPaths({ maxRetries: 10, retryDelay: 100 }))
+  const commandCleanups: Array<() => Promise<void>> = []
+  afterEach(async () => {
+    await Promise.all(commandCleanups.splice(0).map((cleanup) => cleanup()))
+    await removeTemporaryPaths()
+  })
 
   async function createContext() {
     const cwd = await createTemporaryWorkspace('mico-bash-tool-')
@@ -24,7 +26,9 @@ describe('bash tool', () => {
       signal: controller.signal,
       controller,
       deltas,
-      onOutputDelta: (delta: { stream: string; delta: string }) => deltas.push(delta)
+      onOutputDelta: (delta: { stream: string; delta: string }) => {
+        deltas.push(delta)
+      }
     }
   }
 
@@ -42,6 +46,16 @@ describe('bash tool', () => {
     // The command stays alive after writing so settling the promise cannot race
     // the deltas: any delta observed here arrived while the command still ran.
     let settled = false
+    const observed = Promise.withResolvers<void>()
+    const collect = context.onOutputDelta
+    context.onOutputDelta = (delta) => {
+      collect(delta)
+      if (
+        context.deltas.some((part) => part.stream === 'stdout' && part.delta === 'out') &&
+        context.deltas.some((part) => part.stream === 'stderr' && part.delta === 'err')
+      )
+        observed.resolve()
+    }
     const pending = createBashTool()
       .execute(
         {
@@ -61,18 +75,26 @@ describe('bash tool', () => {
         }
       )
 
-    await vi.waitFor(() => {
+    const drained = pending.catch(() => undefined)
+    const cleanup = async () => {
+      context.controller.abort()
+      await drained
+    }
+    commandCleanups.push(cleanup)
+    try {
+      await Promise.race([observed.promise, pending])
       expect(context.deltas).toEqual(
         expect.arrayContaining([
           { stream: 'stdout', delta: 'out' },
           { stream: 'stderr', delta: 'err' }
         ])
       )
-    })
-
-    expect(settled).toBe(false)
-    context.controller.abort()
-    await expect(pending).rejects.toThrow('Command aborted')
+      expect(settled).toBe(false)
+      context.controller.abort()
+      await expect(pending).rejects.toThrow('Command aborted')
+    } finally {
+      await cleanup()
+    }
   })
 
   it('user watches command progress when output streams, then both streams arrive', async () => {
@@ -103,20 +125,39 @@ describe('bash tool', () => {
   it('user stops a running command when cancelling, then execution rejects with an abort error', async () => {
     const { cwd } = await createContext()
     const controller = new AbortController()
-    const command = 'node -e "process.stdout.write(\'ready\'); setTimeout(() => {}, 30000)"'
-    const deltas: Array<{ stream: string; delta: string }> = []
-
+    const command =
+      'node -e "process.stdout.write(JSON.stringify({ ready: true, pid: process.pid })); setTimeout(() => {}, 30000)"'
+    let output = ''
+    const ready = Promise.withResolvers<void>()
     const pending = createBashTool().execute(
       { command },
-      { cwd, signal: controller.signal, onOutputDelta: (delta) => deltas.push(delta) }
+      {
+        cwd,
+        signal: controller.signal,
+        onOutputDelta: (delta) => {
+          if (delta.stream !== 'stdout') return
+          output += delta.delta
+          if (output.endsWith('}')) ready.resolve()
+        }
+      }
     )
-    // Abort once the command is observably running. Aborting during shell startup
-    // races taskkill's tree enumeration against the shell spawning the command,
-    // which can orphan the command instead of killing it.
-    await vi.waitFor(() => expect(deltas).toContainEqual({ stream: 'stdout', delta: 'ready' }))
-    controller.abort()
-
-    await expect(pending).rejects.toThrow('Command aborted')
+    const drained = pending.catch(() => undefined)
+    const cleanup = async () => {
+      controller.abort()
+      await drained
+    }
+    commandCleanups.push(cleanup)
+    try {
+      await Promise.race([ready.promise, pending])
+      const commandProcess: { ready: boolean; pid: number } = JSON.parse(output)
+      expect(commandProcess.ready).toBe(true)
+      controller.abort()
+      await expect(pending).rejects.toThrow('Command aborted')
+      await removeTemporaryPaths()
+      expect(() => process.kill(commandProcess.pid, 0)).toThrow(/ESRCH/)
+    } finally {
+      await cleanup()
+    }
   })
 
   it.each([

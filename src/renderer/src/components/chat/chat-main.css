@@ -388,6 +388,65 @@
   line-height: 1.5;
 }
 
+/* Compact process row for conversation-local lifecycle feedback (compaction
+   outcome, scheduled retry). It borrows the agent activity row's box, type and
+   tones so transient state reads in the same rhythm as the timeline, without
+   claiming to be part of the message history. */
+.chat-process-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 1.875rem;
+  padding: 0.1875rem 0.375rem;
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.chat-process-row__node {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.chat-process-row[data-tone="failed"] .chat-process-row__node {
+  color: var(--destructive);
+}
+
+.chat-process-row__label {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.chat-process-row[data-tone="failed"] .chat-process-row__label {
+  color: var(--destructive);
+}
+
+.chat-process-row__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+/* The word carries the state next to the color so neither is the only signal. */
+.agent-activity__state {
+  flex: none;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.agent-activity__trace[data-state="failed"] .agent-activity__state {
+  color: var(--destructive);
+}
+
 /* Only pointer disclosure animates. State updates and keyboard access remain immediate. */
 .thinking-block[data-animate-disclosure="false"] > .thinking-block__panel,
 .thinking-block[data-animate-disclosure="false"]
@@ -406,10 +465,6 @@
     flex-basis: calc(100% - 1.5rem);
     margin-left: 1.5rem;
   }
-}
-
-.chat-retry-status {
-  position: relative;
 }
 
 .chat-retry-progress {
@@ -534,31 +589,18 @@
 
 .chat-composer__surface {
   box-shadow: var(--chat-composer-shadow);
-  transition-property: border-color, box-shadow;
+  transition-property: border-color;
 }
 
-.chat-composer__surface:focus-within {
-  box-shadow: var(--chat-composer-focus-shadow);
+/* Focus styling is owned here: only the textarea's focus changes the input
+   surface, so footer buttons and menus never light up the composer border.
+   The border is the sole focus signal — no additional focus glow. */
+.chat-composer__surface {
+  border-color: var(--border-subtle);
 }
 
-.chat-composer__actions {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.5rem;
-  padding-top: 0.125rem;
-}
-
-.chat-composer__tools {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.chat-composer__send {
-  position: absolute;
-  right: 0;
-  bottom: 0.125rem;
+.chat-composer__surface[data-input-focused="true"] {
+  border-color: var(--border-strong);
 }
 
 .tool-trace__command {
@@ -575,51 +617,4 @@
 
 .agent-activity__trace[data-state="failed"] .agent-activity__action {
   color: var(--destructive);
-}
-
-.chat-composer__generation {
-  display: flex;
-  min-width: 0;
-  max-width: 100%;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  justify-self: end;
-  gap: 0.25rem;
-}
-
-.chat-composer__context {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0 0.25rem 0.375rem;
-}
-
-.chat-composer__context:empty {
-  display: none;
-}
-
-.chat-composer__suggestion {
-  animation: chat-composer-suggestion-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes chat-composer-suggestion-in {
-  from {
-    opacity: 0;
-    transform: translateY(0.375rem);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chat-composer__suggestion {
-    animation: none;
-  }
 }

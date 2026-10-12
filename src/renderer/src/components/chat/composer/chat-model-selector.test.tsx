@@ -94,4 +94,27 @@ describe('ChatModelSelector', () => {
 
     expect(screen.queryByRole('listbox', { name: 'Available models' })).toBeNull()
   })
+
+  it('user cannot open or choose models when the selector is disabled, then the trigger stays unavailable', () => {
+    render(<ChatModelSelector library={library} disabled onSelect={() => undefined} />)
+
+    expect(screen.getByRole('button', { name: 'Qwen 3 8B' })).toBeDisabled()
+  })
+
+  it('user navigates models when pressing arrows and ends, then focus reaches the list edges', async () => {
+    const user = userEvent.setup()
+    renderSelector()
+
+    await user.click(screen.getByRole('button', { name: 'Qwen 3 8B' }))
+    // Start in the query explicitly; opening also schedules its focus on the next frame.
+    await user.click(screen.getByRole('textbox', { name: 'Search models' }))
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('option', { name: 'Qwen 3 8B' })).toHaveFocus()
+
+    await user.keyboard('{End}')
+    expect(screen.getByRole('option', { name: 'Example Chat' })).toHaveFocus()
+
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('option', { name: 'Qwen 3 8B' })).toHaveFocus()
+  })
 })

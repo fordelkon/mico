@@ -2,7 +2,8 @@ import '@testing-library/jest-dom/vitest'
 
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { useState } from 'react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { SearchPopover } from '../../../components/composites/search-popover'
 import { Button } from '../../../components/primitives/button'
@@ -36,5 +37,44 @@ describe('SearchPopover', () => {
 
     await user.click(screen.getByRole('button', { name: 'Choose option' }))
     expect(screen.getByRole('textbox', { name: 'Search options' })).toHaveValue('')
+  })
+
+  it('user toggles a popover when its open state is controlled, then the caller sees the changes', async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn<(open: boolean) => void>()
+
+    function ControlledPopover() {
+      const [open, setOpen] = useState(false)
+
+      return (
+        <>
+          <SearchPopover
+            open={open}
+            onOpenChange={(next) => {
+              onOpenChange(next)
+              setOpen(next)
+            }}
+            searchLabel="Search options"
+            searchPlaceholder="Search options"
+            trigger={<Button>Choose option</Button>}
+          >
+            {() => <p>Options</p>}
+          </SearchPopover>
+          <output>{open ? 'Open' : 'Closed'}</output>
+        </>
+      )
+    }
+
+    render(<ControlledPopover />)
+
+    await user.click(screen.getByRole('button', { name: 'Choose option' }))
+
+    expect(screen.getByRole('textbox', { name: 'Search options' })).toBeVisible()
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+    expect(screen.getByRole('status')).toHaveTextContent('Open')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Search options' })).toBeNull()
+    expect(onOpenChange).toHaveBeenLastCalledWith(false)
+    expect(screen.getByRole('status')).toHaveTextContent('Closed')
   })
 })

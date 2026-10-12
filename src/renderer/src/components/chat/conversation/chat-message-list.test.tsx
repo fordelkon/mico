@@ -151,7 +151,7 @@ describe('ChatMessageList', () => {
     )
   })
 
-  it('user sees no pending thinking state when the effort is off, then the control is absent', () => {
+  it('user sees a working status when the effort is off and nothing streams yet, then the wait stays visible', () => {
     const userMessage = {
       id: 'user-1',
       role: 'user' as const,
@@ -160,18 +160,21 @@ describe('ChatMessageList', () => {
 
     renderMessageList({ isResponding: true, isThinkingEnabled: false, messages: [userMessage] })
 
+    // The pending row stays visible without thinking; it just stops claiming "Thinking".
+    expect(screen.getByRole('status')).toHaveTextContent('Working')
     expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull()
   })
 
-  it('user sees a provider error when the response fails, then an alert announces it', () => {
+  it('user sees a neutral interruption heading when the response fails, then the provider message and retry remain', () => {
     renderMessageList({
       errorMessage: 'The chat provider could not complete the response.',
       onRetry: () => undefined
     })
 
     const outcome = screen.getByRole('alert')
-    expect(outcome).toHaveTextContent('Stopped')
+    expect(outcome).toHaveTextContent('Response interrupted')
     expect(outcome).toHaveTextContent('The chat provider could not complete the response.')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible()
   })
 
   it('user retries the response when pressing Try again, then the retry callback runs', async () => {
@@ -183,14 +186,51 @@ describe('ChatMessageList', () => {
     expect(screen.getByText('Retry requested')).toBeVisible()
   })
 
-  it('user sees the retry attempt when the connection drops, then the status shows a countdown', () => {
+  it('user hears one stable retry announcement when the countdown ticks, then it is not repeated', () => {
+    vi.useFakeTimers()
     renderMessageList({
       isResponding: true,
       retry: { attempt: 2, maxAttempts: 5, retryDelayMs: 2_000, startedAt: Date.now() }
     })
 
-    expect(
-      screen.getByText('Connection interrupted. Retrying in 2s · attempt 2 of 5.')
-    ).toHaveAttribute('role', 'status')
+    const retryStatus = (): HTMLElement => {
+      const status = screen
+        .getAllByRole('status')
+        .find((element) => element.textContent?.includes('attempt'))
+      if (!status) throw new Error('Retry announcement is missing.')
+      return status
+    }
+    expect(retryStatus()).toHaveTextContent('Retrying · attempt 2 of 5.')
+    const announcedBeforeTick = retryStatus().textContent
+
+    act(() => {
+      vi.advanceTimersByTime(250)
+    })
+
+    expect(retryStatus().textContent).toBe(announcedBeforeTick)
+    expect(screen.getByTestId('retry-progress')).toBeVisible()
   })
+
+  it.each([
+    ['provider_error', 'The model provider request failed'],
+    ['step_limit', 'The model reached its step limit'],
+    ['token_limit', 'The model reached its output token limit'],
+    ['aborted', 'The response was stopped'],
+    ['no_model', 'No model is selected'],
+    ['process_interrupted', 'The app was closed during the response']
+  ] as const)(
+    'user reads a named heading when the failure is %s, then the detail and retry remain',
+    (failureCode, heading) => {
+      renderMessageList({
+        errorMessage: 'Offline.',
+        failureCode,
+        onRetry: () => undefined
+      })
+
+      const outcome = screen.getByRole('alert')
+      expect(outcome).toHaveTextContent(heading)
+      expect(outcome).toHaveTextContent('Offline.')
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible()
+    }
+  )
 })

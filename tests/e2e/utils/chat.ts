@@ -10,7 +10,9 @@ export async function selectChatModel(page: Page, modelId: string): Promise<void
 
 /** The composer lives in the main chat surface, outside floating search dialogs. */
 export function composer(page: Page): Locator {
-  return page.getByRole('main', { name: 'Main content', exact: true }).getByRole('textbox')
+  return page
+    .getByRole('main', { name: 'Main content', exact: true })
+    .getByRole('textbox', { name: 'Message' })
 }
 
 export function assistantMessages(page: Page): Locator {

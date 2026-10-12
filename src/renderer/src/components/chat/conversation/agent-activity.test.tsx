@@ -755,7 +755,7 @@ describe('AgentActivityTimeline', () => {
 })
 
 describe('Read group collapsing', () => {
-  it('user collapses consecutive reads into one group line when two arrive together, then expands to the individual traces', () => {
+  it('user collapses consecutive reads into one group line when two arrive together, then expands to inspect each file', () => {
     render(
       <AgentActivityTimeline
         id="group"
@@ -783,17 +783,17 @@ describe('Read group collapsing', () => {
 
     const group = screen.getByRole('button', { name: 'Read 2 files' })
     expect(group).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByText('b.ts')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Read a.ts Read 1 line.' })).not.toBeInTheDocument()
 
     fireEvent.click(group)
 
-    // The group is the only disclosure; individual reads do not add a third level.
     expect(screen.getByText('Read 1 line.')).toBeVisible()
     expect(screen.getByText('Read 2 lines.')).toBeVisible()
     expect(screen.getByText('(a.ts)')).toBeVisible()
     expect(screen.getByText('(b.ts)')).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'Read a.ts Read 1 line.' })).not.toBeInTheDocument()
+    // Each read keeps its own row disclosure so the file content stays inspectable.
+    fireEvent.click(screen.getByRole('button', { name: 'Read a.ts Read 1 line.' }))
+    expect(screen.getByRole('log', { name: 'File content' })).toHaveTextContent('one')
   })
 
   it('user sees a lone read keep its own invocation header when only one arrives, then no group wraps it', () => {
@@ -842,8 +842,45 @@ describe('Read group collapsing', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: '2 file reads · 2 not completed' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '2 file reads · 2 interrupted' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Read 2 files' })).not.toBeInTheDocument()
+  })
+
+  it('user sees an approval called out when a grouped read waits for permission, then the group names the wait', () => {
+    render(
+      <AgentActivityTimeline
+        id="group-approval"
+        isStreaming
+        parts={[
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'read-approved',
+            toolName: 'Read',
+            state: 'output-available',
+            input: { file_path: 'a.ts' },
+            output: 'one'
+          },
+          {
+            type: 'dynamic-tool',
+            toolCallId: 'read-awaiting',
+            toolName: 'Read',
+            state: 'input-available',
+            input: { file_path: 'b.ts' },
+            permission: {
+              approvalId: '00000000-0000-4000-8000-000000000002',
+              toolCallId: 'read-awaiting',
+              toolName: 'Read',
+              cwd: '/workspace',
+              input: { file_path: 'b.ts' },
+              reason: 'This file read runs on your computer.',
+              state: 'pending'
+            }
+          }
+        ]}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: '2 file reads · 1 awaiting approval' })).toBeVisible()
   })
 })
 
@@ -904,7 +941,7 @@ describe('Activity disclosure and outcomes', () => {
         ]}
       />
     )
-    expect(screen.getByRole('button', { name: 'Bash pnpm test Not completed.' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Bash pnpm test Interrupted' })).toBeVisible()
     expect(screen.queryByText('Completed.')).not.toBeInTheDocument()
   })
 
@@ -967,7 +1004,7 @@ describe('Unfinished tool details', () => {
         }}
       />
     )
-    expect(screen.getByText('Not completed.')).toBeVisible()
+    expect(screen.getByText('Interrupted')).toBeVisible()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.queryByText('Preparing file')).not.toBeInTheDocument()
     expect(screen.queryByText('File written')).not.toBeInTheDocument()
@@ -986,9 +1023,122 @@ describe('Unfinished tool details', () => {
         }}
       />
     )
-    expect(screen.getByText('Not completed.')).toBeVisible()
+    expect(screen.getByText('Interrupted')).toBeVisible()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.queryByText('Proposed change 1')).not.toBeInTheDocument()
     expect(screen.queryByText('Applying changes')).not.toBeInTheDocument()
+  })
+
+  it('user sees an interrupted status when generation stops before a search result, then success is not claimed', () => {
+    render(
+      <ToolTrace
+        isActive={false}
+        part={{
+          type: 'dynamic-tool',
+          toolName: 'Glob',
+          toolCallId: 'glob-stopped',
+          state: 'input-available',
+          input: { pattern: '**/*.ts' }
+        }}
+      />
+    )
+    expect(screen.getByRole('group', { name: 'Glob **/*.ts Interrupted' })).toBeVisible()
+    expect(screen.queryByText('Search completed.')).not.toBeInTheDocument()
+  })
+})
+
+describe('Tool row status words and failure disclosure', () => {
+  it('user opens a failed command without clicking when it fails, then a manual collapse survives updates', () => {
+    const part = {
+      type: 'dynamic-tool' as const,
+      toolName: 'Bash',
+      toolCallId: 'failed-expand-1',
+      state: 'output-error' as const,
+      input: { command: 'cargo test' },
+      errorText: 'Command exited with code 1'
+    }
+    const { rerender } = render(<ToolTrace part={part} />)
+
+    const trigger = screen.getByRole('button', {
+      name: 'Bash cargo test Command exited with code 1'
+    })
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByLabelText('Command')).toBeVisible()
+
+    fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+
+    rerender(<ToolTrace part={part} />)
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('user reads a failed file tool row when the run fails, then Failed is stated in words', () => {
+    render(
+      <ToolTrace
+        part={{
+          type: 'dynamic-tool',
+          toolName: 'Edit',
+          toolCallId: 'edit-fail-word',
+          state: 'output-error',
+          input: { file_path: 'index.ts', old_string: 'old', new_string: 'new' },
+          errorText: 'Could not edit index.ts.'
+        }}
+      />
+    )
+
+    expect(
+      screen.getByRole('group', { name: 'Update index.ts Failed Could not edit index.ts.' })
+    ).toBeVisible()
+  })
+
+  it('user sees an approval status when a tool row waits for permission, then the state is announced once', () => {
+    render(
+      <ToolTrace
+        part={{
+          type: 'dynamic-tool',
+          toolName: 'Write',
+          toolCallId: 'await-approval-1',
+          state: 'input-available',
+          input: { file_path: 'src/index.ts', content: 'export {}' },
+          permission: {
+            approvalId: '00000000-0000-4000-8000-000000000001',
+            toolCallId: 'await-approval-1',
+            toolName: 'Write',
+            cwd: '/workspace',
+            input: { file_path: 'src/index.ts' },
+            reason: 'This file write runs on your computer.',
+            state: 'pending'
+          }
+        }}
+      />
+    )
+
+    expect(
+      screen.getByRole('group', { name: 'Write src/index.ts Awaiting approval' })
+    ).toBeVisible()
+    expect(screen.queryByText('Waiting for your approval.')).not.toBeInTheDocument()
+  })
+
+  it('user keeps a running command compact when output streams, then a failure opens it without a click', () => {
+    const part = {
+      type: 'dynamic-tool' as const,
+      toolName: 'Bash',
+      toolCallId: 'run-then-fail-1',
+      input: { command: 'cargo build' }
+    }
+    const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
+
+    expect(screen.getByRole('button', { name: 'Bash cargo build Running…' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+
+    rerender(
+      <ToolTrace part={{ ...part, state: 'output-error' as const, errorText: 'Build failed' }} />
+    )
+    expect(screen.getByRole('button', { name: 'Bash cargo build Build failed' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
   })
 })

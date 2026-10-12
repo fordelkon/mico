@@ -1,0 +1,43 @@
+.chat-composer__surface {
+  container-type: inline-size;
+}
+
+/* The textarea keeps native focus, caret, and selection while this composer
+   paints its glyphs transparent; the sibling mirror renders the visible text
+   with invocation tokens colored. The selection background stays translucent
+   so the mirrored glyphs show through it. */
+.chat-composer__input {
+  color: transparent;
+  caret-color: var(--color-foreground);
+}
+
+.chat-composer__input::selection {
+  background: color-mix(in oklab, var(--color-foreground) 18%, transparent);
+}
+
+/* IME composition cannot be reproduced in the mirror, so composition paints
+   the native glyphs and hides the mirrored copy. */
+.chat-composer__input[data-composing="true"] {
+  color: var(--color-foreground);
+}
+
+/* Single-row footer: attachment, model/thinking group, permission, send pinned
+   right. The generation group shrinks first; sending never wraps. */
+.chat-composer-footer__generation {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Icon-only fallback for the model and reasoning labels in cramped panes; each
+   trigger keeps its icon so it never renders empty. */
+@container (max-width: 28rem) {
+  .chat-composer-footer__label,
+  .chat-composer-footer__chevron {
+    display: none;
+  }
+
+  .chat-composer-footer__generation button[aria-haspopup] {
+    width: 1.75rem;
+    padding-inline: 0;
+  }
+}

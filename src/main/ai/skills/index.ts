@@ -1,12 +1,13 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import type { SkillCatalog, SkillDocument, SkillSource } from '@shared/ai/skills'
 import { parseSkillDocument } from './skill-document'
 import {
   assertContained,
   assertOutputSize,
-  MAX_SKILL_OUTPUT_BYTES,
+  MAX_SKILL_DOCUMENT_BYTES,
+  MAX_SKILL_RESOURCE_BYTES,
   readSkillFile,
   resolveResourcePath
 } from './skill-files'
@@ -59,14 +60,33 @@ interface RootDiscovery {
   readonly diagnostics: readonly DiscoveryDiagnostic[]
 }
 
+type EntryDiscovery =
+  | {
+      readonly kind: 'skill'
+      readonly skill: RegisteredSkill
+      readonly diagnostics: readonly DiscoveryDiagnostic[]
+    }
+  | { readonly kind: 'missing'; readonly canonicalDirectory?: string }
+  | { readonly kind: 'rejected'; readonly diagnostics: readonly DiscoveryDiagnostic[] }
+
+function skillScope(source: SkillSource): 'project' | 'user' {
+  return source.startsWith('project-') ? 'project' : 'user'
+}
+
 function isMissing(error: Error): boolean {
   return 'code' in error && error.code === 'ENOENT'
 }
 
-function formatSkill(skill: RegisteredSkill, resource: string, body: string): string {
+function formatSkill(
+  skill: RegisteredSkill,
+  resource: string,
+  body: string,
+  maxBytes: number
+): string {
   const { id, name, baseDirectory } = skill.metadata
   return assertOutputSize(
-    `Skill: ${name}\nSkill ID: ${id}\nBase directory: ${baseDirectory}\nResource: ${resource}\n\n${body}`
+    `Skill: ${name}\nSkill ID: ${id}\nBase directory: ${baseDirectory}\nResource: ${resource}\n\n${body}`,
+    maxBytes
   )
 }
 
@@ -74,20 +94,27 @@ async function discoverEntry(
   root: SkillRoot,
   canonicalRoot: string,
   directory: string
-): Promise<RootDiscovery> {
+): Promise<EntryDiscovery> {
   const lexicalDirectory = join(root.path, directory)
   const path = join(lexicalDirectory, 'SKILL.md')
   let canonicalDocument: string | undefined
+  let canonicalDirectory: string | undefined
   let hasValidatedRootContainment = false
   try {
-    const baseDirectory = await realpath(lexicalDirectory)
     // Identity is only used to reconcile rejected aliases after another root validates the skill.
+    canonicalDirectory = await realpath(lexicalDirectory)
     canonicalDocument = await realpath(path)
-    assertContained(canonicalRoot, baseDirectory)
+    assertContained(canonicalRoot, canonicalDirectory)
     hasValidatedRootContainment = true
-    assertContained(baseDirectory, canonicalDocument)
-    const text = await readSkillFile(baseDirectory, path, MAX_SKILL_OUTPUT_BYTES, canonicalDocument)
-    const parsed = parseSkillDocument(text)
+    assertContained(canonicalDirectory, canonicalDocument)
+    const baseDirectory = canonicalDirectory
+    const text = await readSkillFile(
+      baseDirectory,
+      path,
+      MAX_SKILL_DOCUMENT_BYTES,
+      canonicalDocument
+    )
+    const parsed = parseSkillDocument(text, basename(lexicalDirectory))
     const metadata = Object.freeze({
       id: `${root.source}:${parsed.name}`,
       name: parsed.name,
@@ -104,27 +131,26 @@ async function discoverEntry(
       body: parsed.body,
       document: text
     }
-    formatSkill(skill, 'SKILL.md', text)
+    formatSkill(skill, 'SKILL.md', text, MAX_SKILL_DOCUMENT_BYTES)
     return {
-      skills: [skill],
+      kind: 'skill',
+      skill,
       diagnostics: parsed.warnings.map((message) => ({ source: root.source, path, message }))
     }
   } catch (error) {
+    if (error instanceof Error && isMissing(error)) {
+      return { kind: 'missing', canonicalDirectory }
+    }
     return {
-      skills: [],
-      diagnostics:
-        error instanceof Error && isMissing(error)
-          ? []
-          : [
-              {
-                source: root.source,
-                path,
-                message: error instanceof Error ? error.message : 'Unknown filesystem error',
-                rejectedCanonicalDocument: hasValidatedRootContainment
-                  ? undefined
-                  : canonicalDocument
-              }
-            ]
+      kind: 'rejected',
+      diagnostics: [
+        {
+          source: root.source,
+          path,
+          message: error instanceof Error ? error.message : 'Unknown filesystem error',
+          rejectedCanonicalDocument: hasValidatedRootContainment ? undefined : canonicalDocument
+        }
+      ]
     }
   }
 }
@@ -143,6 +169,32 @@ async function discoverRoot(root: SkillRoot): Promise<RootDiscovery> {
     const results = await Promise.all(
       candidates.map((entry) => discoverEntry(root, canonicalRoot, entry.name))
     )
+    // Catalog layouts nest one extra level under directories without their own
+    // SKILL.md. Every descent is gated by canonical containment, so external
+    // aliases are skipped instead of being read or enumerated.
+    const nestedProbes: Promise<EntryDiscovery[]>[] = []
+    for (const [index, result] of results.entries()) {
+      if (result.kind !== 'missing' || !result.canonicalDirectory) continue
+      try {
+        assertContained(canonicalRoot, result.canonicalDirectory)
+      } catch {
+        continue
+      }
+      const parent = candidates[index]!.name
+      nestedProbes.push(
+        readdir(result.canonicalDirectory, { withFileTypes: true })
+          .then((childEntries) =>
+            Promise.all(
+              childEntries
+                .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+                .sort((a, b) => a.name.localeCompare(b.name, 'en'))
+                .map((child) => discoverEntry(root, canonicalRoot, join(parent, child.name)))
+            )
+          )
+          .catch(() => [])
+      )
+    }
+    const discoveries = [...results, ...(await Promise.all(nestedProbes)).flat()]
     const currentRoot = await stat(canonicalRoot, { bigint: true })
     const currentOwner = await stat(canonicalOwner, { bigint: true })
     if (
@@ -155,8 +207,10 @@ async function discoverRoot(root: SkillRoot): Promise<RootDiscovery> {
     )
       throw new Error('Skill root changed while discovering. Retry in a new turn.')
     return {
-      skills: results.flatMap((result) => result.skills),
-      diagnostics: results.flatMap((result) => result.diagnostics)
+      skills: discoveries.flatMap((result) => (result.kind === 'skill' ? [result.skill] : [])),
+      diagnostics: discoveries.flatMap((result) =>
+        result.kind === 'skill' || result.kind === 'rejected' ? result.diagnostics : []
+      )
     }
   } catch (error) {
     return {
@@ -188,16 +242,16 @@ async function readResource(skill: RegisteredSkill, relativePath: string): Promi
   try {
     const path = resolveResourcePath(skill.metadata.baseDirectory, relativePath)
     if (path === join(skill.metadata.baseDirectory, 'SKILL.md'))
-      return formatSkill(skill, relativePath, skill.document)
+      return formatSkill(skill, relativePath, skill.document, MAX_SKILL_DOCUMENT_BYTES)
     if ((await realpath(skill.lexicalDirectory)) !== skill.metadata.baseDirectory) {
       throw new Error(
         'Skill directory changed after this turn started. Start a new turn to rediscover it.'
       )
     }
-    const prefix = formatSkill(skill, relativePath, '')
-    const budget = MAX_SKILL_OUTPUT_BYTES - Buffer.byteLength(prefix, 'utf8')
+    const prefix = formatSkill(skill, relativePath, '', MAX_SKILL_RESOURCE_BYTES)
+    const budget = MAX_SKILL_RESOURCE_BYTES - Buffer.byteLength(prefix, 'utf8')
     const text = await readSkillFile(skill.metadata.baseDirectory, path, budget)
-    return formatSkill(skill, relativePath, text)
+    return formatSkill(skill, relativePath, text, MAX_SKILL_RESOURCE_BYTES)
   } catch (error) {
     throw new Error(
       `Cannot read skill resource "${relativePath}" for "${skill.metadata.name}": ${error instanceof Error ? error.message : 'Unknown filesystem error'}`,
@@ -211,6 +265,8 @@ async function createSkillSnapshot(
   cwd: string,
   userHome: string = homedir()
 ): Promise<SkillSnapshot> {
+  // Root order defines shadow precedence: project roots outrank user roots, and
+  // within a tier the Agent Skills default leads, then compatibility catalogs.
   const roots: readonly SkillRoot[] = [
     {
       source: 'project-agents',
@@ -223,6 +279,26 @@ async function createSkillSnapshot(
       owner: resolve(cwd)
     },
     {
+      source: 'project-gemini',
+      path: join(resolve(cwd), '.gemini', 'skills'),
+      owner: resolve(cwd)
+    },
+    {
+      source: 'project-cursor',
+      path: join(resolve(cwd), '.cursor', 'skills'),
+      owner: resolve(cwd)
+    },
+    {
+      source: 'project-github',
+      path: join(resolve(cwd), '.github', 'skills'),
+      owner: resolve(cwd)
+    },
+    {
+      source: 'project-skills',
+      path: join(resolve(cwd), 'skills'),
+      owner: resolve(cwd)
+    },
+    {
       source: 'user-agents',
       path: join(resolve(userHome), '.agents', 'skills'),
       owner: resolve(userHome)
@@ -230,6 +306,26 @@ async function createSkillSnapshot(
     {
       source: 'user-claude',
       path: join(resolve(userHome), '.claude', 'skills'),
+      owner: resolve(userHome)
+    },
+    {
+      source: 'user-config-agents',
+      path: join(resolve(userHome), '.config', 'agents', 'skills'),
+      owner: resolve(userHome)
+    },
+    {
+      source: 'user-codex',
+      path: join(resolve(userHome), '.codex', 'skills'),
+      owner: resolve(userHome)
+    },
+    {
+      source: 'user-cursor',
+      path: join(resolve(userHome), '.cursor', 'skills'),
+      owner: resolve(userHome)
+    },
+    {
+      source: 'user-gemini',
+      path: join(resolve(userHome), '.gemini', 'skills'),
       owner: resolve(userHome)
     }
   ]
@@ -253,7 +349,17 @@ async function createSkillSnapshot(
       allSkills.findIndex(({ metadata }) => metadata.name === skill.metadata.name) === index
   )
   const shadowed = allSkills
-    .filter((skill) => !registered.includes(skill))
+    .filter((skill) => {
+      if (registered.includes(skill)) return false
+      const winner = resolveSkill(registered, skill.metadata.name)
+      // Compatibility copies stay quiet only within the same scope tier and
+      // only while the documents remain byte-identical; cross-tier overrides
+      // and divergent documents keep their shadowing notice.
+      return (
+        skillScope(winner.metadata.source) !== skillScope(skill.metadata.source) ||
+        winner.document !== skill.document
+      )
+    })
     .map(({ metadata, lexicalDirectory }) => ({
       source: metadata.source,
       path: join(lexicalDirectory, 'SKILL.md'),
@@ -268,7 +374,7 @@ async function createSkillSnapshot(
     ),
     async load(idOrName: string): Promise<string> {
       const skill = resolveSkill(registered, idOrName)
-      return formatSkill(skill, 'SKILL.md', skill.body)
+      return formatSkill(skill, 'SKILL.md', skill.body, MAX_SKILL_DOCUMENT_BYTES)
     },
     async loadForUser(id: string): Promise<string> {
       const skill = registered.find(({ metadata }) => metadata.id === id)
@@ -279,7 +385,7 @@ async function createSkillSnapshot(
           `Skill "${skill.metadata.name}" cannot be invoked by users. Select another skill.`
         )
       }
-      return formatSkill(skill, 'SKILL.md', skill.body)
+      return formatSkill(skill, 'SKILL.md', skill.body, MAX_SKILL_DOCUMENT_BYTES)
     },
     async readResource(idOrName: string, relativePath: string): Promise<string> {
       return readResource(resolveSkill(registered, idOrName), relativePath)
@@ -293,6 +399,8 @@ async function createSkillSnapshot(
 }
 
 export type { SkillDiagnostic, SkillMetadata, SkillSnapshot, SkillSource }
+
+export { MAX_SKILL_DOCUMENT_BYTES } from './skill-files'
 
 /** Renderer catalog deliberately omits native base directories and hidden skills. */
 function skillCatalog(snapshot: SkillSnapshot): SkillCatalog {

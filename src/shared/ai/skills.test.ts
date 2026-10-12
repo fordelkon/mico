@@ -23,9 +23,20 @@ describe('skill invocation persistence', () => {
     )
   })
 
+  it('user submits a relaxed skill name when validated, then dots and underscores are accepted', () => {
+    const relaxed = {
+      type: 'data-skill-invocation',
+      data: { skillId: 'project-agents:review.v2', name: 'review.v2', arguments: 'Review' }
+    }
+    expect(ChatUserMessageSchema.parse({ role: 'user', parts: [relaxed] }).parts[0]).toEqual(
+      relaxed
+    )
+  })
+
   it.each([
     { ...invocation, data: { ...invocation.data, skillId: '' } },
     { ...invocation, data: { ...invocation.data, name: '../review' } },
+    { ...invocation, data: { ...invocation.data, name: 'Review' } },
     { ...invocation, data: { ...invocation.data, arguments: null } },
     { ...invocation, data: { ...invocation.data, arguments: 'x'.repeat(65537) } },
     { ...invocation, data: { ...invocation.data, path: '/private' } }

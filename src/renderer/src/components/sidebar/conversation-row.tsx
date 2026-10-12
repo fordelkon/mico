@@ -21,7 +21,6 @@ import {
   SidebarMenuItem,
   Spinner
 } from '@mico/ui'
-import type { ChatCompactionState } from '@renderer/hooks/chat/chat-session-instances'
 import type { GlidingHighlightItemProps } from '@renderer/hooks/use-gliding-highlight'
 import type { Conversation } from '@renderer/types/chat'
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react'
@@ -35,9 +34,9 @@ const TITLE_SCROLL_SPEED_PX_PER_SECOND = 48
 
 type ConversationRowProps = {
   conversation: Conversation
-  compactionState?: ChatCompactionState
-  onCompactConversation?: (id: string) => Promise<void>
-  onCancelCompaction?: (id: string) => Promise<void>
+  // Compaction feedback lives in the chat area; the row only protects deletion
+  // while a summary is pending, without presenting any compaction state.
+  isCompacting?: boolean
   isResponding: boolean
   selected: boolean
   onDeleteConversation: (conversationId: string) => Promise<void>
@@ -48,11 +47,9 @@ type ConversationRowProps = {
 }
 
 function ConversationRowStatus({
-  label = 'Generating response',
-  isCompacting = false
+  label = 'Generating response'
 }: {
   label?: string
-  isCompacting?: boolean
 }): React.JSX.Element {
   const [animationDelay, setAnimationDelay] = React.useState<number | null>(null)
 
@@ -67,8 +64,7 @@ function ConversationRowStatus({
   return (
     <Spinner
       aria-label={label}
-      aria-busy={isCompacting || undefined}
-      role={isCompacting ? undefined : 'status'}
+      role="status"
       className="conversation-row__status size-3.5 text-text-tertiary"
       style={animationDelay === null ? undefined : { animationDelay: `${animationDelay}ms` }}
     />
@@ -77,9 +73,7 @@ function ConversationRowStatus({
 
 function ConversationRowComponent({
   conversation,
-  compactionState,
-  onCompactConversation,
-  onCancelCompaction,
+  isCompacting = false,
   isResponding,
   selected,
   onDeleteConversation,
@@ -88,13 +82,6 @@ function ConversationRowComponent({
   shortcutNumber,
   glidingHighlightItemProps
 }: ConversationRowProps): React.JSX.Element {
-  const isCompacting = compactionState?.status === 'pending'
-  const compactionError =
-    compactionState?.status === 'failed'
-      ? compactionState.message
-      : compactionState?.status === 'pending'
-        ? compactionState.error
-        : undefined
   const [editing, setEditing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = React.useState(false)
@@ -309,17 +296,6 @@ function ConversationRowComponent({
                   <PencilIcon aria-hidden="true" />
                   Rename
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={isResponding || isCompacting || !onCompactConversation}
-                  onSelect={() => void onCompactConversation?.(conversation.id)}
-                >
-                  Compact context
-                </DropdownMenuItem>
-                {isCompacting && (
-                  <DropdownMenuItem onSelect={() => void onCancelCompaction?.(conversation.id)}>
-                    Cancel summary
-                  </DropdownMenuItem>
-                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   disabled={isCompacting}
@@ -334,17 +310,6 @@ function ConversationRowComponent({
           )}
           {!editing && !deleting && shortcutNumber === undefined && isResponding && (
             <ConversationRowStatus />
-          )}
-          {isCompacting && <ConversationRowStatus label="Summarizing conversation" isCompacting />}
-          {compactionState?.status === 'accepted' && (
-            <p className="px-2.5 py-1 text-xs text-text-tertiary" role="status">
-              Context compacted.
-            </p>
-          )}
-          {compactionError && (
-            <p className="px-2.5 py-1 text-xs text-destructive" role="alert">
-              {compactionError}
-            </p>
           )}
           {actionError && (
             <p className="px-2.5 py-1 text-xs text-destructive" id={errorId} role="alert">
@@ -374,17 +339,6 @@ function ConversationRowComponent({
           <PencilIcon aria-hidden="true" />
           Rename
         </ContextMenuItem>
-        <ContextMenuItem
-          disabled={isResponding || isCompacting || !onCompactConversation}
-          onSelect={() => void onCompactConversation?.(conversation.id)}
-        >
-          Compact context
-        </ContextMenuItem>
-        {isCompacting && (
-          <ContextMenuItem onSelect={() => void onCancelCompaction?.(conversation.id)}>
-            Cancel summary
-          </ContextMenuItem>
-        )}
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={isCompacting}

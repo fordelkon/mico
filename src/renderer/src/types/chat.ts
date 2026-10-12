@@ -1,5 +1,6 @@
 import type { ToolPermissionData } from '@shared/ai/permissions'
 import type { ChatSkillInvocationPart } from '@shared/ai/skills'
+import type { TurnFailureCode } from '@shared/ai/turn-failure'
 import type { ChatDocumentPart } from '@shared/data/schemas/chat'
 import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
 import type { ProviderMetadata, UIMessage } from 'ai'
@@ -45,7 +46,15 @@ type ActiveChatResponse =
 type ChatResponseState =
   | { status: 'idle' }
   | ActiveChatResponse
-  | { status: 'error'; conversationId: string; message: string; canRetry?: boolean }
+  // `failureCode` is present only when the outcome comes from persisted
+  // recovery; transport-level errors keep the heading neutral.
+  | {
+      status: 'error'
+      conversationId: string
+      message: string
+      canRetry?: boolean
+      failureCode?: TurnFailureCode
+    }
 
 function isActiveChatResponse(response: ChatResponseState): response is ActiveChatResponse {
   return (

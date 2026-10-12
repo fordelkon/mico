@@ -1,4 +1,15 @@
-import { IconSwap, IconTooltipButton, RadioSelect, Textarea } from '@mico/ui'
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+  IconSwap,
+  IconTooltipButton,
+  Spinner,
+  Textarea
+} from '@mico/ui'
 import type { PermissionMode } from '@shared/ai/permissions'
 import type { ChatSkillInvocationPart } from '@shared/ai/skills'
 
@@ -8,14 +19,33 @@ import type {
   ThinkingSelection
 } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import { ArrowUpIcon, SquareIcon } from 'lucide-react'
+import {
+  chatComposerDrafts,
+  composerDraftKey,
+  useChatComposerDraft
+} from '@renderer/hooks/chat/chat-composer-drafts'
+import { ArrowUpIcon, ShieldCheckIcon, ShieldIcon, SquareIcon } from 'lucide-react'
 import * as React from 'react'
 import { ChatModelSelector } from './chat-model-selector'
 import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
+import { shouldCapturePastedText } from './composer-paste-capture-policy'
+import { ComposerTokenHighlight } from './composer-token-highlight'
+import { deleteTextareaRange, insertTextareaText } from './composer-edit-commands'
+import { arrowTokenJump, backspaceDeletion, wordBackspaceDeletion } from './composer-editing'
+import {
+  createPasteToken,
+  expandPasteTokens,
+  pasteClipboardText,
+  pasteTokenIssue,
+  reconcilePasteTokens,
+  restorePasteToken
+} from './composer-paste-tokens'
+import { isCompactDraft, tokenizeComposerDraft } from './composer-tokens'
 import { ProjectSelector } from './project-selector'
 import { ThinkingSelector } from './thinking-selector'
 import { useComposerModelSelection } from './use-composer-model-selection'
 import { useComposerSkills } from './use-composer-skills'
+import './chat-composer.css'
 
 type ChatComposerMode = 'disabled' | 'send' | 'stop'
 
@@ -36,22 +66,51 @@ type ChatComposerProps = {
   projects?: WorkspaceProject[]
   selectedModelEntryId?: string | null
   selectSessionModel?: (modelEntryId: string) => Promise<void>
+  /**
+   * Conversation identity of the active draft. `null` means a chat that does
+   * not exist yet; its draft survives project changes and is cleared by the
+   * submitted identity when the first message goes out.
+   */
+  draftConversationId?: string | null
   onSend: (content: {
     text: string
     documents: ChatDocumentPart[]
     skillInvocation?: ChatSkillInvocationPart['data']
   }) => Promise<boolean>
+  // Dispatches the built-in /compact command for the active conversation.
+  // Its absence hides the command; availability is gated by the composer mode.
+  onCompact?: () => void
   onStop: () => void
   reasoningCapabilities: ModelReasoningCapabilities | null
   thinkingEffort: ThinkingSelection
   onThinkingEffortChange: (selection: ThinkingSelection) => void
 }
 
-const rotatingPlaceholders = [
-  'Ask Mico to explain a concept…',
-  'Plan a project step by step…',
-  'Brainstorm your next idea…'
-]
+// Typing shortcuts apply only on non-interactive background targets. The same
+// boundary lets blank surface clicks focus the input without stealing controls.
+// Interactive roles are enumerated instead of matching every [role]/[tabindex]:
+// focusable trace/log containers must keep the type-to-focus behavior.
+const interactiveTargetSelector = [
+  'input',
+  'textarea',
+  'select',
+  'button',
+  'a',
+  'summary',
+  'details',
+  'label',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="combobox"]',
+  '[role="listbox"]',
+  '[role="option"]',
+  '[role="tab"]',
+  '[role="slider"]',
+  '[role^="menu"]'
+].join(', ')
 
 function ChatComposer({
   approval,
@@ -70,7 +129,9 @@ function ChatComposer({
   projects = [],
   selectedModelEntryId,
   selectSessionModel,
+  draftConversationId = null,
   onSend,
+  onCompact,
   onStop,
   reasoningCapabilities,
   thinkingEffort,
@@ -78,69 +139,89 @@ function ChatComposer({
 }: ChatComposerProps): React.JSX.Element {
   const { currentModelId, hasSelectedModel, library, selectionError, selectModel } =
     useComposerModelSelection({ onModelSelected, selectedModelEntryId, selectSessionModel })
-  const [draft, setDraft] = React.useState('')
-  const skills = useComposerSkills(projectId, draft)
+  // Drafts live in the renderer-owned store, so switching conversations keeps
+  // each draft separate and leaving for Settings keeps the draft alive.
+  const draftKey = composerDraftKey(draftConversationId)
+  const [draft, updateDraft] = useChatComposerDraft(draftKey)
+  // The caret position at the latest edit; the menu opens only while the user
+  // is still editing the leading token.
+  const [selection, setSelection] = React.useState({ key: draftKey, caret: draft.text.length })
+  const caret = selection.key === draftKey ? selection.caret : draft.text.length
+  const skills = useComposerSkills(projectId, draft.text, {
+    offerCompactCommand: onCompact !== undefined,
+    caret
+  })
+  // Commands list before skills; the first skill entry starts the skills group.
+  const firstSkillIndex = skills.matches.findIndex((item) => item.kind === 'skill')
+  const commandCount = firstSkillIndex === -1 ? skills.matches.length : firstSkillIndex
+  // The command uses the session profile; the composer does not require a global model selection.
+  const isCompactCommand = isCompactDraft(draft.text)
+  const canSubmitDraft =
+    isCompactCommand || (hasSelectedModel && Boolean(draft.text.trim() || draft.documents.length))
+  // Paste token markers join the invocation tokens: the mirror paints them and
+  // the atomic-edit rules treat each visible label as one unit.
+  const tokens = [
+    ...tokenizeComposerDraft(draft.text, skills.knownSkillNames),
+    ...draft.pasteTokens
+      .filter((token) => token.state !== 'retired')
+      .map((token) => ({ start: token.start, end: token.end, kind: 'paste' as const }))
+  ].sort((left, right) => left.start - right.start)
+  const damagedPasteToken = draft.pasteTokens.find((token) => token.state === 'damaged')
   const skillMenuId = React.useId()
+  const capabilityHintId = React.useId()
   const activeSkillRef = React.useRef<HTMLButtonElement>(null)
   React.useEffect(() => {
     if (skills.isOpen) activeSkillRef.current?.scrollIntoView?.({ block: 'nearest' })
-  }, [skills.isOpen, skills.selectedIndex, draft])
-  const [documents, setDocuments] = React.useState<ChatDocumentPart[]>([])
-  const [isSending, setIsSending] = React.useState(false)
-  const [sendError, setSendError] = React.useState<string | null>(null)
+  }, [skills.isOpen, skills.selectedIndex, draft.text])
   const [isFocused, setIsFocused] = React.useState(false)
-  const [placeholderIndex, setPlaceholderIndex] = React.useState(0)
-  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(
-    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
+  const [permissionMenuOpen, setPermissionMenuOpen] = React.useState(false)
+  const skillsMenuRef = React.useRef<HTMLElement>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+  // The mounted textarea element, so effects that render before the textarea
+  // sibling (the highlight mirror) can depend on the element itself instead of
+  // reading a ref that is still null during their first layout effect run.
+  const [textarea, setTextarea] = React.useState<HTMLTextAreaElement | null>(null)
+  const attachTextarea = React.useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node
+    setTextarea(node)
+  }, [])
+  const compositionRef = React.useRef(false)
+  // IME composition hides the highlight mirror so the native glyphs and
+  // underline stay visible; the keydown guard keeps awaiting confirmation.
+  const [isComposing, setIsComposing] = React.useState(false)
   const mountedRef = React.useRef(false)
   const previousFocusKeyRef = React.useRef(focusKey)
   const previousModeRef = React.useRef(mode)
-  const isDisabled = mode === 'disabled' || isSending
-  const showRotatingPlaceholder =
-    canAddProject && mode === 'send' && !draft && !isFocused && !prefersReducedMotion
-
-  React.useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const updatePreference = (): void => setPrefersReducedMotion(mediaQuery.matches)
-
-    mediaQuery.addEventListener('change', updatePreference)
-    return () => mediaQuery.removeEventListener('change', updatePreference)
-  }, [])
-
-  React.useEffect(() => {
-    if (!showRotatingPlaceholder) return
-
-    const interval = window.setInterval(() => {
-      setPlaceholderIndex((current) => (current + 1) % rotatingPlaceholders.length)
-    }, 4_500)
-
-    return () => window.clearInterval(interval)
-  }, [showRotatingPlaceholder])
+  const isDisabled = mode === 'disabled' || draft.isSending
+  const configurationDisabled = mode !== 'send' || draft.isSending
+  const hasSkills = skills.knownSkillNames.size > 0
+  const hasCommands = onCompact !== undefined
+  const capabilityHint =
+    hasCommands && hasSkills
+      ? 'Use / for commands, $ for skills.'
+      : hasCommands
+        ? 'Use / for commands.'
+        : hasSkills
+          ? 'Use $ for skills.'
+          : ''
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      const target = event.target
-      const isEditableTarget =
+      const target = event.target instanceof HTMLElement ? event.target : document.activeElement
+      const isInteractiveTarget =
         target instanceof HTMLElement &&
-        (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
-      const isActivatingControl =
-        event.key === ' ' &&
-        target instanceof HTMLElement &&
-        Boolean(target.closest('button, summary, a[href], [role="button"]'))
+        (target.isContentEditable || Boolean(target.closest(interactiveTargetSelector)))
 
       if (
         mode !== 'send' ||
-        isSending ||
+        draft.isSending ||
         event.defaultPrevented ||
         event.isComposing ||
         event.altKey ||
         event.ctrlKey ||
         event.metaKey ||
         event.key.length !== 1 ||
-        isEditableTarget ||
-        isActivatingControl
+        isInteractiveTarget
       )
         return
 
@@ -149,7 +230,7 @@ function ChatComposer({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isSending, mode])
+  }, [draft.isSending, mode])
 
   // Restore typing readiness after a conversation becomes available for input.
   React.useEffect(() => {
@@ -172,42 +253,142 @@ function ChatComposer({
 
     textarea.style.height = 'auto'
     textarea.style.height = `${textarea.scrollHeight}px`
-  }, [draft])
+  }, [draft.text, draftKey])
 
   const submit = async (): Promise<void> => {
-    if (mode !== 'send' || isSending || !hasSelectedModel || (!draft.trim() && !documents.length))
-      return
+    if (mode !== 'send' || chatComposerDrafts.getDraft(draftKey).isSending) return
 
-    setIsSending(true)
-    setSendError(null)
+    // Every store write targets the identity captured now, before any await:
+    // the active conversation may change while the send is in flight, and a
+    // late resolution must never erase another conversation's draft.
+    const sentDraftKey = draftKey
+    const submitted = { text: draft.text, documents: draft.documents }
+    // The provider receives the expanded text; the draft itself keeps the
+    // short labels until the send clears it.
+    const sentText = expandPasteTokens(submitted.text, draft.pasteTokens)
+    const sentDocuments = submitted.documents
+
+    // The built-in /compact command runs locally: it is never sent as a message
+    // and never persisted as a skill invocation part.
+    if (isCompactDraft(draft.text)) {
+      if (!onCompact) {
+        updateDraft((current) => ({
+          ...current,
+          sendError: 'Choose an existing conversation before using /compact. Your draft is kept.'
+        }))
+        return
+      }
+      const commandArguments = /^\/compact(?:\s+([\s\S]+))?$/.exec(draft.text.trim())?.[1]
+      if (commandArguments) {
+        updateDraft((current) => ({
+          ...current,
+          sendError:
+            'The /compact command takes no arguments. Send it on its own, or send your text as a normal message.'
+        }))
+        return
+      }
+      if (sentDocuments.length) {
+        updateDraft((current) => ({
+          ...current,
+          sendError:
+            'The /compact command does not support attachments. Remove them or send them as a normal message.'
+        }))
+        return
+      }
+      updateDraft((current) => ({ ...current, sendError: null }))
+      chatComposerDrafts.clearDraft(sentDraftKey)
+      onCompact()
+      return
+    }
+
+    // A token whose label was edited cannot deliver its payload; the error
+    // names the action (undo, repair, or delete) instead of silently dropping
+    // the original text.
+    const pasteIssue = pasteTokenIssue(draft.text, draft.pasteTokens)
+    if (pasteIssue) {
+      updateDraft((current) => ({ ...current, sendError: pasteIssue }))
+      return
+    }
+
+    if (!hasSelectedModel || (!sentText.trim() && !sentDocuments.length)) return
+
+    updateDraft((current) => ({ ...current, isSending: true, sendError: null }))
     try {
-      const skillInvocation = skills.resolveInvocation()
+      const skillInvocation = skills.resolveInvocation(sentText)
       const content = skillInvocation
-        ? { text: draft, documents, skillInvocation }
-        : { text: draft, documents }
+        ? { text: sentText, documents: sentDocuments, skillInvocation }
+        : { text: sentText, documents: sentDocuments }
       if (await onSend(content)) {
-        setDraft('')
-        setDocuments([])
+        // A draft edited while the send was in flight is preserved for retry;
+        // an untouched draft is cleared with its submitted content.
+        chatComposerDrafts.acceptDraft(sentDraftKey, {
+          ...draft,
+          isSending: false,
+          sendError: null
+        })
       }
     } catch (cause) {
       const detail = cause instanceof Error ? ` ${cause.message}` : ''
-      setSendError(
-        `Could not send this message.${detail} Your draft and attachments are kept. Try again.`
-      )
+      chatComposerDrafts.updateDraft(sentDraftKey, (current) => ({
+        ...current,
+        isSending: false,
+        sendError: `Could not send this message.${detail} Your draft and attachments are kept. Try again.`
+      }))
     } finally {
-      setIsSending(false)
+      chatComposerDrafts.updateDraft(sentDraftKey, (current) =>
+        current.isSending ? { ...current, isSending: false } : current
+      )
     }
   }
 
-  const selectSkill = (name: string): void => {
-    setDraft(`/skill:${name} `)
-    setSendError(null)
-    textareaRef.current?.focus()
+  // Repairs a damaged paste token through one native edit transaction: the
+  // broken text at the token's range is replaced by the exact original label,
+  // which restores the payload association and keeps native undo/redo.
+  const repairDamagedToken = (): void => {
+    const textarea = textareaRef.current
+    if (!textarea || !damagedPasteToken) return
+    const repair = restorePasteToken(draft.text, damagedPasteToken)
+    if (!repair) return
+    const before = textarea.value
+    textarea.focus()
+    textarea.setSelectionRange(repair.start, repair.end)
+    insertTextareaText(damagedPasteToken.displayText)
+    if (textarea.value === before) {
+      updateDraft((current) => ({
+        ...current,
+        sendError:
+          'Could not restore the pasted text in the editor. Undo your edit (Ctrl+Z) or delete the token and paste the text again.'
+      }))
+    }
+  }
+
+  const selectCompletion = (item: (typeof skills.matches)[number]): void => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    // A single browser edit transaction — not a setState write — keeps the
+    // input event flow and native undo/redo identical to typing.
+    const completion = skills.applyCompletion(item)
+    textarea.focus()
+    textarea.setSelectionRange(0, completion.replacedEnd)
+    insertTextareaText(completion.text)
+    textarea.setSelectionRange(completion.caret, completion.caret)
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
-    if (skills.isOpen && !event.shiftKey) {
+    const nativeEvent = event.nativeEvent
+    // IME confirmation arrives as a composition event (isComposing, keyCode
+    // 229, or key "Process"); selection and sending must wait for the composed
+    // text instead of treating the confirming keystroke as a command.
+    if (
+      compositionRef.current ||
+      nativeEvent.isComposing ||
+      nativeEvent.keyCode === 229 ||
+      nativeEvent.key === 'Process'
+    )
+      return
+    // Modified keys retain native editing even while completions are open.
+    const isPlainKey = !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+    if (skills.isOpen && mode === 'send' && !isDisabled && isPlainKey) {
       if (event.key === 'Escape') {
         event.preventDefault()
         skills.dismiss()
@@ -218,13 +399,67 @@ function ChatComposer({
         skills.moveSelection(event.key === 'ArrowDown' ? 1 : -1)
         return
       }
-      if ((event.key === 'Enter' || event.key === 'Tab') && skills.matches.length) {
+      if (event.key === 'Home' && skills.matches.length) {
         event.preventDefault()
-        selectSkill(skills.matches[skills.selectedIndex].name)
+        skills.selectIndex(0)
+        return
+      }
+      if (event.key === 'End' && skills.matches.length) {
+        event.preventDefault()
+        skills.selectIndex(skills.matches.length - 1)
+        return
+      }
+      if (event.key === 'Enter') {
+        // An unmatched leading token is still being edited; Enter must not
+        // accidentally submit it as a half-written command.
+        event.preventDefault()
+        if (skills.matches.length) selectCompletion(skills.matches[skills.selectedIndex])
+        return
+      }
+      if (event.key === 'Tab' && skills.matches.length) {
+        event.preventDefault()
+        selectCompletion(skills.matches[skills.selectedIndex])
         return
       }
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    // Atomic editing of the leading invocation token. Collapsed carets move or
+    // delete the whole token through one native edit transaction (native
+    // undo/redo included); selections, Shift, IME, and carets outside the
+    // token keep the browser's own behavior.
+    const textarea = textareaRef.current
+    const caretCollapsed = Boolean(textarea && textarea.selectionStart === textarea.selectionEnd)
+    const keyCaret = textarea?.selectionStart ?? 0
+    if (event.key === 'Backspace' && caretCollapsed && !event.altKey && !event.shiftKey) {
+      const deletion =
+        event.ctrlKey || event.metaKey
+          ? wordBackspaceDeletion(draft.text, tokens, keyCaret)
+          : isPlainKey
+            ? backspaceDeletion(tokens, keyCaret)
+            : null
+      if (deletion && textarea) {
+        event.preventDefault()
+        deleteTextareaRange(textarea, deletion.start, deletion.end)
+        return
+      }
+    }
+    if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && isPlainKey && caretCollapsed) {
+      const jump = arrowTokenJump(tokens, keyCaret, event.key === 'ArrowLeft' ? 'left' : 'right')
+      if (jump !== null && textarea) {
+        event.preventDefault()
+        textarea.setSelectionRange(jump, jump)
+        return
+      }
+    }
+    // Enter submits only when submission is actually possible; otherwise the
+    // browser's default newline applies. Stop-mode drafts stay editable, and
+    // modified Enter keystrokes keep their platform behavior.
+    if (
+      event.key === 'Enter' &&
+      isPlainKey &&
+      mode === 'send' &&
+      !draft.isSending &&
+      canSubmitDraft
+    ) {
       event.preventDefault()
       void submit()
     }
@@ -233,16 +468,37 @@ function ChatComposer({
   return (
     <form
       className="chat-composer shrink-0 px-4 pb-5 pt-3 sm:px-6"
+      onKeyDownCapture={(event) => {
+        // Native buttons also activate on Enter. Apply the same plain-Enter
+        // contract to footer controls and their portalled menus.
+        if (
+          event.key === 'Enter' &&
+          event.target !== textareaRef.current &&
+          (event.shiftKey ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.nativeEvent.isComposing)
+        ) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+      }}
       onSubmit={(event) => {
         event.preventDefault()
         void submit()
       }}
     >
       <div className="mx-auto w-full max-w-[50rem]">
-        {canAddProject && (
-          <div className="chat-composer__context">
+        {approval}
+        {canAddProject ? (
+          // The workspace control lives above the input surface as its own
+          // row; existing conversations keep theirs in the conversation header.
+          <div className="mb-2 flex min-w-0 items-center">
             <ProjectSelector
+              appearance="pill"
               canAddProject={canAddProject}
+              disabled={configurationDisabled}
               onAddProject={onAddProject}
               onProjectSelected={onProjectSelected}
               onProjectsRefresh={onProjectsRefresh}
@@ -252,15 +508,26 @@ function ChatComposer({
               projects={projects}
             />
           </div>
-        )}
-        {approval}
-        <div className="chat-composer__surface relative flex w-full flex-col gap-2 rounded-[var(--radius-composer)] border border-border-subtle bg-chat-composer p-3 shadow-hairline transition-colors focus-within:border-border-strong">
+        ) : null}
+        <div
+          data-input-focused={isFocused ? 'true' : undefined}
+          className="chat-composer__surface relative flex w-full flex-col gap-2 rounded-[var(--radius-composer)] border bg-chat-composer p-3 transition-colors"
+          onClick={(event) => {
+            const target = event.target
+            if (
+              target instanceof Element &&
+              !target.closest(interactiveTargetSelector) &&
+              !window.getSelection()?.toString()
+            )
+              textareaRef.current?.focus()
+          }}
+        >
           {skills.isOpen && !isDisabled && mode === 'send' ? (
             <section
-              aria-label="Skill commands"
+              ref={skillsMenuRef}
+              aria-label="Commands and skills"
               className="absolute bottom-full left-0 z-20 mb-2 max-h-72 w-full overflow-y-auto rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg"
             >
-              <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Skills</p>
               {skills.status === 'loading' ? (
                 <p role="status" className="px-2 py-2 text-sm text-muted-foreground">
                   Loading skills…
@@ -278,35 +545,60 @@ function ChatComposer({
                   </button>
                 </div>
               ) : null}
-              <div id={skillMenuId} role="listbox" aria-label="Skills">
-                {skills.matches.map((skill, index) => (
-                  <button
-                    key={skill.id}
-                    ref={index === skills.selectedIndex ? activeSkillRef : undefined}
-                    id={`${skillMenuId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={index === skills.selectedIndex}
-                    tabIndex={-1}
-                    className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left aria-selected:bg-accent aria-selected:text-accent-foreground"
-                    onMouseEnter={() => skills.selectIndex(index)}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => selectSkill(skill.name)}
-                  >
-                    <span className="w-full truncate text-sm font-medium">{skill.name}</span>
-                    <span
-                      className="w-full truncate text-xs text-muted-foreground"
-                      title={skill.description}
+              <div id={skillMenuId} role="listbox" aria-label="Commands and skills">
+                {commandCount > 0 && (
+                  <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Commands</p>
+                )}
+                {skills.matches.map((item, index) => (
+                  <React.Fragment key={item.id}>
+                    {index === commandCount && (
+                      <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Skills</p>
+                    )}
+                    <button
+                      ref={index === skills.selectedIndex ? activeSkillRef : undefined}
+                      id={`${skillMenuId}-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === skills.selectedIndex}
+                      tabIndex={-1}
+                      className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left aria-selected:bg-accent aria-selected:text-accent-foreground"
+                      onMouseEnter={() => skills.selectIndex(index)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectCompletion(item)}
                     >
-                      {skill.description.replace(/\s+/g, ' ').trim()}
-                    </span>
-                  </button>
+                      {item.kind === 'command' ? (
+                        <span className="flex w-full min-w-0 items-baseline gap-2">
+                          <span className="font-mono text-xs text-muted-foreground">
+                            /{item.name}
+                          </span>
+                          <span className="truncate text-sm font-medium">{item.label}</span>
+                        </span>
+                      ) : (
+                        <span className="w-full truncate text-sm font-medium">{item.name}</span>
+                      )}
+                      <span
+                        className="w-full truncate text-xs text-muted-foreground"
+                        title={item.description}
+                      >
+                        {item.kind === 'command'
+                          ? item.description
+                          : item.description.replace(/\s+/g, ' ').trim()}
+                      </span>
+                    </button>
+                  </React.Fragment>
                 ))}
               </div>
               {skills.status === 'ready' && !skills.matches.length ? (
-                <p className="px-2 py-2 text-sm text-muted-foreground">
-                  {projectId ? 'No matching skills.' : 'Choose a workspace to use skills.'}
-                </p>
+                skills.queryMode === 'dollar' ? (
+                  <>
+                    <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Skills</p>
+                    <p className="px-2 py-2 text-sm text-muted-foreground">
+                      {projectId ? 'No matching skills.' : 'Choose a workspace to use skills.'}
+                    </p>
+                  </>
+                ) : (
+                  <p className="px-2 py-2 text-sm text-muted-foreground">No matching commands.</p>
+                )
               ) : null}
               {skills.diagnostics.length ? (
                 <div className="mt-1 border-t border-border px-2 pt-2 text-xs text-muted-foreground">
@@ -339,14 +631,57 @@ function ChatComposer({
             </section>
           ) : null}
           <ComposerAttachmentList
-            disabled={mode !== 'send' || isSending}
-            documents={documents}
-            onDocumentsChange={setDocuments}
+            disabled={configurationDisabled}
+            documents={draft.documents}
+            onDocumentsChange={(documents) =>
+              updateDraft((current) => ({ ...current, documents, sendError: null }))
+            }
           />
+          {damagedPasteToken ? (
+            <div className="flex items-center gap-2 px-2 text-xs">
+              <span className="text-destructive" role="alert">
+                {pasteTokenIssue(draft.text, draft.pasteTokens)}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 shrink-0 px-2 text-xs"
+                onClick={repairDamagedToken}
+              >
+                Restore pasted text
+              </Button>
+            </div>
+          ) : null}
           <div className="relative">
+            <ComposerTokenHighlight
+              draft={draft.text}
+              hidden={isComposing}
+              tokens={tokens}
+              textarea={textarea}
+            />
+            {/* The hint is a static overlay instead of the native placeholder:
+                Chromium lets a double-click on an empty textarea select the
+                placeholder text. It sits inert and unselectable, mirroring the
+                native placeholder's visibility (empty draft only). */}
+            {capabilityHint && !draft.text ? (
+              <span
+                aria-hidden="true"
+                id={capabilityHintId}
+                className="chat-composer__hint pointer-events-none absolute left-0 top-0 z-0 select-none px-2 py-2 text-[15px] leading-6 text-muted-foreground/80"
+              >
+                {capabilityHint}
+              </span>
+            ) : null}
             <Textarea
-              className="min-h-10 max-h-40 resize-none border-0 px-2 py-2 pr-12 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
-              ref={textareaRef}
+              className="chat-composer__input relative min-h-10 max-h-40 resize-none border-0 px-2 py-2 text-[15px] leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
+              ref={attachTextarea}
+              aria-label="Message"
+              // The visual hint is aria-hidden, so screen readers reach the
+              // same text through description instead (the native placeholder
+              // it replaces was announced).
+              aria-describedby={capabilityHint && !draft.text ? capabilityHintId : undefined}
+              data-composing={isComposing ? 'true' : undefined}
               aria-controls={skills.isOpen ? skillMenuId : undefined}
               aria-autocomplete="list"
               aria-activedescendant={
@@ -355,107 +690,246 @@ function ChatComposer({
                   : undefined
               }
               disabled={isDisabled}
-              onBlur={() => setIsFocused(false)}
+              onBlur={(event) => {
+                setIsFocused(false)
+                // Leaving the composer dismisses the menu, including focus
+                // moving to footer controls whose own popovers must not stack
+                // on top of it. Focus staying inside this menu (for example
+                // Retry skills) keeps it interactive.
+                const nextTarget = event.relatedTarget
+                if (!(nextTarget instanceof Node && skillsMenuRef.current?.contains(nextTarget)))
+                  skills.dismiss()
+              }}
               onChange={(event) => {
                 skills.resetDismissal()
-                setDraft(event.target.value)
+                const text = event.target.value
+                setSelection({
+                  key: draftKey,
+                  caret: event.target.selectionStart ?? text.length
+                })
+                updateDraft((current) => ({
+                  ...current,
+                  text,
+                  sendError: null,
+                  // Observational only: native undo/redo stays the browser's
+                  // own, and this re-locates, retires, or flags tokens.
+                  pasteTokens: reconcilePasteTokens(current.text, text, current.pasteTokens)
+                }))
+              }}
+              onCompositionStart={() => {
+                compositionRef.current = true
+                setIsComposing(true)
+              }}
+              onCompositionEnd={() => {
+                compositionRef.current = false
+                setIsComposing(false)
+              }}
+              onSelect={(event) => {
+                setSelection({
+                  key: draftKey,
+                  caret: event.currentTarget.selectionStart ?? event.currentTarget.value.length
+                })
               }}
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
-              placeholder={showRotatingPlaceholder ? '' : 'Ask Mico anything…'}
-              value={draft}
-            />
-            {showRotatingPlaceholder ? (
-              <span
-                aria-hidden="true"
-                className="chat-composer__suggestion pointer-events-none absolute left-2 top-2 max-w-[calc(100%-4rem)] truncate text-[15px] leading-6 text-muted-foreground/80 select-none"
-                key={placeholderIndex}
-              >
-                {rotatingPlaceholders[placeholderIndex]}
-              </span>
-            ) : null}
-            <div className="chat-composer__send">
-              <IconTooltipButton
-                className="size-9"
-                disabled={
-                  isSending ||
-                  mode === 'disabled' ||
-                  (mode === 'send' && (!hasSelectedModel || (!draft.trim() && !documents.length)))
+              onCopy={(event) => {
+                const textarea = event.currentTarget
+                const expanded = pasteClipboardText(
+                  textarea.value,
+                  draft.pasteTokens,
+                  textarea.selectionStart ?? 0,
+                  textarea.selectionEnd ?? 0
+                )
+                // No token touched: the browser keeps its native copy.
+                if (expanded === null) return
+                event.clipboardData.setData('text/plain', expanded)
+                event.preventDefault()
+              }}
+              onCut={(event) => {
+                const textarea = event.currentTarget
+                const start = textarea.selectionStart ?? 0
+                const end = textarea.selectionEnd ?? 0
+                const expanded = pasteClipboardText(textarea.value, draft.pasteTokens, start, end)
+                if (expanded === null) return
+                event.clipboardData.setData('text/plain', expanded)
+                // Controlling the clipboard cancels the native cut; the
+                // deletion still runs as one native edit transaction so
+                // undo/redo stays intact.
+                event.preventDefault()
+                const before = textarea.value
+                textarea.setSelectionRange(start, end)
+                deleteTextareaRange(textarea, start, end)
+                if (textarea.value === before) {
+                  updateDraft((current) => ({
+                    ...current,
+                    sendError:
+                      'The pasted text was copied, but the editor could not cut it. Your draft is kept. Try cutting again or delete the selected text.'
+                  }))
                 }
-                icon={
+              }}
+              onPaste={(event) => {
+                const clipboard = event.clipboardData
+                // "text" is the historic alias for "text/plain"; some test
+                // DataTransfer polyfills only store the short form.
+                const text = clipboard.getData('text/plain') || clipboard.getData('text')
+                // Reference-sized pastes stay ordinary textarea text — the
+                // exact cursor position, selection replacement, and Ctrl+Z
+                // undo all keep working, and the draft text is what gets sent.
+                if (!shouldCapturePastedText(text)) return
+                const textarea = event.currentTarget
+                const start = textarea.selectionStart ?? textarea.value.length
+                const end = textarea.selectionEnd ?? start
+                const token = createPasteToken(text, draft.pasteTokens, start)
+                event.preventDefault()
+                const before = textarea.value
+                // Metadata lands first, so the capture transaction's input
+                // event re-locates every token against the value it observes.
+                updateDraft((current) => ({
+                  ...current,
+                  pasteTokens: [...current.pasteTokens, token]
+                }))
+                textarea.setSelectionRange(start, end)
+                insertTextareaText(token.displayText)
+                if (textarea.value === before) {
+                  // The browser refused the transaction; roll the metadata
+                  // back instead of leaving a payload that can never appear.
+                  updateDraft((current) => ({
+                    ...current,
+                    pasteTokens: current.pasteTokens.filter(
+                      (entry) => entry.displayText !== token.displayText
+                    ),
+                    sendError:
+                      'Could not collapse this paste in the editor. Try pasting again, or attach the text as a file.'
+                  }))
+                }
+              }}
+              value={draft.text}
+            />
+          </div>
+          {selectionError ? (
+            <p className="px-2 text-xs text-destructive" role="alert">
+              {selectionError}
+            </p>
+          ) : null}
+          {draft.sendError ? (
+            <p className="px-2 text-xs text-destructive" role="alert">
+              {draft.sendError}
+            </p>
+          ) : null}
+          <div
+            className="chat-composer-footer flex min-w-0 flex-nowrap items-center gap-1.5"
+            onFocusCapture={skills.dismiss}
+            onPointerDownCapture={skills.dismiss}
+          >
+            <ComposerAttachments
+              key={draftKey}
+              disabled={configurationDisabled}
+              documents={draft.documents}
+              onDocumentsChange={(documents) =>
+                updateDraft((current) => ({ ...current, documents, sendError: null }))
+              }
+            />
+            <div className="chat-composer-footer__generation flex min-w-0 items-center gap-1.5">
+              <ChatModelSelector
+                disabled={configurationDisabled}
+                library={library}
+                onSelect={selectModel}
+                selectedModelId={currentModelId}
+              />
+              {reasoningCapabilities ? (
+                <ThinkingSelector
+                  disabled={configurationDisabled}
+                  onValueChange={onThinkingEffortChange}
+                  reasoningCapabilities={reasoningCapabilities}
+                  value={thinkingEffort}
+                />
+              ) : null}
+            </div>
+            {onPermissionModeChange && projectPath && (
+              <DropdownMenu open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <IconTooltipButton
+                    className="size-7 shrink-0"
+                    disabled={configurationDisabled}
+                    icon={
+                      permissionMode === 'acceptEdits' ? (
+                        <ShieldCheckIcon aria-hidden="true" />
+                      ) : (
+                        <ShieldIcon aria-hidden="true" />
+                      )
+                    }
+                    label={`Tool permissions: ${
+                      permissionMode === 'acceptEdits' ? 'Accept edits' : 'Manual'
+                    }`}
+                    // The menu opens above the trigger, so the tooltip reads
+                    // below it and stays hidden while the menu is open.
+                    tooltip={`Permissions: ${
+                      permissionMode === 'acceptEdits' ? 'Accept edits' : 'Manual'
+                    }`}
+                    tooltipDisabled={permissionMenuOpen}
+                    tooltipSide="bottom"
+                    tooltipAlign="start"
+                    size="icon-sm"
+                    type="button"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="top" sideOffset={8} className="min-w-40">
+                  <DropdownMenuRadioGroup
+                    value={permissionMode}
+                    onValueChange={(value) => {
+                      if (
+                        !configurationDisabled &&
+                        (value === 'default' || value === 'acceptEdits')
+                      )
+                        onPermissionModeChange(value)
+                    }}
+                  >
+                    <DropdownMenuRadioItem disabled={configurationDisabled} value="default">
+                      Manual
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem disabled={configurationDisabled} value="acceptEdits">
+                      Accept edits
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <IconTooltipButton
+              className="ml-auto size-9 shrink-0"
+              disabled={
+                draft.isSending || mode === 'disabled' || (mode === 'send' && !canSubmitDraft)
+              }
+              icon={
+                draft.isSending ? (
+                  <Spinner aria-hidden="true" />
+                ) : (
                   <IconSwap
                     from={<ArrowUpIcon aria-hidden="true" />}
                     state={mode === 'stop' ? 'to' : 'from'}
                     to={<SquareIcon aria-hidden="true" />}
                   />
-                }
-                label={
-                  mode === 'stop'
+                )
+              }
+              label={
+                draft.isSending
+                  ? 'Sending message'
+                  : mode === 'stop'
                     ? 'Stop response'
-                    : hasSelectedModel
+                    : hasSelectedModel || isCompactCommand
                       ? 'Send message'
                       : 'Select an enabled model to send messages'
-                }
-                type={mode === 'stop' ? 'button' : 'submit'}
-                variant={mode === 'stop' ? 'secondary' : 'default'}
-                size="icon-lg"
-                onClick={mode === 'stop' ? onStop : undefined}
-              />
-            </div>
-          </div>
-          {sendError ? (
-            <p className="px-2 text-xs text-destructive" role="alert">
-              {sendError}
-            </p>
-          ) : null}
-        </div>
-        <div className="chat-composer__actions">
-          <div className="chat-composer__tools">
-            <ComposerAttachments
-              disabled={mode !== 'send' || isSending}
-              documents={documents}
-              onDocumentsChange={setDocuments}
+              }
+              type={mode === 'stop' ? 'button' : 'submit'}
+              variant={mode === 'stop' ? 'secondary' : 'default'}
+              size="icon-lg"
+              onClick={mode === 'stop' ? onStop : undefined}
             />
-            {onPermissionModeChange && projectPath && (
-              <div title="Manual asks before edits and commands. Accept edits allows ordinary workspace edits; commands still require approval.">
-                <RadioSelect
-                  aria-label="Tool permissions"
-                  align="end"
-                  side="top"
-                  sideOffset={8}
-                  className="h-8 gap-1.5 border-transparent bg-transparent px-2 text-xs font-normal shadow-none"
-                  contentClassName="min-w-40"
-                  disabled={mode !== 'send' || isSending}
-                  value={permissionMode}
-                  onValueChange={onPermissionModeChange}
-                  options={[
-                    { value: 'default', label: 'Manual' },
-                    { value: 'acceptEdits', label: 'Accept edits' }
-                  ]}
-                />
-              </div>
-            )}
           </div>
-          <div className="chat-composer__generation">
-            <div className="flex min-w-0 flex-col gap-1">
-              <ChatModelSelector
-                library={library}
-                onSelect={selectModel}
-                selectedModelId={currentModelId}
-              />
-              {selectionError ? (
-                <p className="px-2 text-xs text-destructive">{selectionError}</p>
-              ) : null}
-            </div>
-            {reasoningCapabilities ? (
-              <ThinkingSelector
-                disabled={mode !== 'send'}
-                onValueChange={onThinkingEffortChange}
-                reasoningCapabilities={reasoningCapabilities}
-                value={thinkingEffort}
-              />
-            ) : null}
-          </div>
+          {draft.isSending ? (
+            <span role="status" className="sr-only">
+              Sending message
+            </span>
+          ) : null}
         </div>
       </div>
     </form>

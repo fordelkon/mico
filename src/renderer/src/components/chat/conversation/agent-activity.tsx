@@ -73,12 +73,12 @@ function toTimelineSegments(parts: AgentActivityPart[]): TimelineSegment[] {
   )
 }
 
-function AgentLoadingIndicator(): React.JSX.Element {
+function AgentLoadingIndicator({ label = 'Thinking' }: { label?: string }): React.JSX.Element {
   return (
     <section aria-label="Agent activity" className="agent-activity agent-activity--loading">
       <div className="agent-activity__live-status" role="status">
         <span aria-hidden="true" className="agent-activity__live-dot" />
-        <span>Thinking</span>
+        <span>{label}</span>
       </div>
     </section>
   )
@@ -125,7 +125,7 @@ function AgentActivityTimeline({
   const label = [
     isLive ? liveLabel : summary,
     failed ? `${failed} ${failed === 1 ? 'tool' : 'tools'} failed` : null,
-    incomplete ? `${incomplete} ${incomplete === 1 ? 'tool' : 'tools'} not completed` : null
+    incomplete ? `${incomplete} ${incomplete === 1 ? 'call' : 'calls'} interrupted` : null
   ]
     .filter(Boolean)
     .join(' · ')

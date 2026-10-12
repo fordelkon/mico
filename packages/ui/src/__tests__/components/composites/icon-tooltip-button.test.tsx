@@ -62,4 +62,29 @@ describe('IconTooltipButton', () => {
     const button = screen.getByRole('button', { name: 'Add item' })
     expect(button).toBeDisabled()
   })
+
+  it('user focuses the button when a tooltip side is set, then the tooltip opens there', () => {
+    render(
+      <IconTooltipButton
+        icon={<svg />}
+        label="Add item"
+        tooltipAlign="start"
+        tooltipSide="bottom"
+      />
+    )
+    fireEvent.focus(screen.getByRole('button', { name: 'Add item' }))
+
+    expect(screen.getByRole('tooltip')).toHaveAttribute('data-side', 'bottom')
+    expect(screen.getByRole('tooltip')).toHaveAttribute('data-align', 'start')
+  })
+
+  it('user focuses the button when its tooltip is suppressed, then no tooltip shows', () => {
+    const { rerender } = render(<IconTooltipButton icon={<svg />} label="Add item" />)
+    fireEvent.focus(screen.getByRole('button', { name: 'Add item' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Add item')
+
+    rerender(<IconTooltipButton icon={<svg />} label="Add item" tooltipDisabled />)
+    fireEvent.focus(screen.getByRole('button', { name: 'Add item' }))
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
 })

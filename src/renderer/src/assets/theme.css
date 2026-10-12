@@ -39,7 +39,6 @@
     var(--chat-canvas)
   );
   --chat-composer-shadow: 0 1px 2px rgb(20 18 16 / 8%), 0 8px 20px -8px rgb(20 18 16 / 16%);
-  --chat-composer-focus-shadow: 0 1px 2px rgb(20 18 16 / 10%), 0 10px 24px -8px rgb(20 18 16 / 20%);
 
   --workspace-paper-feed-surface:
     linear-gradient(to right, rgb(0 0 0 / 5%), transparent 32px),
@@ -123,7 +122,6 @@
     transparent 100%
   );
   --chat-composer-shadow: 0 1px 2px rgb(0 0 0 / 26%), 0 8px 20px -8px rgb(0 0 0 / 34%);
-  --chat-composer-focus-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 24px -8px rgb(0 0 0 / 40%);
 
   --workspace-paper-feed-surface:
     linear-gradient(to right, rgb(0 0 0 / 20%), transparent 32px),

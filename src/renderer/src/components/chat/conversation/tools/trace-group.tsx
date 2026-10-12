@@ -13,8 +13,8 @@ import {
 
 /**
  * Consecutive read calls collapse into one group line, like Claude Code's
- * collapsed read groups: `Read N files`, with individual paths and results
- * available after expanding the group.
+ * collapsed read groups: `Read N files`, with each file's path, result, and
+ * inspectable content available after expanding the group.
  */
 function ToolTraceGroup({
   isLive = true,
@@ -32,21 +32,24 @@ function ToolTraceGroup({
   const hasError = states.includes('failed')
   const incomplete = states.filter((state) => state === 'incomplete').length
   const failed = states.filter((state) => state === 'failed').length
+  const awaiting = states.filter((state) => state === 'awaiting-approval').length
   const nodeState: ToolNodeState = hasError
     ? 'error'
-    : isRunning
+    : isRunning || awaiting
       ? 'running'
       : incomplete
         ? 'incomplete'
         : 'success'
   const fileCount = `${parts.length} ${parts.length === 1 ? 'file' : 'files'}`
+  const awaitingSummary = awaiting ? `${awaiting} awaiting approval` : null
   const label = isRunning
-    ? `Reading ${fileCount}…`
-    : failed || incomplete
+    ? ['Reading', `${fileCount}…`, awaitingSummary].filter(Boolean).join(' ')
+    : failed || incomplete || awaiting
       ? [
           `${parts.length} ${parts.length === 1 ? 'file read' : 'file reads'}`,
           failed ? `${failed} failed` : null,
-          incomplete ? `${incomplete} not completed` : null
+          incomplete ? `${incomplete} interrupted` : null,
+          awaitingSummary
         ]
           .filter(Boolean)
           .join(' · ')
@@ -90,7 +93,7 @@ function ToolTraceGroup({
           inert={!isExpanded}
         >
           {parts.map((part) => (
-            <ToolTrace isActive={isLive} key={part.toolCallId} part={part} showDetails={false} />
+            <ToolTrace isActive={isLive} key={part.toolCallId} part={part} />
           ))}
         </div>
       </div>

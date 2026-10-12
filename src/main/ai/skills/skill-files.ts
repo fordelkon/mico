@@ -2,7 +2,10 @@ import { type BigIntStats, constants } from 'node:fs'
 import { type FileHandle, lstat, open, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep, win32 } from 'node:path'
 
-const MAX_SKILL_OUTPUT_BYTES = 48 * 1024
+const MAX_SKILL_RESOURCE_BYTES = 48 * 1024
+// Instruction documents have a separate budget so long skills remain usable without
+// expanding the output allowance for arbitrary references.
+const MAX_SKILL_DOCUMENT_BYTES = 256 * 1024
 
 function assertContained(root: string, target: string): void {
   const path = relative(root, target)
@@ -83,7 +86,8 @@ async function readSkillFile(
     await verifyPath(target, canonical, identities, lexicalIdentities, handle)
     const stat = await handle.stat({ bigint: true })
     if (!stat.isFile()) throw new Error('Skill resources must be a regular file.')
-    if (stat.size > BigInt(maxBytes)) throw new Error('Skill text exceeds the 48 KiB output limit.')
+    if (stat.size > BigInt(maxBytes))
+      throw new Error(`Skill text exceeds the ${Math.ceil(maxBytes / 1024)} KiB output limit.`)
     const buffer = Buffer.alloc(maxBytes + 1)
     let bytesRead = 0
     while (bytesRead < buffer.length) {
@@ -92,7 +96,8 @@ async function readSkillFile(
       bytesRead += result.bytesRead
     }
     await verifyPath(target, canonical, identities, lexicalIdentities, handle)
-    if (bytesRead > maxBytes) throw new Error('Skill text exceeds the 48 KiB output limit.')
+    if (bytesRead > maxBytes)
+      throw new Error(`Skill text exceeds the ${Math.ceil(maxBytes / 1024)} KiB output limit.`)
     let text: string
     try {
       text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead))
@@ -107,9 +112,9 @@ async function readSkillFile(
   }
 }
 
-function assertOutputSize(text: string): string {
-  if (Buffer.byteLength(text, 'utf8') > MAX_SKILL_OUTPUT_BYTES) {
-    throw new Error('Skill text exceeds the 48 KiB output limit.')
+function assertOutputSize(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+    throw new Error(`Skill text exceeds the ${Math.ceil(maxBytes / 1024)} KiB output limit.`)
   }
   return text
 }
@@ -117,7 +122,8 @@ function assertOutputSize(text: string): string {
 export {
   assertContained,
   assertOutputSize,
-  MAX_SKILL_OUTPUT_BYTES,
+  MAX_SKILL_DOCUMENT_BYTES,
+  MAX_SKILL_RESOURCE_BYTES,
   readSkillFile,
   resolveResourcePath
 }

@@ -195,7 +195,8 @@ function getToolSummary(
     return { detail: getFailureDetail(part, text), kind: 'failure', text }
   }
   if (state === 'preparing') return { kind: 'message', isError: false, text: 'Preparing…' }
-  if (state === 'incomplete') return { kind: 'message', isError: false, text: 'Not completed.' }
+  // Approval and interruption read through the row's status word instead of a
+  // summary line; ToolTrace never asks for a summary in those states.
 
   if (state === 'streaming-output' && part.toolName === 'Bash') {
     const combined = [liveOutput?.stdout, liveOutput?.stderr].filter(Boolean).join('\n')
@@ -312,6 +313,36 @@ function getToolNodeState(state: ToolActivityState): ToolNodeState {
   return 'running'
 }
 
+/**
+ * The row's own word for the three states a node color cannot say alone:
+ * failure, approval, and interruption. Every other state reads through the
+ * action, the target, and the summary line.
+ */
+function getToolStateWord(state: ToolActivityState): string | null {
+  if (state === 'failed') return 'Failed'
+  if (state === 'awaiting-approval') return 'Awaiting approval'
+  if (state === 'incomplete') return 'Interrupted'
+  return null
+}
+
+/** Bash rows speak in past-tense verbs instead of the generic state words. */
+function getBashActionVerb(state: ToolActivityState): string {
+  switch (state) {
+    case 'completed':
+      return 'Ran'
+    case 'awaiting-approval':
+      return 'Awaiting approval'
+    case 'preparing':
+      return 'Preparing'
+    case 'failed':
+      return 'Failed to run'
+    case 'incomplete':
+      return 'Interrupted'
+    default:
+      return 'Running'
+  }
+}
+
 function ToolIcon({ toolName }: { toolName: string }): React.JSX.Element {
   const Icon =
     {
@@ -412,17 +443,20 @@ function getToolActivityLabel(part: ToolActivityPart): string {
 /** Compact invocation with opt-in details; failures remain visible for recovery. */
 function ToolTrace({
   part,
-  isActive = true,
-  showDetails = true
+  isActive = true
 }: {
   part: ToolActivityPart
   isActive?: boolean
-  showDetails?: boolean
 }): React.JSX.Element {
-  const [isExpanded, setExpanded] = React.useState(false)
+  // Disclosure is derived with a manual override: a failed trace opens by
+  // default, the user's own toggle always wins, and streaming updates never
+  // reset the choice. Rows stay mounted (the transcript is not virtualized),
+  // so local state is the whole owner — no cross-render cache.
+  const [userExpanded, setUserExpanded] = React.useState<boolean | null>(null)
   const [hasOpened, setHasOpened] = React.useState(false)
   const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
   const activityState = getToolActivityState(part, isActive)
+  const isFailed = activityState === 'failed'
   const nodeState = getToolNodeState(activityState)
   const input = ToolTraceInputSchema.safeParse(part.input)
   const output = 'output' in part ? ToolOutputSchema.safeParse(part.output) : undefined
@@ -447,62 +481,71 @@ function ToolTrace({
       : null
   const isRunning = nodeState === 'running'
   const elapsedSeconds = useElapsedSeconds(isRunning && part.toolName === 'Bash')
-  const summary: ToolSummary =
-    activityState === 'awaiting-approval'
-      ? { kind: 'message', text: 'Waiting for your approval.', isError: false }
-      : getToolSummary(
-          part,
-          activityState,
-          input.success ? input.data : undefined,
-          output?.success ? output.data : undefined,
-          presentation,
-          part.liveOutput,
-          elapsedSeconds
-        )
+  // The bare status words cover the whole summary for approval and interruption;
+  // repeating both would make a screen reader announce the same state twice.
+  const isStateWordSummary = activityState === 'awaiting-approval' || activityState === 'incomplete'
+  const summary: ToolSummary | null = isStateWordSummary
+    ? null
+    : getToolSummary(
+        part,
+        activityState,
+        input.success ? input.data : undefined,
+        output?.success ? output.data : undefined,
+        presentation,
+        part.liveOutput,
+        elapsedSeconds
+      )
   // Failed mutations must not render their proposed edits as successfully applied.
   const isFileTool = ['Read', 'Edit', 'Write', 'LoadSkill', 'ReadSkillResource'].includes(
     part.toolName
   )
   const hasPanel =
-    showDetails &&
-    ((presentation != null &&
+    (presentation != null &&
       (activityState !== 'failed' || part.toolName === 'Bash') &&
       (!isFileTool || activityState === 'completed')) ||
-      genericDetails != null)
+    genericDetails != null
   const contentId = `tool-trace-${part.toolCallId}`
+  const stateWord =
+    part.toolName === 'Bash' ? getBashActionVerb(activityState) : getToolStateWord(activityState)
   const accessibleSummary =
-    summary.kind === 'output'
-      ? activityState === 'completed'
-        ? 'Output available'
-        : 'Live output'
-      : [summary.text, summary.kind === 'failure' ? summary.detail : null]
-          .filter(Boolean)
-          .join(' · ')
-  const accessibleName = [tool.title, tool.accessibleDetail ?? tool.detail, accessibleSummary]
+    summary == null
+      ? null
+      : summary.kind === 'output'
+        ? activityState === 'completed'
+          ? 'Output available'
+          : 'Live output'
+        : [summary.text, summary.kind === 'failure' ? summary.detail : null]
+            .filter(Boolean)
+            .join(' · ')
+  // The name carries the state word wherever the summary line no longer does:
+  // non-Bash rows state it as a new word, Bash rows only when the bare status
+  // summary was dropped (approval, interruption); otherwise the names keep
+  // their established shape.
+  const accessibleStateWord =
+    stateWord && (part.toolName !== 'Bash' || isStateWordSummary) ? stateWord : null
+  const accessibleName = [
+    tool.title,
+    tool.accessibleDetail ?? tool.detail,
+    accessibleStateWord,
+    accessibleSummary
+  ]
     .filter(Boolean)
     .join(' ')
-
+  const isExpanded = userExpanded ?? (isFailed && hasPanel)
   const header = (
     <>
       <ToolNode state={nodeState} toolName={part.toolName} />
       <span className="agent-activity__action">
-        {part.toolName === 'Bash'
-          ? activityState === 'completed'
-            ? 'Ran'
-            : activityState === 'awaiting-approval'
-              ? 'Awaiting approval'
-              : activityState === 'preparing'
-                ? 'Preparing'
-                : activityState === 'failed'
-                  ? 'Failed to run'
-                  : activityState === 'incomplete'
-                    ? 'Stopped'
-                    : 'Running'
-          : tool.title}
+        {part.toolName === 'Bash' ? getBashActionVerb(activityState) : tool.title}
       </span>
       {tool.detail ? (
         <span className="agent-activity__summary font-mono" title={tool.fullDetail ?? tool.detail}>
           ({tool.detail})
+        </span>
+      ) : null}
+      {part.toolName !== 'Bash' && stateWord ? (
+        <span className="agent-activity__state" data-state={activityState}>
+          {stateWord}
         </span>
       ) : null}
       {isRunning && elapsedSeconds > 0 ? (
@@ -535,7 +578,7 @@ function ToolTrace({
           onClick={(event) => {
             setAnimateDisclosure(event.detail > 0)
             setHasOpened(true)
-            setExpanded((current) => !current)
+            setUserExpanded(!isExpanded)
           }}
         >
           {header}
@@ -545,9 +588,11 @@ function ToolTrace({
           {header}
         </div>
       )}
-      {(activityState === 'failed' ||
-        activityState === 'incomplete' ||
-        (!isExpanded && part.toolName !== 'Bash')) && <ToolSummaryLine summary={summary} />}
+      {summary &&
+        (activityState === 'failed' ||
+          (!isExpanded && part.toolName !== 'Bash' && !isStateWordSummary)) && (
+          <ToolSummaryLine summary={summary} />
+        )}
       {part.permission && (part.permission.state !== 'pending' || !isActive) && (
         <ToolPermissionCard
           permission={part.permission}
@@ -564,7 +609,7 @@ function ToolTrace({
             inert={!isExpanded}
           >
             {presentation != null
-              ? hasOpened && (
+              ? (hasOpened || isExpanded) && (
                   <ToolTracePresentationView
                     command={input.success ? input.data.command : undefined}
                     isDraft={activityState !== 'completed'}

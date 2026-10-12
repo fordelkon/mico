@@ -28,6 +28,7 @@ import {
 type ChatMessageProps = {
   message: MicoUIMessage
   isStreaming: boolean
+  pendingLabel?: string
 }
 
 const textEncoder = new TextEncoder()
@@ -112,7 +113,11 @@ function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): Assista
   }, [])
 }
 
-function ChatMessageComponent({ message, isStreaming }: ChatMessageProps): React.JSX.Element {
+function ChatMessageComponent({
+  message,
+  isStreaming,
+  pendingLabel
+}: ChatMessageProps): React.JSX.Element {
   const [copyState, setCopyState] = React.useState<'idle' | 'copied'>('idle')
   const text = getFinalAnswerText(message.parts)
   const isUser = message.role === 'user'
@@ -183,7 +188,12 @@ function ChatMessageComponent({ message, isStreaming }: ChatMessageProps): React
                   <Bubble align="start" variant="ghost" className="w-full">
                     <BubbleContent className="w-full max-w-[42rem] px-0 py-0 font-serif text-base leading-7">
                       <div data-testid="answer-content">
-                        <Markdown isStreaming={isStreaming} text={block.text} />
+                        {/* Only the tail block still streams; settled interim
+                            text must not carry the live caret. */}
+                        <Markdown
+                          isStreaming={isStreaming && index === assistantBlocks.length - 1}
+                          text={block.text}
+                        />
                       </div>
                     </BubbleContent>
                   </Bubble>
@@ -191,7 +201,9 @@ function ChatMessageComponent({ message, isStreaming }: ChatMessageProps): React
               </div>
             ))
           : null}
-        {!isUser && isStreaming && !message.parts.length ? <AgentLoadingIndicator /> : null}
+        {!isUser && isStreaming && !message.parts.length ? (
+          <AgentLoadingIndicator label={pendingLabel} />
+        ) : null}
         {isUser && (text || !documents.length) ? (
           <Bubble
             align={isUser ? 'end' : 'start'}

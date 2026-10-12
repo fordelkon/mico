@@ -253,6 +253,30 @@ describe('ChatMessage', () => {
     expect(screen.getAllByTestId('answer-content').at(-1)).toHaveTextContent('Done.')
   })
 
+  it('user sees settled interim text without a streaming caret when the step continues, then the tail keeps it', () => {
+    renderAssistantMessage(
+      [
+        { type: 'reasoning', text: 'Inspecting the request.' },
+        { type: 'text', text: 'I found the relevant component.' },
+        {
+          type: 'dynamic-tool',
+          toolCallId: 'call-caret',
+          toolName: 'Read',
+          state: 'input-available',
+          input: { path: 'src/index.ts' }
+        },
+        { type: 'text', text: 'Done.' }
+      ],
+      { isStreaming: true, id: 'assistant-caret' }
+    )
+
+    const answers = screen.getAllByTestId('answer-content')
+    expect(answers).toHaveLength(2)
+    // SAFETY: jsdom runs no CSS animations, so the inline caret variable is the only handle for the visible caret.
+    expect(answers[0].querySelector('[style*="--streamdown-caret"]')).toBeNull()
+    expect(answers[1].querySelector('[style*="--streamdown-caret"]')).not.toBeNull()
+  })
+
   it('user sees one agent run when an empty text block streams mid-step, then the run is not split', () => {
     renderAssistantMessage(
       [

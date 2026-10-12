@@ -1,4 +1,4 @@
-import { access, writeFile } from 'node:fs/promises'
+import { access, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import {
@@ -10,6 +10,7 @@ import {
 } from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createSkillSnapshot } from '../skills'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 import { ToolAgentRunner } from './tool-agent-runner'
 import { type ToolCall, ToolRegistry } from './tool-registry'
@@ -501,6 +502,53 @@ describe('ToolAgentRunner', () => {
     expect(output).toContain('[Tool output shortened for model context.]')
     expect(Buffer.byteLength(output ?? '')).toBeLessThanOrEqual(64 * 1024)
   })
+
+  it.each(['LoadSkill', 'ReadSkillResource'])(
+    'user loads a large skill through %s when requested, then its instructions reach the model intact',
+    async (toolName) => {
+      const cwd = await createTemporaryWorkspace('mico-tool-runner-')
+      const root = join(cwd, '.agents/skills/review')
+      const home = join(cwd, 'isolated-home')
+      await mkdir(root, { recursive: true })
+      await mkdir(home)
+      const body = 'y'.repeat(88 * 1024)
+      await writeFile(
+        join(root, 'SKILL.md'),
+        `---\nname: review\ndescription: Review code\n---\n${body}`
+      )
+      const snapshot = await createSkillSnapshot(cwd, home)
+      const requests: ChatProviderStreamInput[] = []
+      const provider = createScriptedProvider(
+        [
+          [
+            // SAFETY: this fixture matches the provider's completed tool-call chunk.
+            {
+              type: 'tool-input-available',
+              toolCallId: 'call-skill',
+              toolName,
+              input:
+                toolName === 'LoadSkill'
+                  ? { skill_id: 'review' }
+                  : { skill_id: 'review', relative_path: 'SKILL.md' }
+            } as UIMessageChunk
+          ],
+          [{ type: 'text-delta', id: 'answer', delta: 'done' }]
+        ],
+        requests
+      )
+
+      await new ToolAgentRunner().run(
+        createRunInput(provider, 'Load the skill.', {
+          registry: ToolRegistry.forWorkspace(cwd, { skills: snapshot })
+        })
+      )
+
+      const toolResult = requests[1]?.messages.at(-1)
+      const output = toolResult?.role === 'tool' ? toolResult.parts[0]?.output : undefined
+      expect(output).toContain(body)
+      expect(output).not.toContain('[Tool output shortened for model context.]')
+    }
+  )
 
   it('user sees tool activity traced when a call completes, then the trace is reported', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-runner-')

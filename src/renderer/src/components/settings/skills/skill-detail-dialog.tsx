@@ -81,8 +81,8 @@ function SkillDetailDialog({
               </DialogDescription>
               <p className="mt-2 text-xs text-text-tertiary">
                 {skill.userInvocable
-                  ? 'Available as a slash command.'
-                  : 'Model only · unavailable as a slash command.'}
+                  ? `Invoke it with $${skill.name} in the composer.`
+                  : 'Model only · not invocable from the composer.'}
                 {skill.disableModelInvocation ? ' Requires explicit invocation.' : ''}
               </p>
             </div>

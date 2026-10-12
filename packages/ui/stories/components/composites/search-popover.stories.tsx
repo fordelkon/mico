@@ -1,6 +1,7 @@
 import { Button, SearchPopover } from '@mico/ui'
 import type { SearchPopoverRenderContext } from '@mico/ui'
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
 
 const themes = ['Nord', 'Tokyo Night', 'Dracula']
 
@@ -57,4 +58,24 @@ export const EmptyResults: Story = {
       )}
     </SearchPopover>
   )
+}
+
+export const Controlled: Story = {
+  render: function ControlledExample(args) {
+    const [open, setOpen] = useState(false)
+
+    return (
+      <div className="flex items-center gap-3">
+        <SearchPopover
+          {...args}
+          open={open}
+          onOpenChange={setOpen}
+          trigger={<Button variant="outline">{open ? 'Theme picker open' : 'Choose theme'}</Button>}
+        >
+          {renderThemes}
+        </SearchPopover>
+        <output className="text-sm text-muted-foreground">{open ? 'Open' : 'Closed'}</output>
+      </div>
+    )
+  }
 }
