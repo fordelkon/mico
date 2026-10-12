@@ -43,9 +43,13 @@ The [Packaging workflow](../../.github/workflows/packaging.yml) runs on pushes t
 `main` and manual dispatch. New pushes cancel older automatic runs; manual runs
 remain independent. It builds
 Windows x64 on `windows-2022` and macOS arm64 on `macos-15`, with publishing
-disabled. It launches the packaged executable, checks the application window,
-executes the bundled Grep against a real workspace, then restarts and verifies
-the SQLite-backed conversation and tool result. It uses the same isolated
+disabled. Each matrix target matches its runner's platform and architecture, so
+packaging reuses the Electron distribution verified during dependency installation
+via `electronDist` instead of downloading and verifying the same runtime again.
+Cross-platform or cross-architecture builds must use a matching target distribution
+or the builder's default download path. The smoke launches the packaged
+executable, checks the application window, executes the bundled Grep against a
+real workspace, then restarts and verifies the SQLite-backed conversation and tool result. It uses the same isolated
 Electron and local-provider fixtures as source regression; no provider secrets
 are required. Source regression remains a separate project.
 
@@ -136,8 +140,11 @@ Electron's context is launched outside Playwright's default browser fixture.
 The fixture therefore explicitly records [context traces](https://playwright.dev/docs/api/class-tracing)
 and attaches [screenshots](https://playwright.dev/docs/api/class-testinfo#test-info-attach)
 on failure. Each restart creates a new trace segment; passing-test traces are
-removed. These context traces contain browser actions and snapshots, not the
-runner's full assertion history. Video recording is not configured.
+removed. Failed scenarios also attach captured Electron child-process stderr.
+The skill-browsing scenario captures native window state and probes a fresh
+preload document read if the preview remains unavailable, distinguishing a stalled
+read from a stalled UI update. These context traces contain browser actions and
+snapshots, not the runner's full assertion history. Video recording is not configured.
 
 Real-provider scenarios never record traces because action arguments can contain
 credentials. Password entry uses a native input update through evaluation rather

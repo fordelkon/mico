@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,6 +25,7 @@ export const test = base.extend<ElectronFixtures>({
     const workspaceDir = join(directory, 'project')
     const homeDirectory = join(directory, 'home')
     const runtimeErrors: string[] = []
+    const diagnostics: string[] = []
     const traces: string[] = []
     // Traces contain action arguments. Never record real-provider credential entry.
     const recordTrace = testInfo.project.name !== 'real-provider'
@@ -62,6 +63,10 @@ export const test = base.extend<ElectronFixtures>({
       window = await electronApp.firstWindow()
       window.on('pageerror', (error) => runtimeErrors.push(redact(error.message)))
       window.on('crash', () => runtimeErrors.push('The Electron renderer crashed.'))
+      // Child-process errors do not reach the test worker's stderr automatically.
+      electronApp
+        .process()
+        .stderr?.on('data', (chunk: Buffer) => diagnostics.push(redact(chunk.toString('utf8'))))
       if (recordTrace) {
         await electronApp.context().tracing.start({ screenshots: true, snapshots: true })
         tracing = true
@@ -81,7 +86,9 @@ export const test = base.extend<ElectronFixtures>({
           if (!window) throw new Error('The test application window is unavailable.')
           return window
         },
-        workspaceDir,
+        // Temporary paths may use Windows 8.3 aliases or macOS /var symlinks;
+        // fixture consumers must match the canonical identity workspace registration persists.
+        workspaceDir: await realpath(workspaceDir),
         relaunch: async () => {
           await stopTrace()
           await electronApp?.close()
@@ -115,6 +122,11 @@ export const test = base.extend<ElectronFixtures>({
           if (runtimeErrors.length)
             await testInfo.attach('Renderer errors', {
               body: runtimeErrors.join('\n'),
+              contentType: 'text/plain'
+            })
+          if (diagnostics.length)
+            await testInfo.attach('Electron process stderr', {
+              body: diagnostics.join(''),
               contentType: 'text/plain'
             })
         } else {

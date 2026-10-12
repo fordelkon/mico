@@ -65,7 +65,63 @@ test('user browses local skills when opening settings, then reads the real docum
           .evaluate((element) => element.scrollHeight > element.clientHeight)
       ).toBe(true)
       await expect(dialog.getByRole('button', { name: 'Code', exact: true })).toBeInViewport()
-      await expect(dialog.getByRole('heading', { name: 'review instructions' })).toBeVisible()
+      try {
+        await expect(dialog.getByRole('heading', { name: 'review instructions' })).toBeVisible()
+      } catch (error) {
+        // Capture the stalled boundary before another UI action can flush pending updates.
+        const [native, document] = await Promise.all([
+          app.electronApp.evaluate(({ BrowserWindow }) => {
+            const window = BrowserWindow.getAllWindows()[0]
+            return {
+              focused: window?.isFocused(),
+              visible: window?.isVisible(),
+              minimized: window?.isMinimized(),
+              bounds: window?.getBounds(),
+              activeResources: process.getActiveResourcesInfo()
+            }
+          }),
+          app.window.evaluate(async () => {
+            if (!('api' in window)) throw new Error('The renderer preload API is unavailable.')
+            // SAFETY: The real preload exposes this public API at the checked window property.
+            const api = window.api as WindowApiType
+            const startedAt = performance.now()
+            const deadline = AbortSignal.timeout(2000)
+            const probe = (async () => {
+              const projects = await api.workspaces.list()
+              const project = projects.find(({ isDefault }) => isDefault)
+              if (!project) throw new Error('Default workspace is missing.')
+              const document = await api.skills.readDocument({
+                projectId: project.id,
+                skillId: 'project-agents:review'
+              })
+              return { state: 'resolved', contentLength: document.content.length }
+            })().catch((error: Error) => ({
+              state: 'rejected',
+              error: error.message
+            }))
+            const result = await Promise.race([
+              probe,
+              new Promise<{ state: string }>((resolve) => {
+                deadline.addEventListener('abort', () => resolve({ state: 'pending' }), {
+                  once: true
+                })
+              })
+            ])
+            return {
+              ...result,
+              elapsedMs: performance.now() - startedAt,
+              visibility: document.visibilityState,
+              focused: document.hasFocus(),
+              dialogText: document.querySelector('[role="dialog"]')?.textContent
+            }
+          })
+        ])
+        await testInfo.attach('Skill document loading diagnostics', {
+          body: JSON.stringify({ native, document }, null, 2),
+          contentType: 'application/json'
+        })
+        throw error
+      }
       const codeBlock = dialog.getByTestId('code-block')
       await expect(codeBlock).toHaveAttribute('data-state', 'complete')
       await expect(codeBlock.getByRole('button', { name: 'Copy code' })).toBeVisible()

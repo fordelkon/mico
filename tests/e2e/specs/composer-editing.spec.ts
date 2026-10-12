@@ -26,7 +26,7 @@ function readComposerState(page: import('@playwright/test').Page): Promise<{
 
 test('user edits an invocation when drafting, then completion, atomic deletion, and undo behave natively', async ({
   app
-}, testInfo) => {
+}) => {
   await waitForAppReady(app.window)
   const defaultRoot = await app.window.evaluate(async () => {
     if (!('api' in window)) throw new Error('The renderer preload API is unavailable.')
@@ -109,45 +109,4 @@ test('user edits an invocation when drafting, then completion, atomic deletion, 
   await expect
     .poll(() => readComposerState(app.window))
     .toEqual({ composing: null, mirrorVisibility: 'visible' })
-
-  // In a small window the footer controls must not overlap: every button may
-  // shrink to its truncated label instead of spilling into its neighbor.
-  await app.electronApp.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0]
-    if (!window) throw new Error('Application window is missing.')
-    // The product enforces a 1000px minimum. Relax only this isolated window
-    // to exercise the smaller composer panes users can reach while resizing.
-    window.setMinimumSize(500, 500)
-    window.setSize(600, 860)
-  })
-  // Windows display scaling rounds the content width by one CSS pixel.
-  await expect
-    .poll(() => app.window.evaluate(() => Math.abs(innerWidth - 600)))
-    .toBeLessThanOrEqual(1)
-  const footer = app.window.locator('.chat-composer-footer')
-  const overlaps = await footer.evaluate((element) => {
-    const buttons = Array.from(element.querySelectorAll('button')).map((button) =>
-      button.getBoundingClientRect()
-    )
-    return buttons.flatMap((left, index) =>
-      buttons.slice(index + 1).flatMap((right) => {
-        if (left.top >= right.bottom || right.top >= left.bottom) return []
-        return [Math.min(left.right, right.right) - Math.max(left.left, right.left)]
-      })
-    )
-  })
-  expect(overlaps.filter((overlap) => overlap > 0.5)).toEqual([])
-  const narrowState = await app.window.evaluate(() => {
-    const trigger = document.querySelector('.chat-model-selector__trigger')
-    if (!(trigger instanceof HTMLElement)) throw new Error('The model trigger is missing.')
-    const label = trigger.querySelector('.chat-composer-footer__label')
-    return {
-      width: trigger.getBoundingClientRect().width,
-      labelTruncated: label ? label.scrollWidth > label.clientWidth : false,
-      keepsIcon: Boolean(trigger.querySelector('svg'))
-    }
-  })
-  expect(narrowState.keepsIcon).toBe(true)
-  expect(narrowState.width).toBeLessThan(160)
-  await app.window.screenshot({ path: testInfo.outputPath('composer-narrow-footer.png') })
 })

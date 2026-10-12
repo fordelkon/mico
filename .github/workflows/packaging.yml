@@ -45,12 +45,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      # The matrix targets the runner's platform/architecture. Reuse the Electron
+      # distribution verified during install instead of fetching it a second time.
       - name: Package Windows x64
         if: matrix.platform == 'win'
-        run: pnpm exec electron-builder --win --x64 --dir --publish never
+        run: pnpm exec electron-builder --win --x64 --dir --publish never -c.electronDist=node_modules/electron/dist
       - name: Package macOS arm64 with ad hoc signing
         if: matrix.platform == 'mac'
-        run: pnpm exec electron-builder --mac --arm64 --dir --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
+        run: pnpm exec electron-builder --mac --arm64 --dir --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false -c.electronDist=node_modules/electron/dist
       - name: Smoke test the packaged executable
         shell: bash
         run: pnpm test:e2e --project=packaged-smoke 2>&1 | tee packaging-smoke.log
