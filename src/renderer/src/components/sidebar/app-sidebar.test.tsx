@@ -21,6 +21,7 @@ const sidebarProps = {
   onRenameConversation: vi.fn<AppSidebarProps['onRenameConversation']>(async () => {}),
   onSelectConversation:
     vi.fn<(conversationId: string, options?: { focusComposer?: boolean }) => void>(),
+  onSelectProject: vi.fn<AppSidebarProps['onSelectProject']>(),
   respondingConversationIds: new Set<string>(),
   settingsActive: false
 }
@@ -143,6 +144,39 @@ describe('AppSidebar', () => {
     await user.keyboard('{Enter}')
 
     expect(screen.getByRole('button', { name: 'First conversation' })).toBeVisible()
+  })
+
+  it('user selects a project when browsing history, then its conversations stay revealed', async () => {
+    const user = userEvent.setup()
+    const project = { id: 'mico', name: 'mico', rootPath: '/projects/mico', isDefault: true }
+    const onSelectProject = vi.fn<AppSidebarProps['onSelectProject']>()
+    renderSidebar({
+      activeConversationId: null,
+      projects: [project],
+      conversations: [{ id: 'conversation-1', title: 'First conversation', projectId: 'mico' }],
+      onSelectProject
+    })
+
+    await user.click(screen.getByRole('button', { name: 'mico' }))
+
+    expect(onSelectProject).toHaveBeenCalledWith(project)
+    // Navigation must not collapse the group the user is still browsing.
+    expect(screen.getByRole('button', { name: 'First conversation' })).toBeVisible()
+  })
+
+  it('user clicks an unavailable workspace when viewing history, then its conversations are revealed', async () => {
+    const user = userEvent.setup()
+    renderSidebar({
+      activeConversationId: null,
+      conversations: [
+        { id: 'orphan', title: 'Saved project chat', projectId: 'deleted', cwd: '/projects/old' }
+      ]
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Unavailable workspace: old' }))
+
+    expect(sidebarProps.onSelectProject).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Saved project chat' })).toBeVisible()
   })
 
   it('user sees command shortcuts when holding the meta key, then they hide on release', () => {

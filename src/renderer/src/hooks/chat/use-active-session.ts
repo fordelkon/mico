@@ -36,7 +36,8 @@ type ChatActiveSessionSlice = {
   refreshProjects: () => Promise<void>
   addProjectToNewChat: () => Promise<void>
   selectProjectForNewChat: (project: WorkspaceProject) => void
-  startNewChat: () => void
+  /** Leaves any active session behind and starts an empty draft, optionally bound to a project. */
+  startNewChat: (project?: WorkspaceProject) => void
   selectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
   /** Creates a session for the current draft; activates it only if navigation has not changed. */
   createNewSession: () => Promise<ChatSession>
@@ -207,15 +208,20 @@ function useActiveSession(options: {
     [activeSession]
   )
 
-  const startNewChat = React.useCallback((): void => {
-    activationRef.current = { revision: activationRef.current.revision + 1, conversationId: null }
-    setPermissionModeState('default')
-    setActivationError(null)
-    setReasoningCapabilities(null)
-    setActiveSession(null)
-    setSelectedProjectId(null)
-    focusComposer()
-  }, [focusComposer])
+  const startNewChat = React.useCallback(
+    (project?: WorkspaceProject): void => {
+      activationRef.current = { revision: activationRef.current.revision + 1, conversationId: null }
+      setPermissionModeState('default')
+      setActivationError(null)
+      setReasoningCapabilities(null)
+      setActiveSession(null)
+      // A project navigation binds its workspace to the empty draft; the plain
+      // new-chat action falls back to the default workspace on first send.
+      setSelectedProjectId(project ? project.id : null)
+      focusComposer()
+    },
+    [focusComposer]
+  )
 
   const selectConversation = React.useCallback(
     (

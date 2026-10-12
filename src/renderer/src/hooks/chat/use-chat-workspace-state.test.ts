@@ -410,6 +410,46 @@ describe('useChatWorkspaceState', () => {
     await waitFor(() => expect(api.startedRequests[0]?.sessionId).toBe('session-new'))
   })
 
+  it('user opens a project when a conversation is active, then the empty draft targets that project', async () => {
+    const { api, result } = renderWorkspaceState((api) => {
+      api.workspaceProjects = [
+        {
+          id: 'project-default',
+          name: 'Default workspace',
+          rootPath: '/projects/default',
+          isDefault: true
+        },
+        { id: 'project-two', name: 'Project two', rootPath: '/projects/two', isDefault: false }
+      ]
+    })
+    await waitFor(() => expect(result.current.session.activeProject?.id).toBe('project-default'))
+    act(() => result.current.session.selectConversation('session-1'))
+    await waitFor(() =>
+      expect(result.current.session.activeSession?.conversationId).toBe('session-1')
+    )
+
+    act(() =>
+      result.current.session.startNewChat({
+        id: 'project-two',
+        name: 'Project two',
+        rootPath: '/projects/two',
+        isDefault: false
+      })
+    )
+
+    expect(result.current.session.activeSession).toBeNull()
+    expect(result.current.session.activeProject).toMatchObject({
+      id: 'project-two',
+      name: 'Project two'
+    })
+
+    await act(async () => {
+      await result.current.responses.sendMessage({ text: 'Hello', documents: [] })
+    })
+    await waitFor(() => expect(api.startedRequests).toHaveLength(1))
+    expect(api.createSession).toHaveBeenCalledWith({ title: 'New chat', projectId: 'project-two' })
+  })
+
   it('user leaves a conversation when its model refresh callback resumes, then the current capabilities stay selected', async () => {
     const capabilities = Promise.withResolvers<ModelReasoningCapabilities | null>()
     const { result } = renderWorkspaceState((api) => {

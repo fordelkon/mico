@@ -9,6 +9,7 @@ import {
 import { AppSidebar } from './components/sidebar/app-sidebar'
 import { WindowControls } from './components/window-controls/window-controls'
 import { useChatWorkspaceState } from './hooks/chat/use-chat-workspace-state'
+import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import { selectConversationWithPaperTransition } from '@renderer/utils/conversation-paper-transition'
 import { transitionSettingsPage } from '@renderer/utils/settings-paper-transition'
 
@@ -53,6 +54,20 @@ function AppContent(): React.JSX.Element {
     if (activePage === 'settings') void leaveSettings(start)
     else start()
   }, [activePage, leaveSettings, startNewChat])
+
+  // A sidebar project click starts that project's empty draft; the composer
+  // mirrors the same workspace handoff whether leaving settings or not.
+  const handleSelectProject = React.useCallback(
+    (project: WorkspaceProject): void => {
+      const start = (): void => {
+        setActivePage('chat')
+        startNewChat(project)
+      }
+      if (activePage === 'settings') void leaveSettings(start)
+      else start()
+    },
+    [activePage, leaveSettings, startNewChat]
+  )
 
   const handleSelectSettingsPage = React.useCallback(
     (page: 'providers' | 'appearance' | 'workspaces' | 'skills'): void => {
@@ -109,6 +124,7 @@ function AppContent(): React.JSX.Element {
         onOpenSettings={handleOpenSettings}
         onRenameConversation={workspace.renameConversation}
         onSelectConversation={handleSelectConversation}
+        onSelectProject={handleSelectProject}
         onSelectSettingsPage={handleSelectSettingsPage}
         settingsPage={settingsPage}
         settingsActive={activePage === 'settings'}

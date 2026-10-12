@@ -51,6 +51,7 @@ type AppSidebarProps = {
   onOpenSettings: () => void
   onRenameConversation: (conversationId: string, title: string) => Promise<void>
   onSelectConversation: (conversationId: string, options?: { focusComposer?: boolean }) => void
+  onSelectProject: (project: WorkspaceProject) => void
   onSelectSettingsPage?: (page: 'providers' | 'appearance' | 'workspaces' | 'skills') => void
   settingsPage?: 'providers' | 'appearance' | 'workspaces' | 'skills'
   settingsActive: boolean
@@ -80,6 +81,7 @@ function AppSidebar({
   onOpenSettings,
   onRenameConversation,
   onSelectConversation,
+  onSelectProject,
   onSelectSettingsPage,
   settingsPage = 'providers',
   settingsActive
@@ -238,6 +240,7 @@ function AppSidebar({
                 onDeleteConversation={onDeleteConversation}
                 onRenameConversation={onRenameConversation}
                 onSelectConversation={handleConversationSelection}
+                onSelectProject={onSelectProject}
               />
             )}
           </SidebarGroup>

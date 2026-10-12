@@ -25,6 +25,7 @@ type ConversationNavigationProps = {
   onDeleteConversation: (id: string) => Promise<void>
   onRenameConversation: (id: string, title: string) => Promise<void>
   onSelectConversation: (id: string, options?: { focusComposer?: boolean }) => void
+  onSelectProject: (project: WorkspaceProject) => void
 }
 
 type ConversationGroup = {
@@ -32,6 +33,8 @@ type ConversationGroup = {
   name: string
   path: string | null
   isDefault: boolean
+  /** The registered project backing the group; synthesized unavailable groups have none. */
+  project: WorkspaceProject | null
   conversations: Conversation[]
 }
 
@@ -52,7 +55,7 @@ function ConversationList({
   onRenameConversation,
   onSelectConversation,
   shortcutIndexes
-}: Omit<ConversationNavigationProps, 'projects'> & {
+}: Omit<ConversationNavigationProps, 'projects' | 'onSelectProject'> & {
   shortcutIndexes: ReadonlyMap<string, number>
 }): React.JSX.Element {
   const highlight = useGlidingHighlight<HTMLLIElement>()
@@ -82,6 +85,7 @@ function ConversationList({
 
 function ProjectConversations({
   group,
+  onSelectProject,
   ...props
 }: Omit<ConversationNavigationProps, 'projects' | 'conversations'> & {
   group: ConversationGroup
@@ -118,31 +122,48 @@ function ProjectConversations({
     })
   }
   const { open } = disclosure
+  const project = group.project
+  const toggleDisclosure = (): void =>
+    setDisclosure((current) => ({ ...current, open: !current.open }))
 
   return (
     <section aria-label={group.name}>
       <SidebarMenu>
         <SidebarMenuItem className="mx-1.5 my-px">
-          <SidebarMenuButton
-            aria-label={`Toggle ${group.name} conversations`}
-            aria-controls={contentId}
-            aria-expanded={open}
-            className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary"
-            onClick={() => setDisclosure((current) => ({ ...current, open: !current.open }))}
-            title={group.path ?? group.name}
-          >
-            <ChevronRight aria-hidden="true" className={open ? 'size-3.5 rotate-90' : 'size-3.5'} />
-            <FolderOpen aria-hidden="true" className="size-3.5" />
-            <span className="min-w-0 flex-1 truncate">{group.name}</span>
-            {!open && responding ? (
-              <Spinner
-                aria-label={`Generating response in ${group.name}`}
-                className="size-3.5 shrink-0 text-text-tertiary"
+          <div className="flex items-center">
+            <SidebarMenuButton
+              aria-label={`Toggle ${group.name} conversations`}
+              aria-controls={contentId}
+              aria-expanded={open}
+              className="h-[34px] w-8 shrink-0 rounded-r-none px-2 text-[13px] font-normal text-text-secondary"
+              onClick={toggleDisclosure}
+            >
+              <ChevronRight
+                aria-hidden="true"
+                className={open ? 'size-3.5 rotate-90' : 'size-3.5'}
               />
-            ) : (
-              <span className="text-[11px] text-text-tertiary">{group.conversations.length}</span>
-            )}
-          </SidebarMenuButton>
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              aria-label={group.name}
+              className="h-[34px] min-w-0 flex-1 rounded-l-none px-[10px] text-[13px] font-normal text-text-secondary"
+              onClick={() => {
+                if (project) onSelectProject(project)
+                else toggleDisclosure()
+              }}
+              title={group.path ?? group.name}
+            >
+              <FolderOpen aria-hidden="true" className="size-3.5" />
+              <span className="min-w-0 flex-1 truncate">{group.name}</span>
+              {!open && responding ? (
+                <Spinner
+                  aria-label={`Generating response in ${group.name}`}
+                  className="size-3.5 shrink-0 text-text-tertiary"
+                />
+              ) : (
+                <span className="text-[11px] text-text-tertiary">{group.conversations.length}</span>
+              )}
+            </SidebarMenuButton>
+          </div>
         </SidebarMenuItem>
       </SidebarMenu>
       <div id={contentId} hidden={!open} className="ml-3 mr-1">
@@ -170,6 +191,7 @@ function ConversationNavigation({
           name: project.name,
           path: project.rootPath,
           isDefault: project.isDefault,
+          project,
           conversations: []
         }
       ])
@@ -192,6 +214,7 @@ function ConversationNavigation({
           name: `Unavailable workspace: ${name}`,
           path: conversation.cwd ?? null,
           isDefault: false,
+          project: null,
           conversations: []
         }
         byProject.set(group.id, group)
