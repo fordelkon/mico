@@ -1,0 +1,192 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, matching package.json (for example v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Validate version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        name: Resolve the existing tag
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::Use a version tag such as v1.0.0 or v1.0.0-beta.1."; exit 1; }
+          sha="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
+          version="$(git show "$sha:package.json" | node -pe "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+          [[ "$TAG" == "v$version" ]] || { echo "::error::The tag must match package.json version."; exit 1; }
+          prerelease=false
+          [[ "$version" != *-* ]] || prerelease=true
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  lint:
+    needs: version
+    uses: ./.github/workflows/lint.yml
+    with:
+      ref: ${{ needs.version.outputs.sha }}
+
+  typecheck:
+    needs: version
+    uses: ./.github/workflows/typecheck.yml
+    with:
+      ref: ${{ needs.version.outputs.sha }}
+
+  tests:
+    needs: version
+    uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ needs.version.outputs.sha }}
+
+  build:
+    name: Release / ${{ matrix.platform }}
+    needs: [version, lint, typecheck, tests]
+    environment: release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: win
+            arch: x64
+            executable: dist/win-unpacked/Mico.exe
+          - os: macos-15
+            platform: mac
+            arch: arm64
+            executable: dist/mac-arm64/Mico.app/Contents/MacOS/Mico
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Source regression
+        run: pnpm test:e2e --project=electron
+      - name: Sign Windows installer
+        if: matrix.platform == 'win'
+        shell: bash
+        run: |
+          test -n "$WIN_CSC_LINK" || { echo "::error::Configure WIN_CSC_LINK in the release environment."; exit 1; }
+          pnpm exec electron-builder --win --x64 --config electron-builder.release.cjs --publish never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Sign and notarize macOS application
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          for key in CSC_LINK APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            test -n "${!key}" || { echo "::error::Configure $key in the release environment."; exit 1; }
+          done
+          pnpm exec electron-builder --mac --arm64 --config electron-builder.release.cjs --publish never
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Smoke test signed application
+        shell: bash
+        run: pnpm test:e2e --project=packaged-smoke 2>&1 | tee release-smoke.log
+        env:
+          DEBUG: pw:browser
+          MICO_E2E_EXECUTABLE_PATH: ${{ github.workspace }}/${{ matrix.executable }}
+      - name: Upload release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/*.yml
+            !dist/builder-debug.yml
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-failure-${{ matrix.platform }}
+          path: |
+            release-smoke.log
+            playwright-report/
+            test-results/
+            dist/builder-debug.yml
+            dist/builder-effective-config.yaml
+          retention-days: 7
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish verified assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          SHA: ${{ needs.version.outputs.sha }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          [[ "$(git rev-parse --verify "refs/tags/$TAG^{commit}")" == "$SHA" ]] || { echo "::error::The release tag changed during validation."; exit 1; }
+          gh run download "$RUN_ID" --pattern 'release-win-*' --dir assets/win
+          gh run download "$RUN_ID" --pattern 'release-mac-*' --dir assets/mac
+          mapfile -d '' assets < <(find assets -type f -print0)
+          test "${#assets[@]}" -gt 0
+          if gh release view "$TAG" --json isDraft,targetCommitish > release.json 2>/dev/null; then
+            jq -e --arg sha "$SHA" '.isDraft == true and .targetCommitish == $sha' release.json >/dev/null || { echo "::error::Only a draft created for this exact commit can be resumed."; exit 1; }
+          else
+            gh release create "$TAG" --verify-tag --target "$SHA" --title "$TAG" --generate-notes --draft
+          fi
+          gh release upload "$TAG" "${assets[@]}" --clobber
+          if [[ "$PRERELEASE" == true ]]; then
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$TAG" --draft=false --prerelease=false --latest
+          fi

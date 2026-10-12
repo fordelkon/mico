@@ -1,0 +1,42 @@
+name: Select scope
+description: Skip expensive checks for documentation-only changes and fail open if the diff is unavailable
+outputs:
+  code:
+    description: Whether source checks should run
+    value: ${{ steps.scope.outputs.code }}
+  packaged:
+    description: Whether packaged application checks should run
+    value: ${{ steps.scope.outputs.packaged }}
+runs:
+  using: composite
+  steps:
+    - id: scope
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+        BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD: ${{ github.sha }}
+      run: |
+        code=true
+        packaged=true
+        diff_file="$(mktemp)"
+        trap 'rm -f "$diff_file"' EXIT
+        if [[ "$EVENT" =~ ^(pull_request|push)$ && "$BASE" =~ ^[0-9a-f]{40}$ && "$BASE" != 0000000000000000000000000000000000000000 ]] && git diff --name-only -z "$BASE" "$HEAD" > "$diff_file"; then
+          code=false
+          packaged=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              docs/*|README.md|AGENTS.md|CLAUDE.md|CONTRIBUTING.md|LICENSE|LICENSE.*|packages/*/README.md|tests/*/README.md) continue ;;
+            esac
+            code=true
+            case "$path" in
+              tests/e2e/*) packaged=true ;;
+              tests/*|scripts/lint/*|*.test.*|*.spec.*|vitest.config.*|packages/*/vitest.config.*|eslint.config.*|.oxlintrc.*|biome.json*) ;;
+              *) packaged=true ;;
+            esac
+          done < "$diff_file"
+        else
+          echo "::notice::No reliable change range; running all checks."
+        fi
+        echo "code=$code" >> "$GITHUB_OUTPUT"
+        echo "packaged=$packaged" >> "$GITHUB_OUTPUT"

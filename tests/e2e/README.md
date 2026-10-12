@@ -27,21 +27,20 @@ pnpm playwright show-report
 
 Runtime settings have one home in [playwright.config.ts](../../playwright.config.ts).
 Tests run sequentially within each platform. The [E2E workflow](../../.github/workflows/e2e.yml)
-runs local regression on Windows and macOS for pull requests and pushes to main.
-The separate [CI workflow](../../.github/workflows/ci.yml) runs non-mutating formatting,
-lint, and type checks in one job and workspace coverage tests in a parallel job.
-Available coverage reports are uploaded after unsuccessful runs as well. The
-coverage script stops at the first failed project; later projects do not produce
-reports for that run. Thresholds and source scopes live in each project's Vitest
-configuration. A separate workflow-checks job validates GitHub Actions with
-`actionlint`; pinned Action revisions receive grouped weekly Dependabot updates.
-Paid endpoint checks run only on manual dispatch with `real_provider` enabled.
+runs source regression and internal packaged smoke on Windows and macOS for pull
+requests and pushes to main. Documentation-only changes skip these jobs' expensive
+steps. Paid endpoint checks run only through the manual
+[Provider checks workflow](../../.github/workflows/provider-checks.yml).
+
+See [CI and release procedures](../../docs/ci.md) for formatting, lint, type checks,
+parallel workspace coverage, change selection, and signed publishing.
 
 ## Packaged application smoke
 
-The [Packaging workflow](../../.github/workflows/packaging.yml) runs on pushes to
-`main` and manual dispatch. New pushes cancel older automatic runs; manual runs
-remain independent. It builds
+The packaged-smoke jobs in the [E2E workflow](../../.github/workflows/e2e.yml) run
+on pull requests and pushes to `main` when packaging inputs or E2E scenarios change,
+and always on manual dispatch. New pushes cancel older automatic runs; manual runs
+remain independent. The jobs build
 Windows x64 on `windows-2022` and macOS arm64 on `macos-15`, with publishing
 disabled. Each matrix target matches its runner's platform and architecture, so
 packaging reuses the Electron distribution verified during dependency installation
@@ -60,7 +59,8 @@ The macOS archive preserves executable permissions and framework symlinks.
 These are internal test builds: Windows is unsigned, and macOS is ad hoc signed
 without notarization. Only these internal macOS builds disable hardened runtime
 because ad hoc signing otherwise fails Electron framework library validation;
-the release configuration is unchanged. They do not establish installer behavior or Gatekeeper/
+signed releases use hardened runtime and notarization as described in
+[CI and release procedures](../../docs/ci.md). They do not establish installer behavior or Gatekeeper/
 SmartScreen acceptance for downloaded releases. Failed builds upload available
 Playwright evidence and builder diagnostics instead of verified applications.
 

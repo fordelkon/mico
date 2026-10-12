@@ -5,21 +5,17 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      real_provider:
-        description: Run paid real-provider checks in addition to local regression
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   regression:
+    name: E2E / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -28,16 +24,19 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          version: 11
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: pnpm
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        uses: ./.github/actions/select-scope
+      - uses: ./.github/actions/setup-workspace
+        if: steps.scope.outputs.code == 'true'
       - run: pnpm install --frozen-lockfile
+        if: steps.scope.outputs.code == 'true'
       - run: pnpm build
+        if: steps.scope.outputs.code == 'true'
       - run: pnpm test:e2e --project=electron
+        if: steps.scope.outputs.code == 'true'
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -49,37 +48,83 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  real-provider:
-    if: github.event_name == 'workflow_dispatch' && inputs.real_provider
-    runs-on: windows-latest
-    timeout-minutes: 20
-    environment: e2e
+  packaged-smoke:
+    name: Packaged smoke / ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: win
+            arch: x64
+            executable: dist/win-unpacked/Mico.exe
+            directory: dist/win-unpacked
+            archive: dist/Mico-windows-x64.zip
+          - os: macos-15
+            platform: mac
+            arch: arm64
+            executable: dist/mac-arm64/Mico.app/Contents/MacOS/Mico
+            directory: dist/mac-arm64/Mico.app
+            archive: dist/Mico-macos-arm64.zip
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          version: 11
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: pnpm
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        uses: ./.github/actions/select-scope
+      - uses: ./.github/actions/setup-workspace
+        if: steps.scope.outputs.packaged == 'true'
       - run: pnpm install --frozen-lockfile
+        if: steps.scope.outputs.packaged == 'true'
       - run: pnpm build
-      - run: pnpm test:e2e --project=real-provider
+        if: steps.scope.outputs.packaged == 'true'
+      # The matrix targets the runner's platform/architecture. Reuse the Electron
+      # distribution verified during install instead of fetching it a second time.
+      - name: Package Windows x64
+        if: steps.scope.outputs.packaged == 'true' && matrix.platform == 'win'
+        run: pnpm exec electron-builder --win --x64 --dir --publish never '-c.electronDist=node_modules/electron/dist'
+      - name: Package macOS arm64 with ad hoc signing
+        if: steps.scope.outputs.packaged == 'true' && matrix.platform == 'mac'
+        run: pnpm exec electron-builder --mac --arm64 --dir --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false -c.electronDist=node_modules/electron/dist
+      - name: Smoke test the packaged executable
+        if: steps.scope.outputs.packaged == 'true'
+        shell: bash
+        run: pnpm test:e2e --project=packaged-smoke 2>&1 | tee packaging-smoke.log
         env:
-          MICO_E2E_REAL_PROVIDER: '1'
-          MICO_E2E_API_KEY: ${{ secrets.MICO_E2E_API_KEY }}
-          MICO_E2E_OPENAI_BASE_URL: ${{ vars.MICO_E2E_OPENAI_BASE_URL }}
-          MICO_E2E_OPENAI_MODEL: ${{ vars.MICO_E2E_OPENAI_MODEL }}
-          MICO_E2E_ANTHROPIC_BASE_URL: ${{ vars.MICO_E2E_ANTHROPIC_BASE_URL }}
-          MICO_E2E_ANTHROPIC_MODEL: ${{ vars.MICO_E2E_ANTHROPIC_MODEL }}
-      - name: Upload failure screenshots
+          DEBUG: pw:browser
+          MICO_E2E_EXECUTABLE_PATH: ${{ github.workspace }}/${{ matrix.executable }}
+      # Archive first: upload-artifact does not preserve executable modes or symlinks.
+      - name: Archive Windows application
+        if: steps.scope.outputs.packaged == 'true' && matrix.platform == 'win'
+        shell: pwsh
+        run: tar.exe -a -c -f '${{ matrix.archive }}' -C dist win-unpacked
+      - name: Archive macOS application
+        if: steps.scope.outputs.packaged == 'true' && matrix.platform == 'mac'
+        run: ditto -c -k --sequesterRsrc --keepParent '${{ matrix.directory }}' dist/Mico-macos-arm64.zip
+      - name: Upload verified application
+        if: steps.scope.outputs.packaged == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Mico-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ matrix.archive }}
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: e2e-real-provider
+          name: packaging-failure-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
+            packaging-smoke.log
             playwright-report/
             test-results/
+            dist/builder-debug.yml
+            dist/builder-effective-config.yaml
           retention-days: 7
           if-no-files-found: ignore

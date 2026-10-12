@@ -31,3 +31,8 @@ $ pnpm build:mac
 # For Linux
 $ pnpm build:linux
 ```
+
+## Continuous integration and releases
+
+See [CI and release procedures](docs/ci.md) for workflow ownership, required
+checks, signed release prerequisites, and version-tag publishing.

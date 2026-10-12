@@ -1,0 +1,76 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Immutable source revision for release validation
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-test-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+jobs:
+  projects:
+    name: Tests / ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: app
+            command: pnpm test:coverage:app
+            coverage: coverage/
+          - project: ui
+            command: pnpm --filter @mico/ui test:coverage
+            coverage: packages/ui/coverage/
+          - project: providers
+            command: pnpm --filter @mico/ai-providers test:coverage
+            coverage: packages/ai-providers/coverage/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        if: inputs.ref == ''
+        uses: ./.github/actions/select-scope
+      - uses: ./.github/actions/setup-workspace
+        if: steps.scope.outputs.code != 'false'
+      - name: Install dependencies
+        if: steps.scope.outputs.code != 'false'
+        run: pnpm install --frozen-lockfile
+      - name: Test with coverage
+        if: steps.scope.outputs.code != 'false'
+        run: ${{ matrix.command }}
+      - name: Upload coverage
+        if: ${{ !cancelled() && steps.scope.outputs.code != 'false' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-${{ matrix.project }}
+          path: ${{ matrix.coverage }}
+          retention-days: 7
+          if-no-files-found: error
+
+  tests:
+    name: Tests
+    needs: projects
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every project to pass
+        env:
+          RESULT: ${{ needs.projects.result }}
+        run: test "$RESULT" = success

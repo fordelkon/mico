@@ -1,0 +1,51 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Immutable source revision for release validation
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-lint-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+jobs:
+  checks:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Formatting
+            command: pnpm format:check
+          - name: Lint
+            command: pnpm test:lint
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        if: inputs.ref == ''
+        uses: ./.github/actions/select-scope
+      - uses: ./.github/actions/setup-workspace
+        if: steps.scope.outputs.code != 'false'
+      - name: Install dependencies
+        if: steps.scope.outputs.code != 'false'
+        run: pnpm install --frozen-lockfile
+      - name: Check ${{ matrix.name }}
+        if: steps.scope.outputs.code != 'false'
+        run: ${{ matrix.command }}
