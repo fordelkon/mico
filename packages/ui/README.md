@@ -97,9 +97,9 @@ class to an ancestor of the components, normally the document root.
 
 - `IconSwap` — a decorative two-icon fade-and-scale transition
 - `IconMenuButton` — an accessible icon button that opens a dropdown menu
-- `IconTooltipButton` — an accessible icon button with a tooltip
+- `IconTooltipButton` — an accessible icon button with a tooltip; the tooltip side, alignment, and offset are configurable, and it can be suppressed entirely (for example while a caller-owned menu is open)
 - `RadioSelect` — a controlled single-value selection menu with optional `side`, `align`, and `sideOffset` positioning; collision handling keeps the menu within the viewport
-- `SearchPopover` — a searchable popover shell where callers filter and render results
+- `SearchPopover` — a searchable popover shell where callers filter and render results; the open state can be controlled by the caller
 - `Toggle` — an accessible controlled switch with a double-bounce thumb transition
 
 Every component listed above is re-exported from `@mico/ui`. Primitive subpath
