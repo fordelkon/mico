@@ -121,32 +121,64 @@ describe('skill snapshots', () => {
     expect(snapshot.diagnostics).toHaveLength(3)
   })
 
-  it('user keeps identical copies in compatibility roots when discovering, then no shadow notice appears', async () => {
+  it.each([
+    {
+      scenario: 'a byte-identical copy in one compatibility root',
+      outcome: 'no shadow notice appears',
+      documents: [
+        ['.agents', 'Shared instructions'],
+        ['.claude', 'Shared instructions']
+      ],
+      shadowed: []
+    },
+    {
+      scenario: 'divergent copies in one compatibility root',
+      outcome: 'the shadow notice remains',
+      documents: [
+        ['.agents', 'Canonical instructions'],
+        ['.claude', 'Compatibility instructions']
+      ],
+      shadowed: ['.claude']
+    },
+    {
+      scenario: 'byte-identical copies across compatibility roots',
+      outcome: 'no shadow notice appears',
+      documents: [
+        ['.agents', 'Shared instructions'],
+        ['.cursor', 'Shared instructions'],
+        ['.gemini', 'Shared instructions']
+      ],
+      shadowed: []
+    },
+    {
+      scenario: 'divergent copies across compatibility roots',
+      outcome: 'each shadow notice remains',
+      documents: [
+        ['.agents', 'Canonical instructions'],
+        ['.cursor', 'Cursor instructions'],
+        ['.gemini', 'Gemini instructions']
+      ],
+      shadowed: ['.cursor', '.gemini']
+    }
+  ])('user keeps $scenario when discovering, then $outcome', async ({ documents, shadowed }) => {
     const { cwd, home } = await workspace()
-    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Shared instructions')
-    await skill(join(home, '.claude/skills'), 'review', validMetadata, 'Shared instructions')
+    const canonicalBody = documents[0][1]
+    await Promise.all(
+      documents.map(([config, body]) =>
+        skill(join(home, `${config}/skills`), 'review', validMetadata, body)
+      )
+    )
 
     const snapshot = await createSkillSnapshot(cwd, home)
 
     expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
-    expect(snapshot.diagnostics).toEqual([])
-    expect(await snapshot.load('review')).toContain('Shared instructions')
-  })
-
-  it('user keeps distinct copies when discovering, then the shadow notice remains', async () => {
-    const { cwd, home } = await workspace()
-    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Canonical instructions')
-    await skill(join(home, '.claude/skills'), 'review', validMetadata, 'Compatibility instructions')
-
-    const snapshot = await createSkillSnapshot(cwd, home)
-
-    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
-    expect(snapshot.diagnostics).toEqual([
-      expect.objectContaining({
-        path: join(home, '.claude/skills/review/SKILL.md'),
-        message: expect.stringContaining('shadowed')
-      })
-    ])
+    expect(snapshot.diagnostics.map(({ path }) => path)).toEqual(
+      shadowed.map((config) => join(home, `${config}/skills/review/SKILL.md`))
+    )
+    for (const diagnostic of snapshot.diagnostics) {
+      expect(diagnostic.message).toContain('shadowed')
+    }
+    expect(await snapshot.load('review')).toContain(canonicalBody)
   })
 
   it('user changes a document when discovering, then replacement and alias stay rejected', async () => {
@@ -726,33 +758,6 @@ describe('skill snapshots', () => {
       'project-agents:review.v2'
     ])
     expect(snapshot.diagnostics).toHaveLength(1)
-  })
-
-  it('user keeps byte-identical copies across compatibility roots when discovering, then no shadow notice appears', async () => {
-    const { cwd, home } = await workspace()
-    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Shared instructions')
-    await skill(join(home, '.cursor/skills'), 'review', validMetadata, 'Shared instructions')
-    await skill(join(home, '.gemini/skills'), 'review', validMetadata, 'Shared instructions')
-
-    const snapshot = await createSkillSnapshot(cwd, home)
-
-    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
-    expect(snapshot.diagnostics).toEqual([])
-  })
-
-  it('user keeps divergent copies across compatibility roots when discovering, then each shadow notice remains', async () => {
-    const { cwd, home } = await workspace()
-    await skill(join(home, '.agents/skills'), 'review', validMetadata, 'Canonical instructions')
-    await skill(join(home, '.cursor/skills'), 'review', validMetadata, 'Cursor instructions')
-    await skill(join(home, '.gemini/skills'), 'review', validMetadata, 'Gemini instructions')
-
-    const snapshot = await createSkillSnapshot(cwd, home)
-
-    expect(snapshot.skills.map(({ id }) => id)).toEqual(['user-agents:review'])
-    expect(snapshot.diagnostics.map(({ path }) => path)).toEqual([
-      join(home, '.cursor/skills/review/SKILL.md'),
-      join(home, '.gemini/skills/review/SKILL.md')
-    ])
   })
 
   it('user overrides a compatibility root from the workspace when discovering, then the shadow notice remains', async () => {
