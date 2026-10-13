@@ -57,15 +57,6 @@ type ModelLoopInput = {
   onRetry?: (event: RetryEvent) => void
   onContextMeasurement?: (measurement: ContextMeasurement) => void
 }
-/**
- * The turn's parts in exact stream order across every model step. This is the
- * authoritative transcript for persisted display: positions must survive
- * persistence verbatim (see journal/transcript.ts for the invariant).
- */
-type AgentDisplayPart =
-  | { type: 'reasoning'; text: string }
-  | { type: 'text'; textId: string; text: string }
-  | { type: 'tool-call'; toolCallId: string; toolName: string }
 
 const ToolInputAvailableChunkSchema = z.object({
   type: z.literal('tool-input-available'),
@@ -116,7 +107,6 @@ class ModelLoop {
   }: ModelLoopInput): Promise<{
     assistantText: string
     finalAssistant: Extract<ChatProviderMessage, { role: 'assistant' }>
-    displaySequence: AgentDisplayPart[]
   }> {
     // A tool owns its history budget; fresh and replayed observations follow it alike.
     // Without a workspace there are no skill tools, so only the generic fallback applies.
@@ -132,7 +122,6 @@ class ModelLoop {
     let assistantText = ''
     let outputTokenRecoveries = 0
     let responseCount = 0
-    const displaySequence: AgentDisplayPart[] = []
     // Interactive tasks continue until the model finishes, the user cancels, or a
     // real failure occurs. Successful tool use must not silently remove capabilities.
     for (;;) {
@@ -151,10 +140,6 @@ class ModelLoop {
         ChatProviderReasoningPart | ChatProviderTextPart | ChatProviderToolCallPart
       > = []
       const reasoningParts = new Map<string, ChatProviderReasoningPart>()
-      // Display accumulation mirrors the renderer's part identity: text merges by
-      // chunk id, reasoning by its id, tool calls stay in stream position.
-      const displayParts: AgentDisplayPart[] = []
-      const displayTexts = new Map<string, Extract<AgentDisplayPart, { type: 'text' }>>()
       let finishReason: 'length' | 'stop' | 'tool-calls' | 'unknown' = 'stop'
       let continuation: Extract<ChatProviderMessage, { role: 'assistant' }>['replay']
       let usage: ProviderUsage | undefined
@@ -177,13 +162,6 @@ class ModelLoop {
         if (chunk.type === 'text-delta') {
           assistantText += chunk.delta
           appendTextPart(parts, chunk.delta)
-          let displayText = displayTexts.get(chunk.id)
-          if (!displayText) {
-            displayText = { type: 'text', textId: chunk.id, text: '' }
-            displayTexts.set(chunk.id, displayText)
-            displayParts.push(displayText)
-          }
-          displayText.text += chunk.delta
         }
         if (chunk.type === 'tool-input-start') {
           emit({ ...chunk, dynamic: true })
@@ -200,7 +178,6 @@ class ModelLoop {
           const part: ChatProviderReasoningPart = { type: 'reasoning', text: '' }
           reasoningParts.set(reasoningStart.data.id, part)
           parts.push(part)
-          displayParts.push(part)
           emit(chunk)
           continue
         }
@@ -225,11 +202,6 @@ class ModelLoop {
             toolCallId: chunk.toolCallId,
             toolName: chunk.toolName,
             argumentsJson: '{}'
-          })
-          displayParts.push({
-            type: 'tool-call',
-            toolCallId: chunk.toolCallId,
-            toolName: chunk.toolName
           })
           invalidResults.push({
             type: 'tool-result',
@@ -257,16 +229,8 @@ class ModelLoop {
           toolName: call.toolName,
           argumentsJson: JSON.stringify(call.input)
         })
-        displayParts.push({
-          type: 'tool-call',
-          toolCallId: call.toolCallId,
-          toolName: call.toolName
-        })
         emit({ ...chunk, dynamic: true })
       }
-      displaySequence.push(
-        ...displayParts.filter((part) => part.type === 'tool-call' || part.text !== '')
-      )
       const assistant = {
         role: 'assistant' as const,
         parts: parts.filter((part) => part.type !== 'reasoning' || part.text)
@@ -288,7 +252,7 @@ class ModelLoop {
         if (shouldContinue) step.continuationPrompt = OUTPUT_TOKEN_RECOVERY_MESSAGE
         onStep?.(step)
         const finalAssistant = replayAssistant
-        if (finishReason !== 'length') return { assistantText, finalAssistant, displaySequence }
+        if (finishReason !== 'length') return { assistantText, finalAssistant }
         if (outputTokenRecoveries >= MAX_OUTPUT_TOKEN_RECOVERIES)
           throw new AgentBudgetError(
             'token_limit',
@@ -424,5 +388,5 @@ function emitToolResult(result: ChatProviderToolResultPart, emit: ModelLoopInput
   })
 }
 
-export type { AgentDisplayPart, AgentStep }
+export type { AgentStep }
 export { ModelLoop }
