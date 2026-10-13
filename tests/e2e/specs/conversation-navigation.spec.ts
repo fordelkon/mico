@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 
 import { expect, test } from '../fixtures/local-provider.fixture'
 import { assistantMessages, composer, sendUserMessage } from '../utils/chat'
+import { stubWorkspaceChooser } from '../utils/workspace'
 
 test('user holds the platform shortcut when switching chats, then hints and saved drafts follow selection', async ({
   app,
@@ -99,10 +100,7 @@ test('user selects a sidebar project when leaving a conversation, then its empty
 }, testInfo) => {
   await app.window.emulateMedia({ reducedMotion: 'reduce' })
   const projectName = basename(app.workspaceDir)
-  // The folder picker is native; all registration, navigation, and persistence remain real.
-  await app.electronApp.evaluate(({ dialog }, dir) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] })
-  }, app.workspaceDir)
+  await stubWorkspaceChooser(app)
   await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
   await app.window.getByRole('button', { name: 'Workspaces', exact: true }).click()
   await app.window.getByRole('button', { name: 'Add Workspace', exact: true }).click()

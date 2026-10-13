@@ -2,18 +2,9 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { expect, test } from '../fixtures/local-provider.fixture'
-import type { TestApp } from '../fixtures/electron.fixture'
+import { selectTheme } from '../utils/appearance'
 import { assistantMessages, composer, waitForReply } from '../utils/chat'
-
-async function selectWorkspace(app: TestApp): Promise<void> {
-  // Only replace the native chooser; registration and filesystem access remain real.
-  await app.electronApp.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
-  }, app.workspaceDir)
-  await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
-  await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
-  await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
-}
+import { selectWorkspace } from '../utils/workspace'
 
 test('user denies then approves a write when reviewing operations, then only the approved file is created', async ({
   app,
@@ -38,13 +29,10 @@ test('user denies then approves a write when reviewing operations, then only the
   await expect(approval.getByLabel('Proposed file content')).toHaveText('not allowed')
   await expect(readFile(join(app.workspaceDir, 'denied.txt'), 'utf8')).rejects.toThrow('ENOENT')
   await app.electronApp.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].setSize(820, 760)
+    BrowserWindow.getAllWindows()[0].setSize(1000, 800)
   )
   await app.window.screenshot({ path: testInfo.outputPath('permission-pending.png') })
-  await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
-  await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
-  await app.window.getByRole('radio', { name: 'Dark', exact: true }).click()
-  await app.window.getByRole('button', { name: 'Back', exact: true }).click()
+  await selectTheme(app.window, 'Dark')
   await app.window.evaluate(() =>
     // Wait only for time-based animations: scroll-driven ones (animation-timeline:
     // scroll()) finish solely when their scroll range completes, so their

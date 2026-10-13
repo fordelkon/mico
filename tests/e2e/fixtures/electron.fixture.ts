@@ -12,7 +12,7 @@ export type TestApp = {
   /** Relaunch against the same isolated storage without reinitializing preferences. */
   relaunch: () => Promise<Page>
 }
-export type ElectronFixtures = {
+type ElectronFixtures = {
   app: TestApp
   electronApp: ElectronApplication
   mainWindow: Page

@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/local-provider.fixture'
+import { selectTheme } from '../utils/appearance'
 import { assistantMessages, composer, waitForReply } from '../utils/chat'
 import { editKeys } from '../utils/edit-keys'
 import { waitForAppReady } from '../utils/wait-helpers'
@@ -53,11 +54,8 @@ test('user pastes a long text when drafting, then the token collapses, undoes na
 
   // Settings unmounts the composer. Returning with the same draft must align
   // the visible mirror with the native caret before any further input.
-  for (const appearance of ['Light', 'Dark']) {
-    await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
-    await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
-    await app.window.getByRole('radio', { name: appearance, exact: true }).click()
-    await app.window.getByRole('button', { name: 'Back', exact: true }).click()
+  for (const appearance of ['Light', 'Dark'] as const) {
+    await selectTheme(app.window, appearance)
     await expect(input).toHaveValue(label)
     for (const width of [1_000, 1_200]) {
       await app.electronApp.evaluate(({ BrowserWindow }, nextWidth) => {

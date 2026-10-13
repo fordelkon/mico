@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import { expect, test } from '../fixtures/local-provider.fixture'
 import { assistantMessages, sendUserMessage } from '../utils/chat'
+import { selectWorkspace } from '../utils/workspace'
 
 test('user searches a workspace when using the packaged app, then chat and results survive restart', async ({
   app,
@@ -11,13 +12,7 @@ test('user searches a workspace when using the packaged app, then chat and resul
   expect(await app.electronApp.evaluate(({ app }) => app.isPackaged)).toBe(true)
   await expect(app.window).toHaveURL(/app\.asar/)
   await writeFile(join(app.workspaceDir, 'packaged-smoke.txt'), 'MICO_PACKAGED_GREP\n')
-  // Replace only the OS folder picker; registration and tool execution stay real.
-  await app.electronApp.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
-  }, app.workspaceDir)
-  await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
-  await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
-  await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
+  await selectWorkspace(app)
 
   provider.enqueue({
     type: 'tool',

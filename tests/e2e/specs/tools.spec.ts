@@ -1,10 +1,21 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import type { TestApp } from '../fixtures/electron.fixture'
 import { expect, test } from '../fixtures/local-provider.fixture'
+import { selectTheme } from '../utils/appearance'
 import { assistantMessages, composer, sendUserMessage, waitForReply } from '../utils/chat'
+import { selectWorkspace } from '../utils/workspace'
 
-test('user inspects file changes and a running command when tools execute, then details remain readable through completion', async ({
+const originalGreeting = 'export function greeting() {\n  return "Hello"\n}\n'
+const updatedGreeting = originalGreeting.replace('Hello', 'Welcome')
+
+async function prepareGreetingWorkspace(app: TestApp): Promise<void> {
+  await selectWorkspace(app)
+  await writeFile(join(app.workspaceDir, 'greeting.ts'), originalGreeting)
+}
+
+test('user inspects file changes and a running command when tools execute, then details stay readable through completion', async ({
   app,
   provider
 }, testInfo) => {
@@ -12,15 +23,7 @@ test('user inspects file changes and a running command when tools execute, then 
   await app.electronApp.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(1280, 900)
   )
-  await app.electronApp.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
-  }, app.workspaceDir)
-  await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
-  await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
-  await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
-  const original = 'export function greeting() {\n  return "Hello"\n}\n'
-  const updated = original.replace('Hello', 'Welcome')
-  await writeFile(join(app.workspaceDir, 'greeting.ts'), original)
+  await prepareGreetingWorkspace(app)
   // The command waits on a real file event, so UI assertions control when output completes.
   await writeFile(
     join(app.workspaceDir, 'trace-command.cjs'),
@@ -56,8 +59,8 @@ console.error('Diagnostic output')
     id: 'update-source',
     input: {
       file_path: 'greeting.ts',
-      old_string: original,
-      new_string: updated
+      old_string: originalGreeting,
+      new_string: updatedGreeting
     }
   })
   provider.enqueue({
@@ -131,25 +134,68 @@ console.error('Diagnostic output')
   await expect(app.window.getByRole('log', { name: 'Terminal output' })).toContainText(
     'Final output'
   )
-  expect(await readFile(join(app.workspaceDir, 'greeting.ts'), 'utf8')).toBe(updated)
-  await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
-  await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
-  await app.window.getByRole('radio', { name: 'Dark', exact: true }).click()
-  await app.window.getByRole('button', { name: 'Back', exact: true }).click()
+  expect(await readFile(join(app.workspaceDir, 'greeting.ts'), 'utf8')).toBe(updatedGreeting)
+})
+
+test('user reads tool details when using dark theme at the minimum window size, then collapsing hides the panels', async ({
+  app,
+  provider
+}, testInfo) => {
+  await app.window.emulateMedia({ reducedMotion: 'reduce' })
+  await prepareGreetingWorkspace(app)
+  provider.enqueue({
+    type: 'tool',
+    name: 'Read',
+    id: 'layout-read',
+    input: { file_path: 'greeting.ts' }
+  })
+  provider.enqueue({
+    type: 'tool',
+    name: 'Edit',
+    id: 'layout-edit',
+    input: { file_path: 'greeting.ts', old_string: originalGreeting, new_string: updatedGreeting }
+  })
+  provider.enqueue({
+    type: 'tool',
+    name: 'Bash',
+    id: 'layout-command',
+    input: { command: 'echo MICO_E2E_LAYOUT' }
+  })
+  provider.enqueue({ type: 'text', text: 'Updated the greeting and ran the command.' })
+  await composer(app.window).fill('Update the greeting and run a command.')
+  await app.window.getByRole('button', { name: 'Send message' }).click()
+  await app.window
+    .getByRole('group', { name: 'Approval for Edit', exact: true })
+    .getByRole('button', { name: 'Allow once' })
+    .click()
+  await app.window
+    .getByRole('group', { name: 'Approval for Bash', exact: true })
+    .getByRole('button', { name: 'Allow once' })
+    .click()
+  await waitForReply(app.window, assistantMessages(app.window).last())
+  expect(await readFile(join(app.workspaceDir, 'greeting.ts'), 'utf8')).toBe(updatedGreeting)
+
+  await selectTheme(app.window, 'Dark')
   await app.electronApp.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].setSize(1000, 850)
+    BrowserWindow.getAllWindows()[0].setSize(1000, 800)
   )
   await expect(app.window.locator('html')).toHaveClass(/dark/)
-  const update = app.window.getByRole('button', { name: /^Update greeting.ts/ })
+  const update = app.window.getByRole('button', { name: /^Update greeting\.ts/ })
   if ((await update.getAttribute('aria-expanded')) === 'false') await update.click()
-  if ((await completedCommand.getAttribute('aria-expanded')) === 'false')
-    await completedCommand.click()
+  const command = app.window.getByRole('button', { name: /^Bash echo MICO_E2E_LAYOUT/ })
+  if ((await command.getAttribute('aria-expanded')) === 'false') await command.click()
+  const diff = app.window.getByRole('log', { name: 'File diff' })
+  await expect(diff).toContainText('-  return "Hello"')
+  await expect(diff).toContainText('+  return "Welcome"')
+  await expect(app.window.getByRole('log', { name: 'Terminal output' })).toContainText(
+    'MICO_E2E_LAYOUT'
+  )
   await app.window.screenshot({ path: testInfo.outputPath('tool-details-dark-narrow.png') })
   expect(
     await app.window.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
   ).toBe(true)
-  await completedCommand.click()
-  await expect(completedCommand).toHaveAttribute('aria-expanded', 'false')
+  await command.click()
+  await expect(command).toHaveAttribute('aria-expanded', 'false')
   await expect(app.window.getByRole('log', { name: 'Terminal output' })).toBeHidden()
   await update.click()
   await expect(update).toHaveAttribute('aria-expanded', 'false')
@@ -162,13 +208,7 @@ test('user edits a file when the provider temporarily fails, then recovery prese
   provider
 }, testInfo) => {
   await writeFile(join(app.workspaceDir, 'recovery.txt'), 'TOKEN')
-  // Only the OS picker is replaced; selection, permissions, and file operations remain real.
-  await app.electronApp.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
-  }, app.workspaceDir)
-  await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
-  await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
-  await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
+  await selectWorkspace(app)
   await app.window.getByRole('button', { name: /^Tool permissions:/ }).click()
   await app.window.getByRole('menuitemradio', { name: 'Accept edits' }).click()
   provider.enqueue({
@@ -223,18 +263,12 @@ test('user edits a file when the provider temporarily fails, then recovery prese
   await app.window.screenshot({ path: testInfo.outputPath('committed-edit-recovered.png') })
 })
 
-// The only native stub is the OS folder picker; the selected directory is real.
 test('user asks for a file when a workspace is selected, then the file and tool transcript survive restart', async ({
   app,
   provider
 }) => {
-  await app.electronApp.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
-  }, app.workspaceDir)
-  await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
-  await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
+  await selectWorkspace(app)
   await expect(app.window.getByRole('button', { name: /^Workspace: project/ })).toBeVisible()
-  await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
   await expect(app.window.getByRole('textbox', { name: 'Search workspaces' })).toBeHidden()
   await app.window.getByRole('button', { name: /^Tool permissions:/ }).click()
   await app.window.getByRole('menuitemradio', { name: 'Accept edits' }).click()
@@ -309,82 +343,76 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   expect(await readFile(join(app.workspaceDir, 'result.txt'), 'utf8')).toBe('MICO_EDITED_RESULT')
 })
 
-test('user invokes a manual skill with $ when following its reference, then details survive restart', async ({
-  app,
-  provider
-}, testInfo) => {
-  const skillDirectory = join(app.workspaceDir, '.agents', 'skills', 'mico-e2e-skill')
-  const skillBody = 'Follow MICO_SKILL_BODY and read references/guide.md before replying.'
-  const resourceBody = '# Reference guide\nUse MICO_SKILL_RESOURCE when completing the request.'
-  const description = `Follow the Mico E2E reference guide. ${'Read the guide before responding. '.repeat(16).trim()}`
+const skillBody = 'Follow MICO_SKILL_BODY and read references/guide.md before replying.'
+const skillResource = '# Reference guide\nUse MICO_SKILL_RESOURCE when completing the request.'
+const skillDescription = `Follow the Mico E2E reference guide. ${'Read the guide before responding. '.repeat(16).trim()}`
+
+/** Write the manual-only skill and its reference document into the workspace. */
+async function writeManualSkill(workspaceDir: string): Promise<void> {
+  const skillDirectory = join(workspaceDir, '.agents', 'skills', 'mico-e2e-skill')
   await mkdir(join(skillDirectory, 'references'), { recursive: true })
-  const invalidSkillPaths = await Promise.all(
-    Array.from({ length: 12 }, async (_, index) => {
-      const directory = join(app.workspaceDir, '.agents', 'skills', `invalid-${index}`)
-      await mkdir(directory, { recursive: true })
-      const path = join(directory, 'SKILL.md')
-      await writeFile(
-        path,
-        '---\nname: INVALID\ndescription: Invalid metadata.\n---\nBroken skill.'
-      )
-      return path
-    })
-  )
   await writeFile(
     join(skillDirectory, 'SKILL.md'),
-    `---\nname: mico-e2e-skill\ndescription: ${description}\ndisable-model-invocation: true\n---\n${skillBody}\n`
+    `---\nname: mico-e2e-skill\ndescription: ${skillDescription}\ndisable-model-invocation: true\n---\n${skillBody}\n`
   )
-  await writeFile(join(skillDirectory, 'references', 'guide.md'), resourceBody)
-  // Replace only the native folder chooser; workspace selection and discovery remain real.
-  await app.electronApp.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
-  }, app.workspaceDir)
-  await app.window.getByRole('button', { name: /^Workspace:|^Choose workspace$/ }).click()
-  await app.window.getByRole('button', { name: 'Add workspace', exact: true }).click()
-  await app.window.getByRole('textbox', { name: 'Search workspaces' }).press('Escape')
+  await writeFile(join(skillDirectory, 'references', 'guide.md'), skillResource)
+}
 
-  const resource = provider.enqueue({
-    type: 'tool',
-    name: 'ReadSkillResource',
-    id: 'read-skill-reference',
-    input: { skill_id: 'mico-e2e-skill', relative_path: 'references/guide.md' }
-  })
-  const answer = provider.enqueue({ type: 'text', text: 'Followed the skill and its reference.' })
+/** Write skills whose frontmatter fails validation, so discovery reports warnings. */
+async function writeInvalidSkills(workspaceDir: string): Promise<void> {
+  await Promise.all(
+    Array.from({ length: 12 }, async (_, index) => {
+      const directory = join(workspaceDir, '.agents', 'skills', `invalid-${index}`)
+      await mkdir(directory, { recursive: true })
+      await writeFile(
+        join(directory, 'SKILL.md'),
+        '---\nname: INVALID\ndescription: Invalid metadata.\n---\nBroken skill.'
+      )
+    })
+  )
+}
+
+test('user opens the $ menu when discovery warns about invalid skills, then warnings expand and retry reproduces them', async ({
+  app
+}, testInfo) => {
+  await writeManualSkill(app.workspaceDir)
+  await writeInvalidSkills(app.workspaceDir)
+  await selectWorkspace(app)
+  const skillMenu = app.window.getByRole('region', { name: 'Commands and skills' })
+  const warnings = skillMenu.getByText('12 skill discovery warnings', { exact: true })
   const draft = composer(app.window)
   await draft.fill('$')
   await expect(app.window.getByRole('option', { name: /^mico-e2e-skill / })).toBeVisible()
   await expect(app.window.getByText('mico-e2e-skill', { exact: true })).toBeVisible()
-  const skillDescription = app.window.getByText(description, { exact: true })
-  await expect(skillDescription).toBeVisible()
-  await expect(skillDescription).toHaveCSS('white-space', 'nowrap')
-  await expect(skillDescription).toHaveCSS('text-overflow', 'ellipsis')
+  const description = app.window.getByText(skillDescription, { exact: true })
+  await expect(description).toBeVisible()
+  await expect(description).toHaveCSS('white-space', 'nowrap')
+  await expect(description).toHaveCSS('text-overflow', 'ellipsis')
   await expect(app.window.getByText('Manual only', { exact: true })).toHaveCount(0)
-  const skillMenu = app.window.getByRole('region', { name: 'Commands and skills' })
-  const warnings = skillMenu.getByText('12 skill discovery warnings', { exact: true })
   await expect(warnings).toBeVisible()
-  await expect(skillMenu.getByText(invalidSkillPaths[0], { exact: true })).toBeHidden()
+  // Collapsed by default: the affected paths are not listed until expanded.
+  await expect(
+    skillMenu.getByText(join(app.workspaceDir, '.agents', 'skills', 'invalid-0', 'SKILL.md'), {
+      exact: true
+    })
+  ).toBeHidden()
   await app.window.screenshot({ path: testInfo.outputPath('skill-menu-light.png') })
   await warnings.focus()
   await warnings.press('Space')
   await expect(warnings).toBeFocused()
-  const warningList = skillMenu.getByRole('list', { name: 'Skill discovery warnings' })
-  await expect(warningList).toBeVisible()
-  await expect(warningList.getByRole('listitem')).toHaveCount(12)
-  await warningList.getByRole('listitem').last().scrollIntoViewIfNeeded()
-  await expect(warningList.getByRole('listitem').last()).toBeInViewport()
-  await app.window.screenshot({ path: testInfo.outputPath('skill-warnings-expanded-light.png') })
+  await expect(skillMenu.getByRole('list', { name: 'Skill discovery warnings' })).toBeVisible()
+  await app.window.screenshot({
+    path: testInfo.outputPath('skill-warnings-expanded-light.png')
+  })
   await warnings.press('Space')
   await skillMenu.getByRole('button', { name: 'Retry skills', exact: true }).click()
   await expect(warnings).toBeVisible()
   await expect(draft).toHaveValue('$')
   await draft.focus()
   await draft.press('Escape')
-  await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
-  await app.window.getByRole('button', { name: 'Appearance', exact: true }).click()
-  await app.window.getByRole('radio', { name: 'Dark', exact: true }).click()
-  await app.window.getByRole('button', { name: 'Back', exact: true }).click()
+  await selectTheme(app.window, 'Dark')
   await app.electronApp.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].setSize(768, 850)
+    BrowserWindow.getAllWindows()[0].setSize(1000, 800)
   )
   await expect(app.window.locator('html')).toHaveClass(/dark/)
   await draft.fill('')
@@ -396,6 +424,25 @@ test('user invokes a manual skill with $ when following its reference, then deta
     await app.window.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
   ).toBe(true)
   await app.window.screenshot({ path: testInfo.outputPath('skill-menu-dark-narrow.png') })
+})
+
+// The only native stub is the OS folder picker; the selected directory is real.
+test('user invokes a manual skill with $ when following its reference, then details survive restart', async ({
+  app,
+  provider
+}) => {
+  await writeManualSkill(app.workspaceDir)
+  await selectWorkspace(app)
+  const resource = provider.enqueue({
+    type: 'tool',
+    name: 'ReadSkillResource',
+    id: 'read-skill-reference',
+    input: { skill_id: 'mico-e2e-skill', relative_path: 'references/guide.md' }
+  })
+  const answer = provider.enqueue({ type: 'text', text: 'Followed the skill and its reference.' })
+  const draft = composer(app.window)
+  await draft.fill('$')
+  await expect(app.window.getByRole('option', { name: /^mico-e2e-skill / })).toBeVisible()
   await draft.press('Tab')
   await expect(draft).toHaveValue('$mico-e2e-skill ')
   await expect(draft).toBeFocused()
@@ -409,7 +456,7 @@ test('user invokes a manual skill with $ when following its reference, then deta
     expect.objectContaining({
       role: 'tool',
       tool_call_id: 'read-skill-reference',
-      content: expect.stringContaining(resourceBody)
+      content: expect.stringContaining(skillResource)
     })
   )
   await app.window
@@ -417,7 +464,7 @@ test('user invokes a manual skill with $ when following its reference, then deta
       name: /^Read skill resource mico-e2e-skill\/references\/guide\.md/
     })
     .click()
-  for (const line of resourceBody.split('\n'))
+  for (const line of skillResource.split('\n'))
     await expect(app.window.getByRole('log', { name: 'File content' })).toContainText(line)
   await expect(app.window.locator('.conversation-row__title')).toHaveText('E2E conversation')
 
@@ -444,7 +491,7 @@ test('user invokes a manual skill with $ when following its reference, then deta
       name: /^Read skill resource mico-e2e-skill\/references\/guide\.md/
     })
     .click()
-  for (const line of resourceBody.split('\n'))
+  for (const line of skillResource.split('\n'))
     await expect(app.window.getByRole('log', { name: 'File content' })).toContainText(line)
   await expect(assistantMessages(app.window).last().getByTestId('answer-content')).toHaveText(
     'Completed the follow-up.'

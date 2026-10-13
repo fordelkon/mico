@@ -91,7 +91,9 @@ asserts `app.isPackaged` to reject accidentally testing the development binary.
 | Native Quit | Pending provider URL edit survives Quit and relaunch before debounce saves |
 | Workspaces | Add a real temporary directory through the settings flow |
 | Navigation | Search from workspace settings returns to the conversation with renamed workspace labels in sidebar and composer |
-| Tools | Real file creation, tool result replay, transcript and file after restart, failed file read, committed edit retained through transient provider failure |
+| Tools | File changes and command output, completed tool details in dark theme at minimum window size, real file creation, tool result replay, transcript and file after restart, failed file read, committed edit retained through transient provider failure |
+| Compaction | Manual command pending and cancellation lifecycle, empty-summary failure preserves history, successful confirmation remains visible through theme navigation |
+| Skills | Invalid-skill warnings expand and recur after Retry; manual $ invocation reads resources and preserves the transcript after restart |
 | Real providers | Optional OpenAI-compatible and Anthropic-compatible completed replies |
 
 The local regression replaces only the external model with a loopback HTTP server.

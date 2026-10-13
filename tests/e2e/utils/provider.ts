@@ -4,12 +4,11 @@ export type ProviderEndpoint = {
   providerName: string
   baseUrl: string
   modelId: string
-  apiFormat: 'openai-compatible' | 'anthropic-compatible' | 'openai-responses'
+  apiFormat: 'openai-compatible' | 'anthropic-compatible'
 }
 
 const apiFormatLabels = {
   'openai-compatible': 'Chat Completions (/chat/completions)',
-  'openai-responses': 'Responses (/responses)',
   'anthropic-compatible': 'Anthropic Messages (v1/messages)'
 } as const
 
