@@ -871,14 +871,16 @@ describe('registerIpc workspace handlers', () => {
 
   it('user renames a project when the name is valid, then the renamed one is returned', async () => {
     const { handlers, workspace, event } = createHarness()
-    workspace.renameProject.mockResolvedValue(project)
+    const renamed = { ...project, name: 'Renamed' }
+    workspace.renameProject.mockResolvedValue(renamed)
 
     await expect(
       handlers.get(IpcChannel.Workspaces_Rename)?.(event, {
         projectId: 'project-1',
         name: 'Renamed'
       })
-    ).resolves.toEqual(project)
+    ).resolves.toEqual(renamed)
+    expect(workspace.renameProject).toHaveBeenCalledWith('project-1', 'Renamed')
   })
 
   it('user cannot archive a project when the ID is invalid, then it is rejected', () => {
