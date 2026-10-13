@@ -2,11 +2,15 @@
 
 Mico is a desktop AI workspace and coding assistant built with Electron, React, and TypeScript.
 
-The current focus is building a lightweight **toy agent** harness directly into the application, drawing inspiration and architectural patterns from modern agent projects:
+The current focus is building a lightweight **toy agent** harness directly into the application, drawing inspiration and architectural patterns from modern open-source projects:
 
-- **[Pi](https://github.com/earendil-works/pi)** (`pi-coding-agent`): Modular agent loop design, minimal core abstractions, and extensible tool contracts.
-- **[OpenAI Codex](https://github.com/openai/codex)**: Stream-driven agent interactions, project instruction ingestion, and execution boundaries.
-- **[dsh](https://github.com/deepseek-ai/deepseek-harness)** (DeepSeek Harness): Flexible harness architecture, modular tool composition, and transparent execution traces.
+- **Agent Core & Harness**:
+  - **[Pi](https://github.com/earendil-works/pi)** (`pi-coding-agent`): Modular agent loop design, minimal core abstractions, and extensible tool contracts.
+  - **[OpenAI Codex](https://github.com/openai/codex)**: Stream-driven agent interactions, project instruction ingestion, and execution boundaries.
+  - **[dsh](https://github.com/deepseek-ai/deepseek-harness)** (DeepSeek Harness): Flexible harness architecture, modular tool composition, and transparent execution traces.
+- **Frontend & Workspace UI**:
+  - **[shadcn/ui](https://github.com/shadcn-ui/ui)**: Accessible, composable UI component primitives and token-based styling powering `@mico/ui`.
+  - **[Lody](https://github.com/LodyAI/Lody)**: Modern coding agent workspace ergonomics, multi-turn interaction design, and activity monitoring.
 
 ## Overview & Architecture
 
