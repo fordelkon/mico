@@ -154,7 +154,7 @@ describe('createPasteToken', () => {
 })
 
 describe('restorePasteToken', () => {
-  it('user repairs a damaged token when drafting, then the exact label replaces the broken text', () => {
+  it('user repairs a damaged token after a prefix when drafting, then its range covers the broken label', () => {
     const displayText = label('fff666', 1_100)
     const damaged = {
       ...token({ displayText, text: 'f'.repeat(1_100) }),
@@ -164,9 +164,6 @@ describe('restorePasteToken', () => {
     const value = `go ${broken}`
     const repair = restorePasteToken(value, { ...damaged, start: 3, end: 3 + broken.length })
     expect(repair).toEqual({ start: 3, end: 3 + broken.length })
-    expect(`${value.slice(0, 3)}${displayText}${value.slice(3 + broken.length)}`).toBe(
-      `go ${displayText}`
-    )
   })
 })
 

@@ -279,14 +279,6 @@ describe('SettingsMain', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
   })
 
-  it('user returns to the last provider when a selection is saved, then it is restored', async () => {
-    mockLibrary('ollama')
-
-    renderSettings()
-
-    expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
-  })
-
   it('user falls back to the first provider when the selection is gone, then it opens', async () => {
     mockLibrary('missing-custom-provider')
 
@@ -296,6 +288,11 @@ describe('SettingsMain', () => {
   })
 
   it('user sees the last provider when returning to settings, then it is restored', async () => {
+    const user = userEvent.setup()
+    persistedLibrary = {
+      ...persistedLibrary,
+      customProviders: [exampleAiCustomProvider]
+    }
     const { rerender } = render(
       <ProviderLibraryProvider>
         <SettingsMain />
@@ -303,6 +300,8 @@ describe('SettingsMain', () => {
     )
 
     await waitForOllama()
+    await user.click(screen.getByRole('button', { name: 'Example AI' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Example AI' })).toBeVisible()
     rerender(
       <ProviderLibraryProvider>
         <div />
@@ -314,7 +313,8 @@ describe('SettingsMain', () => {
       </ProviderLibraryProvider>
     )
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'Ollama' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Example AI' })).toBeVisible()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Ollama' })).not.toBeInTheDocument()
   })
 
   it('user sees custom providers when the library loads, then they appear as buttons', async () => {
