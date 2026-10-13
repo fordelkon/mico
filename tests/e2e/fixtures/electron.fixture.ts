@@ -60,6 +60,18 @@ export const test = base.extend<ElectronFixtures>({
         },
         timeout: 60_000
       })
+      if (process.platform === 'win32') {
+        await electronApp.evaluate(({ app }) => {
+          // Candidate workaround for Windows inspector-related filesystem stalls:
+          // https://github.com/electron/electron/issues/32132
+          // Wake Node's loop for each launch; clear the timer on quit.
+          // Confirmation on the affected CI runner is still pending.
+          const wakeup = setInterval(() => {
+            // The timer itself wakes the loop; no application work is needed.
+          }, 100)
+          app.once('will-quit', () => clearInterval(wakeup))
+        })
+      }
       window = await electronApp.firstWindow()
       window.on('pageerror', (error) => runtimeErrors.push(redact(error.message)))
       window.on('crash', () => runtimeErrors.push('The Electron renderer crashed.'))
