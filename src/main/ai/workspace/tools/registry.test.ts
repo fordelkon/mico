@@ -154,10 +154,24 @@ describe('ToolRegistry', () => {
     expect(results.map((result) => result.isError)).toEqual([false, false])
   })
 
-  it('user submits a command with a file read when batching tools, then both succeed', async () => {
+  it('user batches a read-only command with a file read when both are safe, then both start before either finishes', async () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'a.txt'), 'content')
-    const registry = ToolRegistry.forWorkspace(cwd, { requestApproval: async () => true })
+    const prepared: string[] = []
+    const ready = Promise.withResolvers<void>()
+    const registry = ToolRegistry.forWorkspace(cwd, {
+      requestApproval: async () => true,
+      hooks: {
+        preToolUse: [
+          async ({ toolCallId }) => {
+            prepared.push(toolCallId)
+            if (prepared.length === 2) ready.resolve()
+            // Both real tools must reach their existing hook before either executes.
+            await ready.promise
+          }
+        ]
+      }
+    })
 
     const results = (
       await registry.executeBatch(
@@ -170,6 +184,9 @@ describe('ToolRegistry', () => {
     ).map(({ result }) => result)
 
     expect(results.map((result) => result.isError)).toEqual([false, false])
+    expect([...prepared].sort()).toEqual(['call-list', 'call-read'])
+    expect(results[0]?.output).toContain('a.txt')
+    expect(results[1]?.output).toBe('content')
   })
 
   it('user sees live output attributed when a tool streams, then the result is intact', async () => {
