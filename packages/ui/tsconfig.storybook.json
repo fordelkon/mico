@@ -1,6 +1,12 @@
 {
   "extends": "./tsconfig.json",
-  "include": [".storybook/**/*.ts", ".storybook/**/*.tsx", "stories"],
+  "include": [
+    ".storybook/**/*.ts",
+    ".storybook/**/*.tsx",
+    "stories",
+    "playwright.config.ts",
+    "tests/browser"
+  ],
   "exclude": [],
   "compilerOptions": {
     "types": ["node"]

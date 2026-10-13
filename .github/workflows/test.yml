@@ -54,6 +54,12 @@ jobs:
       - name: Test with coverage
         if: steps.scope.outputs.code != 'false'
         run: ${{ matrix.command }}
+      - name: Install Chromium
+        if: steps.scope.outputs.code != 'false' && matrix.project == 'ui'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test UI browser contracts
+        if: steps.scope.outputs.code != 'false' && matrix.project == 'ui'
+        run: pnpm --filter @mico/ui test:browser
       - name: Upload coverage
         if: ${{ !cancelled() && steps.scope.outputs.code != 'false' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

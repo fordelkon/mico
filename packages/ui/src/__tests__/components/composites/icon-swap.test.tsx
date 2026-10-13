@@ -15,32 +15,20 @@ function iconSwap(state: 'from' | 'to') {
   )
 }
 
-// jsdom does not apply Tailwind's compiled stylesheet, so the visibility rules IconSwap
-// relies on are injected here; only the utilities used by the component are replicated.
-const ICON_SWAP_VISIBILITY_CSS = String.raw`
-  .opacity-0 { opacity: 0 }
-  .group\/icon-swap[data-state='to'] .group-data-\[state\=to\]\/icon-swap\:opacity-0 { opacity: 0 }
-  .group\/icon-swap[data-state='to'] .group-data-\[state\=to\]\/icon-swap\:opacity-100 { opacity: 1 }
-`
-
 describe('IconSwap', () => {
-  it('user switches the state when swapping icons, then only the matching icon is presented', () => {
-    const style = document.createElement('style')
-    style.textContent = ICON_SWAP_VISIBILITY_CSS
-    document.head.append(style)
+  it('user switches the state when swapping icons, then both decorative icons stay mounted', () => {
+    const { rerender } = render(iconSwap('from'))
+    const fromIcon = screen.getByTestId('from-icon')
+    const toIcon = screen.getByTestId('to-icon')
 
-    try {
-      const { rerender } = render(iconSwap('from'))
+    expect(fromIcon).toBeInTheDocument()
+    expect(toIcon).toBeInTheDocument()
+    expect(fromIcon.closest('[data-slot="icon-swap"]')).toHaveAttribute('aria-hidden', 'true')
 
-      expect(screen.getByTestId('from-icon')).toBeVisible()
-      expect(screen.getByTestId('to-icon')).not.toBeVisible()
+    rerender(iconSwap('to'))
 
-      rerender(iconSwap('to'))
-
-      expect(screen.getByTestId('from-icon')).not.toBeVisible()
-      expect(screen.getByTestId('to-icon')).toBeVisible()
-    } finally {
-      style.remove()
-    }
+    expect(screen.getByTestId('from-icon')).toBe(fromIcon)
+    expect(screen.getByTestId('to-icon')).toBe(toIcon)
+    expect(fromIcon.closest('[data-slot="icon-swap"]')).toHaveAttribute('aria-hidden', 'true')
   })
 })

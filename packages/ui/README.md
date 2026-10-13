@@ -123,14 +123,16 @@ src/
 ├── styles/             # Theme and CSS variable definitions
 └── index.ts            # Public package entry point
 stories/                # Storybook stories and usage examples
-test/                   # Shared test setup
+test/                   # Shared unit test setup
+tests/browser/          # CSS and browser behavior contracts against Storybook
 ```
 
-Place package tests beneath `src/__tests__/` and mirror the source ownership
+Place unit tests beneath `src/__tests__/` and mirror the source ownership
 path there. For example, a primitive belongs in
 `src/__tests__/components/primitives/`, while a composite belongs in
 `src/__tests__/components/composites/`. Do not add flat test files directly
-under the package test root.
+under the unit test root. CSS-dependent contracts belong in `tests/browser/`
+(see [Browser contracts](#browser-contracts)).
 
 ## Development
 
@@ -153,3 +155,29 @@ pnpm --filter @mico/ui build:storybook
 When adding a component, keep the source in `src/components`, follow the
 existing shadcn/ui composition patterns, add a Storybook story for its
 observable states, and add tests for meaningful interaction behavior.
+
+### Browser contracts
+
+```bash
+# Install the browser once (CI also installs its Linux system dependencies)
+pnpm exec playwright install chromium
+
+# Run the UI browser contracts
+pnpm --filter @mico/ui test:browser
+```
+
+[playwright.config.ts](playwright.config.ts) owns the Chromium runner and starts
+Storybook through Playwright's `webServer`. It can reuse a local Storybook server;
+CI starts a fresh one. The existing UI matrix job in
+[the Test workflow](../../.github/workflows/test.yml) installs Chromium and runs
+these contracts alongside unit coverage.
+
+Tests load the real stories and Tailwind stylesheet via the Storybook preview,
+with no copied CSS or injected visibility rules. IconSwap's interactive story
+owns the matching-icon opacity and final scale contract across From → To → From;
+retrying computed-style assertions wait for the state to settle. Tailwind v4
+expresses scaling through the individual CSS `scale` property. The jsdom test
+separately owns both icons remaining mounted and their decorative `aria-hidden`
+semantics. `toBeVisible()` alone does not detect opacity zero. Browser contracts
+do not establish animation timing, easing, or intermediate frames, and do not
+contribute to Vitest's unit coverage report.
