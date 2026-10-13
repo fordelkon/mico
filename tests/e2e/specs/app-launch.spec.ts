@@ -43,15 +43,3 @@ test('user types a multiline draft when pressing Shift+Enter, then the unsent dr
   await expect(composer).toBeFocused()
   await expect(mainWindow.locator('[data-slot="message"]')).toHaveCount(0)
 })
-
-test('user keeps control focus when typing on a footer button, then the composer does not steal it', async ({
-  mainWindow
-}) => {
-  await waitForAppReady(mainWindow)
-  const attachments = mainWindow.getByRole('button', { name: 'Add attachment' })
-  await attachments.focus()
-  await mainWindow.keyboard.press('a')
-
-  await expect(attachments).toBeFocused()
-  await expect(mainWindow.getByRole('textbox', { name: 'Message' })).not.toBeFocused()
-})

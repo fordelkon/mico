@@ -8,11 +8,7 @@ import userEvent from '@testing-library/user-event'
 import type { UserEvent } from '@testing-library/user-event'
 import * as React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ProviderLibraryProvider,
-  useProviderLibraryActions,
-  useProviderLibraryState
-} from './providers/provider-library'
+import { ProviderLibraryProvider } from './providers/provider-library'
 import { SettingsMain } from './settings-main'
 
 type CustomProvider = PersistedProviderLibrary['customProviders'][number]
@@ -52,17 +48,6 @@ async function addExampleAiProvider(user: UserEvent): Promise<void> {
   await user.type(within(dialog).getByLabelText('Provider name'), 'Example AI')
   await user.type(within(dialog).getByLabelText('Base URL'), 'https://api.example.com/v1')
   await user.click(within(dialog).getByRole('button', { name: 'Add Provider' }))
-}
-
-function ActionOnlyConsumer({ onRender }: { onRender: () => void }): React.JSX.Element {
-  onRender()
-  const { selectProvider } = useProviderLibraryActions()
-  return <button onClick={() => void selectProvider('ollama')}>Select provider</button>
-}
-
-function SelectedProviderConsumer(): React.JSX.Element {
-  const { library } = useProviderLibraryState()
-  return <output>{library.selectedProviderId ?? 'none'}</output>
 }
 
 async function waitForOllama(): Promise<void> {
@@ -250,25 +235,6 @@ describe('SettingsMain', () => {
 
     expect(screen.queryByText('All changes saved')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
-  })
-
-  it('user selects a provider when an action-only consumer is mounted, then that consumer does not render again', async () => {
-    const user = userEvent.setup()
-    const onRender = vi.fn<() => void>()
-    render(
-      <ProviderLibraryProvider>
-        <ActionOnlyConsumer onRender={onRender} />
-        <SelectedProviderConsumer />
-      </ProviderLibraryProvider>
-    )
-
-    await waitFor(() => expect(providerApi.getLibrary).toHaveBeenCalled())
-    expect(onRender).toHaveBeenCalledTimes(1)
-
-    await user.click(screen.getByRole('button', { name: 'Select provider' }))
-
-    expect(screen.getByText('ollama')).toBeVisible()
-    expect(onRender).toHaveBeenCalledTimes(1)
   })
 
   it('user lands on the first provider when nothing is saved, then it is selected', async () => {

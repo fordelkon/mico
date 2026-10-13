@@ -1274,7 +1274,8 @@ describe('ChatComposer', () => {
     expect(screen.getByRole('textbox')).not.toHaveAttribute('placeholder')
   })
 
-  it('user keeps control focus when typing a letter on a button, then the composer does not steal it', () => {
+  it('user keeps control focus when typing a letter on a button, then the composer does not steal it', async () => {
+    const user = userEvent.setup()
     renderWithLibrary(
       <>
         <button type="button">Conversation action</button>
@@ -1284,10 +1285,11 @@ describe('ChatComposer', () => {
 
     const button = screen.getByRole('button', { name: 'Conversation action' })
     button.focus()
-    fireEvent.keyDown(window, { key: 'h' })
+    await user.keyboard('h')
 
     expect(button).toHaveFocus()
     expect(screen.getByRole('textbox')).not.toHaveFocus()
+    expect(screen.getByRole('textbox')).toHaveValue('')
   })
 
   it('user types when a tool log has focus, then the composer receives the text', async () => {

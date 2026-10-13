@@ -1,13 +1,25 @@
 import type { ProviderLibrary } from '@shared/data/schemas/provider'
 import type { ProvidersAPI } from '@shared/ipc/schemas/providers'
 import type { WindowControlsAPI } from '@shared/ipc/schemas/window-controls'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ProviderLibraryProvider,
   useProviderLibraryActions,
   useProviderLibraryState
 } from './provider-library'
+
+function ActionOnlyConsumer({ onRender }: { onRender: () => void }): React.JSX.Element {
+  onRender()
+  const { selectProvider } = useProviderLibraryActions()
+  return <button onClick={() => void selectProvider('ollama')}>Select provider</button>
+}
+
+function SelectedProviderConsumer(): React.JSX.Element {
+  const { library } = useProviderLibraryState()
+  return <output>{library.selectedProviderId ?? 'none'}</output>
+}
 
 const provider = {
   apiFormat: 'openai-compatible' as const,
@@ -36,6 +48,41 @@ const addedModel = {
 afterEach(() => vi.useRealTimers())
 
 describe('ProviderLibraryProvider', () => {
+  it('user selects a provider when an action-only consumer is mounted, then that consumer does not render again', async () => {
+    const user = userEvent.setup()
+    const onRender = vi.fn<() => void>()
+    const getLibrary = vi.fn<ProvidersAPI['getLibrary']>(async () => ({
+      configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],
+      customProviders: [],
+      enabledProviderIds: ['ollama'],
+      models: [],
+      selectedModelId: null,
+      selectedProviderId: null
+    }))
+    const saveLibrary = vi.fn<ProvidersAPI['saveLibrary']>(async (snapshot) => snapshot)
+    const onProviderDraftFlush = vi.fn<WindowControlsAPI['onProviderDraftFlush']>(
+      () => () => undefined
+    )
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { providers: { getLibrary, saveLibrary }, windowControls: { onProviderDraftFlush } }
+    })
+    render(
+      <ProviderLibraryProvider>
+        <ActionOnlyConsumer onRender={onRender} />
+        <SelectedProviderConsumer />
+      </ProviderLibraryProvider>
+    )
+
+    await waitFor(() => expect(getLibrary).toHaveBeenCalled())
+    expect(onRender).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Select provider' }))
+
+    expect(screen.getByText('ollama')).toBeVisible()
+    expect(onRender).toHaveBeenCalledTimes(1)
+  })
+
   it('user toggles during model addition when both start together, then both changes persist', async () => {
     const initial: ProviderLibrary = {
       configurations: [{ provider: 'ollama', baseUrl: 'http://localhost:11434' }],

@@ -290,6 +290,8 @@ describe('AppSidebar', () => {
       </SidebarProvider>
     )
 
+    // The update itself must land: only the streaming row shows a status.
+    expect(screen.getByRole('status', { name: 'Generating response' })).toBeVisible()
     expect(stableTitleReads).toBe(readsAfterInitialRender)
   })
 })

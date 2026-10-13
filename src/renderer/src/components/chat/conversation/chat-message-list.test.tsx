@@ -44,7 +44,7 @@ function renderMessageList(
 }
 
 describe('ChatMessageList', () => {
-  it('user receives another streamed chunk when earlier messages are unchanged, then their parts are not read again', () => {
+  it('user receives another streamed chunk when earlier messages are unchanged, then their parts are not read again and the new chunk renders', () => {
     let stablePartsReads = 0
     const stableParts: MicoUIMessage['parts'] = [
       { type: 'text', text: 'Earlier message', state: 'done' }
@@ -86,9 +86,12 @@ describe('ChatMessageList', () => {
     )
 
     expect(stablePartsReads).toBe(readsBeforeNextChunk)
+    expect(screen.getAllByTestId('answer-content').at(-1)).toHaveTextContent(
+      'First chunk, then more'
+    )
   })
 
-  it('user waits through a retry countdown when its timer advances, then the transcript is not read again', async () => {
+  it('user waits through a retry countdown when its timer advances, then the countdown ticks and the transcript is not read again', async () => {
     vi.useFakeTimers()
     class ObservableMessages extends Array<MicoUIMessage> {
       latestMessageReads = 0
@@ -104,10 +107,16 @@ describe('ChatMessageList', () => {
       messages,
       retry: { attempt: 2, maxAttempts: 5, retryDelayMs: 2_000, startedAt: Date.now() }
     })
+    const visibleCountdown = (): string => {
+      const countdown = screen.getByText(/^Retrying in \d+s/)
+      return countdown.textContent ?? ''
+    }
+    expect(visibleCountdown()).toBe('Retrying in 2s · attempt 2 of 5.')
     const readsBeforeCountdownTick = messages.latestMessageReads
 
-    await act(() => vi.advanceTimersByTimeAsync(250))
+    await act(() => vi.advanceTimersByTimeAsync(1_500))
 
+    expect(visibleCountdown()).toBe('Retrying in 1s · attempt 2 of 5.')
     expect(messages.latestMessageReads).toBe(readsBeforeCountdownTick)
   })
 

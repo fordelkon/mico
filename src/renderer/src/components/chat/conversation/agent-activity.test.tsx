@@ -196,35 +196,67 @@ describe('ToolTrace', () => {
     expect(diff).toHaveTextContent('after')
   })
 
-  it('user opens a compact command when output streams, then updates preserve the expanded detail', () => {
-    const part = {
-      type: 'dynamic-tool' as const,
-      toolCallId: 'compact-stream',
-      toolName: 'Bash',
-      input: { command: 'pnpm test' }
+  it.each([
+    {
+      variant: 'live output streams',
+      part: {
+        type: 'dynamic-tool' as const,
+        toolCallId: 'compact-stream',
+        toolName: 'Bash',
+        input: { command: 'pnpm test' },
+        liveOutput: { preview: '', stdout: 'first line', stderr: '' }
+      },
+      initialTrigger: 'Bash pnpm test Live output',
+      liveLogText: /first line/,
+      finalOutput: 'first line\nlast line',
+      finalLogText: 'last line'
+    },
+    {
+      variant: 'no output has arrived yet',
+      part: {
+        type: 'dynamic-tool' as const,
+        toolCallId: 'terminal',
+        toolName: 'Bash',
+        input: { command: 'pnpm test' }
+      },
+      initialTrigger: 'Bash pnpm test Running…',
+      liveLogText: /Waiting for output…/,
+      finalOutput: 'Tests passed',
+      finalLogText: 'Tests passed'
     }
-    const { rerender } = render(
-      <ToolTrace
-        part={{
-          ...part,
-          state: 'input-available',
-          liveOutput: { preview: '', stdout: 'first line', stderr: '' }
-        }}
-      />
-    )
-    expect(screen.queryByText('first line')).not.toBeInTheDocument()
-    const trigger = screen.getByRole('button', { name: 'Bash pnpm test Live output' })
-    fireEvent.click(trigger)
-    expect(screen.getByRole('log')).toHaveTextContent('first line')
-    rerender(
-      <ToolTrace part={{ ...part, state: 'output-available', output: 'first line\nlast line' }} />
-    )
-    expect(screen.getByRole('button', { name: 'Bash pnpm test Output available' })).toHaveAttribute(
-      'aria-expanded',
-      'true'
-    )
-    expect(screen.getByRole('log')).toHaveTextContent('last line')
-  })
+  ])(
+    'user opens a running tool when $variant, then completion preserves the expanded detail',
+    (fixture) => {
+      const { rerender } = render(
+        <ToolTrace part={{ ...fixture.part, state: 'input-available' }} />
+      )
+      const trigger = screen.getByRole('button', { name: fixture.initialTrigger })
+      expect(trigger).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByRole('log')).not.toBeInTheDocument()
+
+      fireEvent.click(trigger)
+      expect(screen.getByRole('log', { name: 'Terminal output' })).toHaveTextContent(
+        fixture.liveLogText
+      )
+
+      rerender(
+        <ToolTrace
+          part={{
+            type: fixture.part.type,
+            toolCallId: fixture.part.toolCallId,
+            toolName: fixture.part.toolName,
+            input: fixture.part.input,
+            state: 'output-available',
+            output: fixture.finalOutput
+          }}
+        />
+      )
+      expect(
+        screen.getByRole('button', { name: 'Bash pnpm test Output available' })
+      ).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByRole('log')).toHaveTextContent(fixture.finalLogText)
+    }
+  )
 
   it('user scans a workspace command when it includes a directory wrapper, then sees the meaningful action first', () => {
     const command =
@@ -885,25 +917,6 @@ describe('Read group collapsing', () => {
 })
 
 describe('Activity disclosure and outcomes', () => {
-  it('user opens a live tool when inspecting output, then it stays open after completion', () => {
-    const part = {
-      type: 'dynamic-tool' as const,
-      toolCallId: 'terminal',
-      toolName: 'Bash',
-      input: { command: 'pnpm test' }
-    }
-    const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
-    const trigger = screen.getByRole('button', { name: 'Bash pnpm test Running…' })
-    expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(trigger)
-    rerender(<ToolTrace part={{ ...part, state: 'output-available', output: 'Tests passed' }} />)
-    expect(screen.getByRole('button', { name: 'Bash pnpm test Output available' })).toHaveAttribute(
-      'aria-expanded',
-      'true'
-    )
-    expect(screen.getByRole('log', { name: 'Terminal output' })).toHaveTextContent('Tests passed')
-  })
-
   it('user sees a failed edit when rich input exists, then the error remains visible', () => {
     render(
       <AgentActivityTimeline
