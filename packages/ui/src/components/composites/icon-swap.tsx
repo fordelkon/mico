@@ -21,10 +21,10 @@ function IconSwap({ className, from, state, to, ...props }: IconSwapProps): Reac
       data-state={state}
       {...props}
     >
-      <span className="col-start-1 row-start-1 inline-flex items-center justify-center opacity-100 transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-data-[state=to]/icon-swap:scale-60 group-data-[state=to]/icon-swap:opacity-0 motion-reduce:transition-none">
+      <span className="col-start-1 row-start-1 inline-flex items-center justify-center opacity-100 transition-[opacity,scale] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-data-[state=to]/icon-swap:scale-60 group-data-[state=to]/icon-swap:opacity-0 motion-reduce:transition-none">
         {from}
       </span>
-      <span className="col-start-1 row-start-1 inline-flex scale-60 items-center justify-center opacity-0 transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-data-[state=to]/icon-swap:scale-100 group-data-[state=to]/icon-swap:opacity-100 motion-reduce:transition-none">
+      <span className="col-start-1 row-start-1 inline-flex scale-60 items-center justify-center opacity-0 transition-[opacity,scale] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-data-[state=to]/icon-swap:scale-100 group-data-[state=to]/icon-swap:opacity-100 motion-reduce:transition-none">
         {to}
       </span>
     </span>

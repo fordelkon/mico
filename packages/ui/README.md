@@ -175,9 +175,11 @@ these contracts alongside unit coverage.
 Tests load the real stories and Tailwind stylesheet via the Storybook preview,
 with no copied CSS or injected visibility rules. IconSwap's interactive story
 owns the matching-icon opacity and final scale contract across From → To → From;
-retrying computed-style assertions wait for the state to settle. Tailwind v4
-expresses scaling through the individual CSS `scale` property. The jsdom test
-separately owns both icons remaining mounted and their decorative `aria-hidden`
-semantics. `toBeVisible()` alone does not detect opacity zero. Browser contracts
-do not establish animation timing, easing, or intermediate frames, and do not
+retrying computed-style assertions wait for the state to settle. Its motion test
+seeks browser-created transitions to verify intermediate opacity and scale,
+and its reduced-motion test verifies the final state without transitions.
+Tailwind v4 expresses scaling through the individual CSS `scale` property.
+The jsdom test separately owns both icons remaining mounted and their decorative
+`aria-hidden` semantics. `toBeVisible()` alone does not detect opacity zero.
+Browser contracts do not establish animation timing or exact easing and do not
 contribute to Vitest's unit coverage report.
