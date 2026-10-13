@@ -395,18 +395,4 @@ describe('public provider failures', () => {
     await consume(provider)
     expect(cancel).toHaveBeenCalledTimes(1)
   })
-
-  it('user receives Responses incomplete when reading, then keeps the native length finish', async () => {
-    const parts = await consume(
-      providerWithResponse(
-        'openai-responses',
-        new Response(
-          sse('response.incomplete', {
-            response: { incomplete_details: { reason: 'max_output_tokens' } }
-          })
-        )
-      )
-    )
-    expect(parts.at(-1)).toEqual({ type: 'provider-finish', reason: 'length' })
-  })
 })

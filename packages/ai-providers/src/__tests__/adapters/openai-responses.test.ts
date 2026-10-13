@@ -171,27 +171,49 @@ describe('OpenAI Responses provider', () => {
     })
   })
 
-  it('user sees a resumable finish when tokens run out, then continuation survives', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        sseResponse(
-          'event: response.incomplete\ndata: {"response":{"id":"resp_123","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":12,"output_tokens":34,"output_tokens_details":{"reasoning_tokens":21},"total_tokens":46}}}\n\n'
+  it.each([
+    {
+      variant: 'full response details',
+      response: {
+        id: 'resp_123',
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+        usage: {
+          input_tokens: 12,
+          output_tokens: 34,
+          output_tokens_details: { reasoning_tokens: 21 },
+          total_tokens: 46
+        }
+      },
+      finish: {
+        type: 'provider-finish',
+        reason: 'length',
+        continuation: { provider: 'openai-responses', responseId: 'resp_123' },
+        usage: { inputTokens: 12, outputTokens: 34, reasoningTokens: 21, totalTokens: 46 }
+      }
+    },
+    {
+      variant: 'no response id, status, or usage',
+      response: { incomplete_details: { reason: 'max_output_tokens' } },
+      finish: { type: 'provider-finish', reason: 'length' }
+    }
+  ])(
+    'user sees a length finish when tokens run out with $variant, then the native completion survives',
+    async ({ response, finish }) => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          sseResponse(`event: response.incomplete\ndata: ${JSON.stringify({ response })}\n\n`)
         )
+      const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
+
+      const parts = await collectProtocol(
+        await provider.stream(streamInput('Continue.', { thinkingEffort: 'high' }))
       )
-    const provider = createChatProvider(providerConfig(), streamDependencies(fetchMock))
 
-    const parts = await collectProtocol(
-      await provider.stream(streamInput('Continue.', { thinkingEffort: 'high' }))
-    )
-
-    expect(parts).toContainEqual({
-      type: 'provider-finish',
-      reason: 'length',
-      continuation: { provider: 'openai-responses', responseId: 'resp_123' },
-      usage: { inputTokens: 12, outputTokens: 34, reasoningTokens: 21, totalTokens: 46 }
-    })
-  })
+      expect(parts).toContainEqual(finish)
+    }
+  )
 
   it('user gets reasoning and text replayed when sent, then both become input_text', async () => {
     const fetchMock = vi
