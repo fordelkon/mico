@@ -10,7 +10,7 @@
 | `test.yml` | Parallel app, UI, and provider coverage tests | Pull requests, main pushes, manual, reusable release validation |
 | `e2e.yml` | Source regression and internal packaged smoke on Windows and macOS | Pull requests, main pushes, manual |
 | `provider-checks.yml` | Tests against configured paid provider endpoints | Manual only |
-| `release.yml` | Validate a version tag, build signed installers, verify applications, and publish assets | Version-tag pushes; manual for an existing tag |
+| `release.yml` | Validate a version tag, build installers, verify applications, and publish assets | Version-tag pushes; manual for an existing tag |
 
 The workflows live in [`.github/workflows`](../.github/workflows).
 Dependency installation uses the shared `setup-workspace` action. Executable
@@ -49,25 +49,20 @@ pair: `MICO_E2E_OPENAI_BASE_URL` with `MICO_E2E_OPENAI_MODEL`, or
 `MICO_E2E_ANTHROPIC_BASE_URL` with `MICO_E2E_ANTHROPIC_MODEL`.
 These checks can incur provider charges.
 
-## Signed release prerequisites
+## Release prerequisites
 
-Create the repository's `release` environment and configure its signing secrets:
+Create the repository's `release` environment. If it restricts deployment tags,
+allow the version tags used for publishing; required reviewers must approve the
+build and publish jobs. No signing certificates, signing secrets, or separate
+personal access token are required. The publishing job uses `GITHUB_TOKEN` with
+its declared repository write permission.
 
-| Secret | Purpose |
-| --- | --- |
-| `WIN_CSC_LINK` | Windows signing certificate supported by electron-builder |
-| `WIN_CSC_KEY_PASSWORD` | Windows certificate password, if encrypted |
-| `MAC_CSC_LINK` | macOS signing certificate supported by electron-builder |
-| `MAC_CSC_KEY_PASSWORD` | macOS certificate password, if encrypted |
-| `APPLE_ID` | Apple account used for notarization |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for notarization |
-| `APPLE_TEAM_ID` | Apple developer team for notarization |
-
-Signing secrets are exposed only to signing steps. Missing signing credentials
-fail the release rather than producing unsigned release assets.
 [`electron-builder.release.cjs`](../electron-builder.release.cjs) inherits the
-application's base build configuration, requires signing, enables macOS hardened
-runtime and notarization, and derives GitHub update metadata from the repository.
+application's base build configuration and derives GitHub update metadata from
+the repository. Windows installers are unsigned. macOS builds use ad hoc signing
+without notarization and disable hardened runtime to avoid Electron framework
+library validation failures with ad hoc signatures. Downloaded applications may
+show Windows SmartScreen or macOS Gatekeeper warnings.
 
 ## Publishing a version
 
@@ -78,8 +73,8 @@ runtime and notarization, and derives GitHub update metadata from the repository
 
 Release resolves the existing tag to an immutable commit and requires the tag to
 match that commit's package version. Formatting, lint, type checks, and coverage
-must pass before signed Windows NSIS and macOS DMG/ZIP builds run. Each platform
-also runs source regression and smoke tests against the signed application.
+must pass before Windows x64 NSIS and macOS arm64 DMG/ZIP builds run. Each platform
+also runs source regression and smoke tests against the packaged application.
 
 Only the final publishing job has repository write permission. It downloads the
 current run's verified assets, checks that the tag still resolves to the validated
@@ -90,5 +85,5 @@ Runs for the same tag are serialized without cancellation.
 
 Application smoke tests verify startup and exercised application behavior. They
 do not establish installer behavior or downloaded-file Gatekeeper/SmartScreen
-acceptance. Signed macOS builds, notarization, and GitHub publication require
-verification in the configured release environment.
+acceptance. GitHub publication requires verification in the configured release
+environment.

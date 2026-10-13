@@ -57,9 +57,9 @@ After smoke succeeds, downloadable artifacts contain `Mico-windows-x64.zip`
 `Mico-macos-arm64.zip` (`Mico.app`; extract using Archive Utility or `ditto`).
 The macOS archive preserves executable permissions and framework symlinks.
 These are internal test builds: Windows is unsigned, and macOS is ad hoc signed
-without notarization. Only these internal macOS builds disable hardened runtime
+without notarization. These macOS builds disable hardened runtime
 because ad hoc signing otherwise fails Electron framework library validation;
-signed releases use hardened runtime and notarization as described in
+release signing follows the policy in
 [CI and release procedures](../../docs/ci.md). They do not establish installer behavior or Gatekeeper/
 SmartScreen acceptance for downloaded releases. Failed builds upload available
 Playwright evidence and builder diagnostics instead of verified applications.

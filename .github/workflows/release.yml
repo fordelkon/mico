@@ -93,30 +93,15 @@ jobs:
       - run: pnpm build
       - name: Source regression
         run: pnpm test:e2e --project=electron
-      - name: Sign Windows installer
+      - name: Build unsigned Windows installer
         if: matrix.platform == 'win'
-        shell: bash
-        run: |
-          test -n "$WIN_CSC_LINK" || { echo "::error::Configure WIN_CSC_LINK in the release environment."; exit 1; }
-          pnpm exec electron-builder --win --x64 --config electron-builder.release.cjs --publish never
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-      - name: Sign and notarize macOS application
+        run: pnpm exec electron-builder --win --x64 --config electron-builder.release.cjs --publish never
+      - name: Build macOS application with ad hoc signing
         if: matrix.platform == 'mac'
-        shell: bash
-        run: |
-          for key in CSC_LINK APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            test -n "${!key}" || { echo "::error::Configure $key in the release environment."; exit 1; }
-          done
-          pnpm exec electron-builder --mac --arm64 --config electron-builder.release.cjs --publish never
+        run: pnpm exec electron-builder --mac --arm64 --config electron-builder.release.cjs --publish never
         env:
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - name: Smoke test signed application
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Smoke test packaged application
         shell: bash
         run: pnpm test:e2e --project=packaged-smoke 2>&1 | tee release-smoke.log
         env:
