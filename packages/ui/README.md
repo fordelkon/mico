@@ -89,7 +89,12 @@ class to an ancestor of the components, normally the document root.
 - `DropdownMenu` — menu, checkbox, radio, separator, shortcut, and submenu primitives
 - `Separator` — horizontal or vertical visual separator
 - `Sheet` — accessible edge-aligned overlay panel primitives
-- `Sidebar` — composable, responsive, resizable, and collapsible sidebar primitives
+- `Sidebar` — composable, responsive, resizable, and collapsible sidebar primitives;
+  `SidebarProvider.resize.collapseThreshold` optionally collapses during a pointer
+  drag below the unclamped width. The threshold must be finite, nonnegative, and
+  below `minWidth`; invalid or omitted values keep clamp-only resizing. It does
+  not collapse `collapsible="none"` sidebars and retains the expanded width for
+  reopening.
 
 - `Popover` — anchored, portal-rendered content with controlled and uncontrolled open state
 

@@ -34,16 +34,22 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 function SidebarExample({
+  collapseThreshold,
   defaultOpen = true,
   resizable = false
 }: {
+  collapseThreshold?: number
   defaultOpen?: boolean
   resizable?: boolean
 }) {
   return (
     <SidebarProvider
       defaultOpen={defaultOpen}
-      resize={resizable ? { defaultWidth: 256, maxWidth: 360, minWidth: 200 } : undefined}
+      resize={
+        resizable
+          ? { defaultWidth: 256, maxWidth: 360, minWidth: 200, collapseThreshold }
+          : undefined
+      }
     >
       <Sidebar collapsible="icon">
         <SidebarContent>
@@ -85,4 +91,8 @@ export const Collapsed: Story = {
 
 export const Resizable: Story = {
   render: () => <SidebarExample resizable />
+}
+
+export const DragCollapsible: Story = {
+  render: () => <SidebarExample collapseThreshold={120} resizable />
 }

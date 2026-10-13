@@ -36,9 +36,12 @@ type SidebarResizeConfig = {
   defaultWidth: number
   maxWidth: number
   minWidth: number
+  /** Collapse during a drag below this unclamped width; must be nonnegative and below minWidth. */
+  collapseThreshold?: number
 }
 
 type SidebarResizeState = {
+  collapseThreshold: number | undefined
   edge: 'min' | 'max' | null
   isResizing: boolean
   maxWidth: number
@@ -60,6 +63,7 @@ type SidebarContextProps = {
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
+const SidebarCollapsibleContext = React.createContext(true)
 
 function useSidebar() {
   const context = React.useContext(SidebarContext)
@@ -93,6 +97,13 @@ function SidebarProvider({
   const [_open, _setOpen] = React.useState(defaultOpen)
   const minWidth = Math.min(resizeConfig?.minWidth ?? 0, resizeConfig?.maxWidth ?? 0)
   const maxWidth = Math.max(resizeConfig?.minWidth ?? 0, resizeConfig?.maxWidth ?? 0)
+  const collapseThreshold =
+    resizeConfig?.collapseThreshold !== undefined &&
+    Number.isFinite(resizeConfig.collapseThreshold) &&
+    resizeConfig.collapseThreshold >= 0 &&
+    resizeConfig.collapseThreshold < minWidth
+      ? resizeConfig.collapseThreshold
+      : undefined
   const [width, setWidth] = React.useState(() =>
     Math.min(Math.max(resizeConfig?.defaultWidth ?? 0, minWidth), maxWidth)
   )
@@ -157,6 +168,7 @@ function SidebarProvider({
       toggleSidebar,
       resize: resizeConfig
         ? {
+            collapseThreshold,
             edge: resizeEdge,
             isResizing,
             maxWidth,
@@ -176,6 +188,7 @@ function SidebarProvider({
       setOpenMobile,
       toggleSidebar,
       resizeConfig,
+      collapseThreshold,
       resizeEdge,
       isResizing,
       maxWidth,
@@ -214,7 +227,8 @@ function SidebarProvider({
 }
 
 function SidebarResizeHandle({ className, ...props }: React.ComponentProps<'div'>) {
-  const { isMobile, resize, state } = useSidebar()
+  const { isMobile, resize, state, setOpen } = useSidebar()
+  const collapsible = React.useContext(SidebarCollapsibleContext)
   const dragRef = React.useRef<{ pointerId: number; startWidth: number; startX: number } | null>(
     null
   )
@@ -223,7 +237,16 @@ function SidebarResizeHandle({ className, ...props }: React.ComponentProps<'div'
     return null
   }
 
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>): void => {
+    dragRef.current = null
+    resize.setIsResizing(false)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || dragRef.current) return
     event.preventDefault()
     dragRef.current = {
       pointerId: event.pointerId,
@@ -241,6 +264,17 @@ function SidebarResizeHandle({ className, ...props }: React.ComponentProps<'div'
     }
 
     const nextWidth = drag.startWidth + event.clientX - drag.startX
+    // Keep the visible minimum while allowing a deliberate pull past it to collapse.
+    if (
+      collapsible &&
+      resize.collapseThreshold !== undefined &&
+      nextWidth < resize.collapseThreshold
+    ) {
+      endDrag(event)
+      setOpen(false)
+      return
+    }
+
     resize.setWidth(Math.min(Math.max(nextWidth, resize.minWidth), resize.maxWidth))
   }
 
@@ -250,11 +284,7 @@ function SidebarResizeHandle({ className, ...props }: React.ComponentProps<'div'
       return
     }
 
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    dragRef.current = null
-    resize.setIsResizing(false)
+    endDrag(event)
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -316,7 +346,9 @@ function Sidebar({
         )}
         {...props}
       >
-        {children}
+        <SidebarCollapsibleContext.Provider value={false}>
+          {children}
+        </SidebarCollapsibleContext.Provider>
       </div>
     )
   }
