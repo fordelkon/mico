@@ -141,9 +141,7 @@ The fixture therefore explicitly records [context traces](https://playwright.dev
 and attaches [screenshots](https://playwright.dev/docs/api/class-testinfo#test-info-attach)
 on failure. Each restart creates a new trace segment; passing-test traces are
 removed. Failed scenarios also attach captured Electron child-process stderr.
-The skill-browsing scenario captures native window state and probes a fresh
-preload document read if the preview remains unavailable, distinguishing a stalled
-read from a stalled UI update. These context traces contain browser actions and
+These context traces contain browser actions and
 snapshots, not the runner's full assertion history. Video recording is not configured.
 
 Real-provider scenarios never record traces because action arguments can contain
@@ -189,3 +187,10 @@ from environment variables in the workflow.
 Release-installer validation, real native dialogs, attachments, clipboard actions,
 provider discovery, and broader theme/scrolling regressions are not yet covered by
 this suite. Local protocol tests do not replace real-provider compatibility runs.
+
+Skill catalog behavior follows the owning boundaries in [docs/testing.md](../../docs/testing.md)
+instead of an end-to-end duplicate: discovery, shadowing, and containment live in
+`src/main/ai/workspace/skills/snapshot.test.ts`, settings browsing and the document
+dialog in `src/renderer/src/components/settings/skills/skills-settings.test.tsx`,
+and skill invocation through the composer and tools in the `$` scenarios above.
+The settings journey keeps no dedicated scenario here.

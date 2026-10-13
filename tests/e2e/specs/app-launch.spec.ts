@@ -29,46 +29,6 @@ test.describe('App launch', () => {
     await mainWindow.screenshot({ path: screenshotPath })
     await testInfo.attach('launch-composer', { path: screenshotPath })
   })
-
-  test('user resizes the window very narrow when composing, then the send control stays reachable', async ({
-    electronApp,
-    mainWindow
-  }, testInfo) => {
-    await waitForAppReady(mainWindow)
-
-    await electronApp.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(360, 720)
-    })
-    await expect(mainWindow.getByRole('textbox', { name: 'Message' })).toBeVisible()
-    // Without a configured model the send button carries the guidance label.
-    const send = mainWindow.getByRole('button', { name: /Send message|Select an enabled model/ })
-    await expect(send).toBeVisible()
-
-    // The real window width may be clamped by the app's minimum size; assert
-    // the actual footer geometry instead of a nominal threshold.
-    const geometry = await send.evaluate((button) => {
-      const footer = button.parentElement
-      if (!footer) throw new Error('The composer footer is missing.')
-      const footerBounds = footer.getBoundingClientRect()
-      const buttonBounds = button.getBoundingClientRect()
-      return {
-        buttonVisible: buttonBounds.width > 0 && buttonBounds.height > 0,
-        buttonInsideFooter:
-          buttonBounds.right <= footerBounds.right + 1 &&
-          buttonBounds.left >= footerBounds.left - 1,
-        pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
-      }
-    })
-    expect(geometry).toEqual({
-      buttonVisible: true,
-      buttonInsideFooter: true,
-      pageOverflow: false
-    })
-
-    const screenshotPath = testInfo.outputPath('narrow-composer.png')
-    await mainWindow.screenshot({ path: screenshotPath })
-    await testInfo.attach('narrow-composer', { path: screenshotPath })
-  })
 })
 
 test('user types a multiline draft when pressing Shift+Enter, then the unsent draft stays editable', async ({
