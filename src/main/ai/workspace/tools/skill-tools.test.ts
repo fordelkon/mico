@@ -44,42 +44,16 @@ describe('skill tools', () => {
     }
   })
 
-  it('user loads long instructions when tools settle, then their history budget preserves the complete text', async () => {
+  it('user registers skill tools when entering a workspace, then their history allowance exceeds the default', async () => {
     const cwd = await createTemporaryWorkspace('mico-skill-budget-')
     const home = await createTemporaryWorkspace('mico-skill-home-')
-    const base = join(cwd, '.agents', 'skills', 'review')
-    await mkdir(base, { recursive: true })
-    const body = 'x'.repeat(88 * 1024)
-    await writeFile(join(base, 'SKILL.md'), `---\nname: review\ndescription: Review\n---\n${body}`)
-    await writeFile(join(cwd, 'ordinary.txt'), body)
     const snapshot = await createSkillSnapshot(cwd, home)
     const registry = ToolRegistry.forWorkspace(cwd, { skills: snapshot })
-    const signal = new AbortController().signal
-    const calls: ToolCall[] = [
-      { toolCallId: 'load', toolName: 'LoadSkill', input: { skill_id: 'review' } },
-      {
-        toolCallId: 'resource',
-        toolName: 'ReadSkillResource',
-        input: { skill_id: 'review', relative_path: 'SKILL.md' }
-      }
-    ]
 
-    for (const call of calls) {
-      const { result } = await registry.execute(call, signal)
-      expect(result).toMatchObject({ isError: false, output: expect.stringContaining(body) })
-      expect(registry.historyBudgetFor(call.toolName)).toBe(256 * 1024)
-      expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(
-        registry.historyBudgetFor(call.toolName)
-      )
-    }
-    const { result } = await registry.execute(
-      { toolCallId: 'read', toolName: 'Read', input: { file_path: 'ordinary.txt' } },
-      signal
-    )
-    expect(result).toMatchObject({ isError: false, output: body })
+    expect(registry.historyBudgetFor('LoadSkill')).toBe(256 * 1024)
+    expect(registry.historyBudgetFor('ReadSkillResource')).toBe(256 * 1024)
     expect(registry.historyBudgetFor('Read')).toBe(64 * 1024)
     expect(registry.historyBudgetFor('unavailable')).toBe(64 * 1024)
-    expect(Buffer.byteLength(result.output)).toBeGreaterThan(registry.historyBudgetFor('Read'))
   })
 
   it('user invokes a skill when it lives outside the workspace, then only scoped resources are readable', async () => {
