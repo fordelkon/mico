@@ -43,9 +43,11 @@ jobs:
           [[ "$TAG" == "v$version" ]] || { echo "::error::The tag must match package.json version."; exit 1; }
           prerelease=false
           [[ "$version" != *-* ]] || prerelease=true
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "sha=$sha"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
 
   lint:
     needs: version
