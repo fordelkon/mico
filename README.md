@@ -2,6 +2,10 @@
 
 Mico is a desktop AI workspace and coding assistant built with Electron, React, and TypeScript.
 
+| Dark Theme | Light Theme |
+| :---: | :---: |
+| ![Dark Theme](docs/production/dark.png) | ![Light Theme](docs/production/light.png) |
+
 The current focus is building a lightweight **toy agent** harness directly into the application, drawing inspiration and architectural patterns from modern open-source projects:
 
 - **Agent Core & Harness**:
