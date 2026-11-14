@@ -29,5 +29,6 @@
     ".oxlintrc.json": "jsonc"
   },
   "tailwindCSS.classFunctions": ["cva", "cn", "clsx"],
-  "js/ts.tsdk.path": "./node_modules/typescript/lib"
+  "js/ts.tsdk.path": "./node_modules/typescript/lib",
+  "python.terminal.useEnvFile": true
 }
