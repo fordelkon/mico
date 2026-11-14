@@ -192,8 +192,20 @@ test('user reads tool details when using dark theme at the minimum window size, 
   )
   await app.window.screenshot({ path: testInfo.outputPath('tool-details-dark-narrow.png') })
   expect(
-    await app.window.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
-  ).toBe(true)
+    await app.window.evaluate(() => {
+      const viewport = document.querySelector('[data-slot="message-scroller-viewport"]')
+      if (!viewport) throw new Error('The conversation viewport is missing.')
+      const bounds = viewport.getBoundingClientRect()
+      const panels = Array.from(document.querySelectorAll('.tool-trace__detail'))
+      return {
+        pageFits: document.documentElement.scrollWidth <= window.innerWidth,
+        panelsFit: panels.every((panel) => {
+          const rect = panel.getBoundingClientRect()
+          return rect.left >= bounds.left && rect.right <= bounds.right
+        })
+      }
+    })
+  ).toEqual({ pageFits: true, panelsFit: true })
   await command.click()
   await expect(command).toHaveAttribute('aria-expanded', 'false')
   await expect(app.window.getByRole('log', { name: 'Terminal output' })).toBeHidden()
@@ -513,7 +525,7 @@ test('user sees a failed file read when the tool cannot find it, then the error 
   const activity = app.window.getByRole('region', { name: 'Agent activity', exact: true })
   await expect(activity.getByRole('status')).toHaveText('1 tool failed')
   // A failed read has no panel: its invocation header and error line are the whole row.
-  await expect(app.window.getByText('(missing-e2e-file.txt)', { exact: true })).toBeVisible()
+  await expect(app.window.getByText('missing-e2e-file.txt', { exact: true })).toBeVisible()
   await expect(app.window.locator('.agent-activity__result--error')).toContainText(
     /missing-e2e-file|exist|ENOENT/i
   )

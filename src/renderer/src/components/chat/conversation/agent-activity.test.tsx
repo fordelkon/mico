@@ -87,6 +87,32 @@ describe('ThinkingTrace', () => {
 })
 
 describe('ToolTrace', () => {
+  it('user follows a command when it completes, then Bash keeps its identity and the expanded output stays open', () => {
+    const part = {
+      type: 'dynamic-tool' as const,
+      toolName: 'Bash',
+      toolCallId: 'stable-command',
+      input: { command: 'pnpm test' }
+    }
+    const { rerender } = render(<ToolTrace part={{ ...part, state: 'input-available' }} />)
+    const trigger = screen.getByRole('button', { name: 'Bash pnpm test Running…' })
+    expect(within(trigger).getByText('Bash', { exact: true })).toBeVisible()
+    expect(within(trigger).getByText('Running', { exact: true })).toBeVisible()
+    fireEvent.click(trigger)
+
+    rerender(
+      <ToolTrace part={{ ...part, state: 'output-available', output: 'All tests passed.' }} />
+    )
+
+    const completed = screen.getByRole('button', { name: 'Bash pnpm test Output available' })
+    expect(within(completed).getByText('Bash', { exact: true })).toBeVisible()
+    expect(within(completed).getByText('Ran', { exact: true })).toBeVisible()
+    expect(completed).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('log', { name: 'Terminal output' })).toHaveTextContent(
+      'All tests passed.'
+    )
+  })
+
   it('user sees an update stay compact when running, then can inspect its highlighted diff', async () => {
     const part = {
       type: 'dynamic-tool' as const,
@@ -168,8 +194,8 @@ describe('ToolTrace', () => {
         name: `Write ${fullPath} Wrote 1 line to …/quicksort-demo/src/lib.rs.`
       })
     ).toBeVisible()
-    expect(screen.getByTitle(fullPath)).toHaveTextContent('(…/quicksort-demo/src/lib.rs)')
-    expect(screen.queryByText(`(${fullPath})`)).not.toBeInTheDocument()
+    expect(screen.getByTitle(fullPath)).toHaveTextContent('…/quicksort-demo/src/lib.rs')
+    expect(screen.queryByText(fullPath)).not.toBeInTheDocument()
   })
 
   it('user sees edits summarized as line counts, then both diff versions show when expanded', () => {
@@ -279,7 +305,7 @@ describe('ToolTrace', () => {
         name: 'Bash cargo test 2>&1 | tail -25 Output available'
       })
     ).toBeVisible()
-    expect(screen.getByTitle(command)).toHaveTextContent('(cargo test 2>&1 | tail -25)')
+    expect(screen.getByTitle(command)).toHaveTextContent('cargo test 2>&1 | tail -25')
   })
 
   it('user sees a failed command when stderr is available, then the actionable final line is visible', () => {
@@ -530,7 +556,7 @@ describe('ToolTrace', () => {
 
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.getByText('Reading file…')).toBeVisible()
-    expect(screen.getByText('(src/index.ts)')).toBeVisible()
+    expect(screen.getByText('src/index.ts')).toBeVisible()
   })
 
   it('user sees a compact path when a file tool runs, then assistive text retains the full path', () => {
@@ -549,7 +575,7 @@ describe('ToolTrace', () => {
     )
 
     expect(screen.getByRole('group', { name: `Read ${fullPath} Reading file…` })).toBeVisible()
-    expect(screen.getByTitle(fullPath)).toHaveTextContent('(…/quicksort-demo/src/lib.rs)')
+    expect(screen.getByTitle(fullPath)).toHaveTextContent('…/quicksort-demo/src/lib.rs')
   })
 
   it('user sees a completed read counted in lines when collapsed, then expanding reveals highlighted contents', async () => {
@@ -623,6 +649,81 @@ describe('ToolTrace', () => {
 })
 
 describe('AgentActivityTimeline', () => {
+  it('user opens one read when another read arrives, then the focused file stays open inside the group', () => {
+    const first = {
+      type: 'dynamic-tool' as const,
+      toolName: 'Read',
+      toolCallId: 'first-read',
+      state: 'output-available' as const,
+      input: { file_path: 'first.ts' },
+      output: 'export const first = true'
+    }
+    const { rerender } = render(
+      <AgentActivityTimeline id="read-continuity" isStreaming parts={[first]} />
+    )
+    const trigger = screen.getByRole('button', { name: 'Read first.ts Read 1 line.' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    expect(screen.getByRole('log', { name: 'File content' })).toHaveTextContent(first.output)
+
+    rerender(
+      <AgentActivityTimeline
+        id="read-continuity"
+        isStreaming
+        parts={[first, { ...first, toolCallId: 'second-read', input: { file_path: 'second.ts' } }]}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: 'Read 2 files' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    expect(screen.getByRole('button', { name: 'Read first.ts Read 1 line.' })).toBe(trigger)
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('log', { name: 'File content' })).toHaveTextContent(first.output)
+  })
+
+  it('user opens streaming reasoning when a second thought arrives, then the same disclosure stays open through completion', () => {
+    const first = {
+      type: 'reasoning' as const,
+      text: 'Inspect the first file.',
+      state: 'streaming' as const
+    }
+    const { rerender } = render(
+      <AgentActivityTimeline id="thought-continuity" isStreaming parts={[first]} />
+    )
+    const trigger = screen.getByRole('button', { name: 'Thinking' })
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    const parts = [
+      { ...first, state: 'done' as const },
+      { ...first, text: 'Inspect the second file.' }
+    ]
+    rerender(<AgentActivityTimeline id="thought-continuity" isStreaming parts={parts} />)
+
+    expect(screen.getByRole('button', { name: 'Thinking' })).toBe(trigger)
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByLabelText('Reasoning')).toHaveTextContent(
+      'Inspect the first file. Inspect the second file.'
+    )
+
+    rerender(
+      <AgentActivityTimeline
+        id="thought-continuity"
+        isStreaming={false}
+        parts={parts.map((part) => ({ ...part, state: 'done' }))}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: 'Reasoning · 2 steps' })).toBe(trigger)
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByLabelText('Reasoning')).toHaveTextContent('Inspect the second file.')
+  })
+
   it('user revisits consecutive thoughts when a step has settled, then sees one reasoning disclosure', () => {
     render(
       <AgentActivityTimeline
@@ -821,8 +922,8 @@ describe('Read group collapsing', () => {
 
     expect(screen.getByText('Read 1 line.')).toBeVisible()
     expect(screen.getByText('Read 2 lines.')).toBeVisible()
-    expect(screen.getByText('(a.ts)')).toBeVisible()
-    expect(screen.getByText('(b.ts)')).toBeVisible()
+    expect(screen.getByText('a.ts')).toBeVisible()
+    expect(screen.getByText('b.ts')).toBeVisible()
     // Each read keeps its own row disclosure so the file content stays inspectable.
     fireEvent.click(screen.getByRole('button', { name: 'Read a.ts Read 1 line.' }))
     expect(screen.getByRole('log', { name: 'File content' })).toHaveTextContent('one')

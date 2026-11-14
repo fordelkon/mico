@@ -512,22 +512,20 @@ function ToolTrace({
   const header = (
     <>
       <ToolNode state={nodeState} toolName={part.toolName} />
-      <span className="agent-activity__action">
-        {part.toolName === 'Bash' ? getBashActionVerb(activityState) : tool.title}
-      </span>
+      <span className="agent-activity__action">{toolLabel(part.toolName)}</span>
       {tool.detail ? (
         <span className="agent-activity__summary font-mono" title={tool.fullDetail ?? tool.detail}>
-          ({tool.detail})
+          {tool.detail}
         </span>
       ) : null}
-      {part.toolName !== 'Bash' && stateWord ? (
+      {stateWord ? (
         <span className="agent-activity__state" data-state={activityState}>
           {stateWord}
         </span>
       ) : null}
-      {isRunning && elapsedSeconds > 0 ? (
-        <span aria-hidden="true" className="text-xs text-text-tertiary">
-          {elapsedSeconds}s
+      {part.toolName === 'Bash' ? (
+        <span aria-hidden="true" className="agent-activity__elapsed">
+          {isRunning && elapsedSeconds > 0 ? `${elapsedSeconds}s` : null}
         </span>
       ) : null}
       {hasPanel ? (
@@ -566,8 +564,7 @@ function ToolTrace({
         </div>
       )}
       {summary &&
-        (activityState === 'failed' ||
-          (!isExpanded && part.toolName !== 'Bash' && !isStateWordSummary)) && (
+        (activityState === 'failed' || (part.toolName !== 'Bash' && !isStateWordSummary)) && (
           <ToolSummaryLine summary={summary} />
         )}
       {part.permission && (part.permission.state !== 'pending' || !isActive) && (

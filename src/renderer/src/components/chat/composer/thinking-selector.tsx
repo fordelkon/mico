@@ -5,14 +5,16 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
 } from '@mico/ui'
+import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
+import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 import { ChevronDownIcon, CircleOffIcon, LightbulbIcon } from 'lucide-react'
 import * as React from 'react'
-
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
-
-import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 
 type ThinkingSelectorProps = {
   disabled: boolean
@@ -51,25 +53,39 @@ function ThinkingSelector({
 }: ThinkingSelectorProps): React.JSX.Element {
   const { clearHighlight, getItemProps, highlightProps } = useGlidingHighlight<HTMLElement>()
   const selected = value === 'default' ? 'auto' : value
+  const [menuOpen, setMenuOpen] = React.useState(false)
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label={`Thinking effort: ${labels[selected]}`}
-          className="h-7 min-w-0 shrink gap-1.5 px-2 text-xs font-normal text-text-secondary"
-          disabled={disabled}
-          type="button"
-          variant="ghost"
-        >
-          <LightbulbIcon aria-hidden="true" className="size-4 shrink-0" />
-          <span className="chat-composer-footer__label truncate">{labels[selected]}</span>
-          <ChevronDownIcon
-            aria-hidden="true"
-            className="chat-composer-footer__chevron size-3.5 text-muted-foreground"
-          />
-        </Button>
-      </DropdownMenuTrigger>
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <TooltipProvider delayDuration={500}>
+        <Tooltip open={menuOpen ? false : undefined}>
+          <DropdownMenuTrigger asChild>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={`Thinking effort: ${labels[selected]}`}
+                className="chat-thinking-selector__trigger h-7 min-w-0 shrink gap-1.5 px-2 text-xs font-normal text-text-secondary"
+                disabled={disabled}
+                type="button"
+                variant="ghost"
+              >
+                {selected === 'none' ? (
+                  <CircleOffIcon aria-hidden="true" className="size-4 shrink-0" />
+                ) : (
+                  <LightbulbIcon aria-hidden="true" className="size-4 shrink-0" />
+                )}
+                <span className="chat-composer-footer__label truncate">{labels[selected]}</span>
+                <ChevronDownIcon
+                  aria-hidden="true"
+                  className="chat-composer-footer__chevron size-3.5 text-muted-foreground"
+                />
+              </Button>
+            </TooltipTrigger>
+          </DropdownMenuTrigger>
+          {!menuOpen && (
+            <TooltipContent side="bottom">Thinking effort: {labels[selected]}</TooltipContent>
+          )}
+        </Tooltip>
+      </TooltipProvider>
       <DropdownMenuContent
         align="end"
         className="w-80 max-w-[calc(100vw-2rem)] p-2"

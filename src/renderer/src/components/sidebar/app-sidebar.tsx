@@ -29,8 +29,8 @@ import {
   Moon,
   Palette,
   PanelLeft,
-  Search,
   ScrollText,
+  Search,
   Settings,
   SquarePen
 } from 'lucide-react'
@@ -89,6 +89,7 @@ function AppSidebar({
   const { state, toggleSidebar } = useSidebar()
   const { preference, setPreference } = useAppearance()
   const collapsed = state === 'collapsed'
+  const shortcutModifier = window.api.windowControls.platform === 'darwin' ? '⌘' : 'Ctrl'
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [commandKeyPressed, setCommandKeyPressed] = React.useState(false)
   const [selectionRequest, setSelectionRequest] = React.useState<{
@@ -105,15 +106,26 @@ function AppSidebar({
   )
   const settingsHighlight = useGlidingHighlight<HTMLLIElement>()
 
-  // Keep the new-chat shortcut available while focus is inside any sidebar control.
+  // Keep application shortcuts available while focus is inside navigation or the composer.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       const isMacOS = window.api.windowControls.platform === 'darwin'
       const modifierPressed = isMacOS ? event.metaKey : event.ctrlKey
-      if (!modifierPressed || event.key.toLowerCase() !== 'n') return
+      if (
+        !modifierPressed ||
+        event.altKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.defaultPrevented
+      )
+        return
+
+      const key = event.key.toLowerCase()
+      if (key !== 'n' && key !== 'k') return
 
       event.preventDefault()
-      onNewChat()
+      if (key === 'k') setSearchOpen(true)
+      else onNewChat()
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -160,7 +172,7 @@ function AppSidebar({
     <>
       <Sidebar
         aria-label="Sidebar"
-        className="app-sidebar font-mono"
+        className="app-sidebar font-sans"
         collapsible="offcanvas"
         variant="floating"
       >
@@ -182,7 +194,7 @@ function AppSidebar({
                 >
                   <SidebarMenuButton
                     aria-current={settingsPage === 'providers' ? 'page' : undefined}
-                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-primary data-[active=true]:bg-sidebar-row-active data-[active=true]:font-medium data-[active=true]:text-text-primary"
                     isActive={settingsPage === 'providers'}
                     onClick={() => onSelectSettingsPage?.('providers')}
                     tooltip="Providers"
@@ -197,7 +209,7 @@ function AppSidebar({
                 >
                   <SidebarMenuButton
                     aria-current={settingsPage === 'workspaces' ? 'page' : undefined}
-                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-primary data-[active=true]:bg-sidebar-row-active data-[active=true]:font-medium data-[active=true]:text-text-primary"
                     isActive={settingsPage === 'workspaces'}
                     onClick={() => onSelectSettingsPage?.('workspaces')}
                     tooltip="Workspaces"
@@ -212,7 +224,7 @@ function AppSidebar({
                 >
                   <SidebarMenuButton
                     aria-current={settingsPage === 'appearance' ? 'page' : undefined}
-                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-primary data-[active=true]:bg-sidebar-row-active data-[active=true]:font-medium data-[active=true]:text-text-primary"
                     isActive={settingsPage === 'appearance'}
                     onClick={() => onSelectSettingsPage?.('appearance')}
                     tooltip="Appearance"
@@ -227,7 +239,7 @@ function AppSidebar({
                 >
                   <SidebarMenuButton
                     aria-current={settingsPage === 'skills' ? 'page' : undefined}
-                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+                    className="h-[34px] rounded-lg px-[10px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-transparent hover:text-text-primary data-[active=true]:bg-sidebar-row-active data-[active=true]:font-medium data-[active=true]:text-text-primary"
                     isActive={settingsPage === 'skills'}
                     onClick={() => onSelectSettingsPage?.('skills')}
                     tooltip="Skills"
@@ -283,7 +295,12 @@ function AppSidebar({
           icon={<Search aria-hidden="true" />}
           label="Search threads"
           onClick={() => setSearchOpen(true)}
-          tooltip="Search threads and actions"
+          tooltip={
+            <>
+              <span>Search threads and actions</span>
+              <Kbd>{shortcutModifier} K</Kbd>
+            </>
+          }
         />
         <IconTooltipButton
           className="titlebar-button"
@@ -303,7 +320,7 @@ function AppSidebar({
             ) : (
               <>
                 <span>New chat</span>
-                <Kbd>⌘ N</Kbd>
+                <Kbd>{shortcutModifier} N</Kbd>
               </>
             )
           }

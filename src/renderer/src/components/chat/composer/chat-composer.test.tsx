@@ -1266,12 +1266,20 @@ describe('ChatComposer', () => {
     )
   })
 
-  it('user opens a composer when commands and skills are unavailable, then syntax hints are omitted', async () => {
+  it('user opens a composer when commands and skills are unavailable, then a message hint invites typing', async () => {
+    const user = userEvent.setup()
     renderWithLibrary(<ChatComposer {...props} projectId={null} />)
 
-    // The base input stays quiet: no hint and no placeholder, only the native caret.
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAccessibleDescription(
+      'Ask a question or describe a task.'
+    )
+    expect(screen.getByText('Ask a question or describe a task.')).toBeVisible()
     expect(screen.queryByText(/^Use (\/|\$) for/)).toBeNull()
     expect(screen.getByRole('textbox')).not.toHaveAttribute('placeholder')
+
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Hello')
+    expect(screen.queryByText('Ask a question or describe a task.')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).not.toHaveAttribute('aria-describedby')
   })
 
   it('user keeps control focus when typing a letter on a button, then the composer does not steal it', async () => {
@@ -1430,6 +1438,19 @@ describe('ChatComposer', () => {
     renderWithLibrary(<ChatComposer {...props} />)
 
     expect(screen.queryByRole('button', { name: 'Thinking effort' })).toBeNull()
+  })
+
+  it('user focuses reasoning when checking its setting, then a tooltip explains the current effort', async () => {
+    const user = userEvent.setup()
+    renderWithLibrary(<ThinkingEffortHarness />)
+    const trigger = screen.getByRole('button', { name: /^Thinking effort:/ })
+
+    trigger.focus()
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Thinking effort: Medium')
+
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('menu')).toBeVisible()
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
   it('user sees only advertised efforts when opening the thinking menu, then the rest are missing', async () => {

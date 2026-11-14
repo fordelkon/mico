@@ -1,9 +1,8 @@
 import { Button } from '@mico/ui'
-import * as React from 'react'
-
 import type { ToolPermissionData } from '@shared/ai/permissions'
-import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import { ToolTraceInputSchema } from '@shared/ai/tool-trace'
+import type { ChatAPI } from '@shared/ipc/schemas/chat'
+import * as React from 'react'
 
 function ToolPermissionCard({
   permission,
@@ -37,7 +36,7 @@ function ToolPermissionCard({
       className={
         pending
           ? 'space-y-3 rounded-lg border border-border-subtle bg-background p-3 text-foreground shadow-hairline'
-          : 'px-2 py-1 text-text-tertiary'
+          : 'agent-activity__result'
       }
       role="group"
     >

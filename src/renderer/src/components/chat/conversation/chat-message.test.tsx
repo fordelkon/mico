@@ -1,11 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 
-import { render, screen } from '@testing-library/react'
+import type { MicoUIMessage } from '@renderer/types/chat'
 import type { RenderResult } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-import type { MicoUIMessage } from '@renderer/types/chat'
 
 import { ChatMessage } from './chat-message'
 
@@ -28,6 +27,27 @@ function renderAssistantMessage(
 }
 
 describe('ChatMessage', () => {
+  it('user stops a partial reply when cancellation settles, then the preserved answer is marked stopped', () => {
+    render(
+      <ChatMessage
+        isStreaming={false}
+        message={{
+          id: 'stopped-answer',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'The partial answer remains available.' }],
+          metadata: { completionState: 'stopped' }
+        }}
+      />
+    )
+
+    expect(screen.getByTestId('answer-content')).toHaveTextContent(
+      'The partial answer remains available.'
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Response stopped')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy message' })).not.toBeInTheDocument()
+  })
+
   it('user reads tool output when the message rerenders, then earlier output is not appended twice', async () => {
     const user = userEvent.setup()
     const message: MicoUIMessage = {
@@ -331,7 +351,7 @@ describe('ChatMessage', () => {
 
     expect(screen.getByRole('button', { name: 'Thought' })).toBeVisible()
     expect(screen.getByText('Reading file…')).toBeVisible()
-    expect(screen.getByText('(src/index.ts)')).toBeVisible()
+    expect(screen.getByText('src/index.ts')).toBeVisible()
   })
 
   it('user sees a completed tool compacted when reasoning follows, then its details collapse', () => {

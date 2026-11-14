@@ -28,16 +28,21 @@
   min-width: 0;
 }
 
-/* Icon-only fallback for the model and reasoning labels in cramped panes; each
-   trigger keeps its icon so it never renders empty. */
+/* Keep the selected model readable in cramped panes. Reasoning keeps its
+   current value available through the trigger's hover and focus tooltip. */
 @container (max-width: 28rem) {
-  .chat-composer-footer__label,
+  .chat-thinking-selector__trigger .chat-composer-footer__label,
   .chat-composer-footer__chevron {
     display: none;
   }
 
-  .chat-composer-footer__generation button[aria-haspopup] {
+  .chat-thinking-selector__trigger {
     width: 1.75rem;
+    flex: none;
     padding-inline: 0;
+  }
+
+  .chat-model-selector__trigger {
+    max-width: 100%;
   }
 }

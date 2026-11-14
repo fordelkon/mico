@@ -23,9 +23,9 @@ import { ArrowUpIcon, ShieldCheckIcon, ShieldIcon, SquareIcon } from 'lucide-rea
 import * as React from 'react'
 import { ChatModelSelector } from './chat-model-selector'
 import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
-import { ComposerTokenHighlight } from './composer-token-highlight'
 import { deleteTextareaRange, insertTextareaText } from './composer-edit-commands'
 import { arrowTokenJump, backspaceDeletion, wordBackspaceDeletion } from './composer-editing'
+import { ComposerTokenHighlight } from './composer-token-highlight'
 import { projectComposerDraft } from './draft/composer-draft-model'
 import { composerDraftKey, useChatComposerDraft } from './draft/composer-drafts'
 import { ProjectSelector } from './project-selector'
@@ -179,7 +179,7 @@ function ChatComposer({
         ? 'Use / for commands.'
         : hasSkills
           ? 'Use $ for skills.'
-          : ''
+          : 'Ask a question or describe a task.'
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -555,7 +555,7 @@ function ChatComposer({
               </span>
             ) : null}
             <Textarea
-              className="chat-composer__input relative min-h-10 max-h-40 resize-none border-0 px-2 py-2 text-[15px] leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
+              className="chat-composer__input relative min-h-10 max-h-[min(30vh,20rem)] resize-none border-0 px-2 py-2 text-[15px] leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent"
               ref={attachTextarea}
               aria-label="Message"
               // The visual hint is aria-hidden, so screen readers reach the

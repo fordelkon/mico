@@ -145,7 +145,7 @@ function ProjectConversations({
             </SidebarMenuButton>
             <SidebarMenuButton
               aria-label={group.name}
-              className="h-[34px] min-w-0 flex-1 rounded-l-none px-[10px] text-[13px] font-normal text-text-secondary"
+              className="h-[34px] min-w-0 flex-1 rounded-l-none px-[10px] text-[13px] font-medium text-text-primary"
               onClick={() => {
                 if (project) onSelectProject(project)
                 else toggleDisclosure()
@@ -236,7 +236,7 @@ function ConversationNavigation({
   return (
     <>
       {groups.length > 0 && (
-        <SidebarGroupLabel className="px-3 text-[11px] font-normal text-text-tertiary">
+        <SidebarGroupLabel className="px-3 text-[11px] font-medium tracking-wide text-text-tertiary">
           Projects
         </SidebarGroupLabel>
       )}
@@ -250,7 +250,7 @@ function ConversationNavigation({
       ))}
       {recent.length > 0 && (
         <>
-          <SidebarGroupLabel className="mt-3 px-3 text-[11px] font-normal text-text-tertiary">
+          <SidebarGroupLabel className="mt-3 px-3 text-[11px] font-medium tracking-wide text-text-tertiary">
             Recent chats
           </SidebarGroupLabel>
           <ConversationList {...props} conversations={recent} shortcutIndexes={shortcutIndexes} />

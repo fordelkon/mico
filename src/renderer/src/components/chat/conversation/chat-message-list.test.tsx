@@ -1,12 +1,11 @@
 import '@testing-library/jest-dom/vitest'
 
-import { act, render, screen } from '@testing-library/react'
-import type { RenderResult } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import * as React from 'react'
-
 import type { MicoUIMessage } from '@renderer/types/chat'
+import type { RenderResult } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import * as React from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatMessageList } from './chat-message-list'
 
@@ -159,6 +158,35 @@ describe('ChatMessageList', () => {
       'Start with the most important task.'
     )
   })
+
+  it.each([
+    { parts: [{ type: 'text', text: '', state: 'streaming' }] },
+    { parts: [{ type: 'step-start' }] }
+  ] satisfies { parts: MicoUIMessage['parts'] }[])(
+    'user waits when the first assistant part has no visible content, then Working remains until text arrives',
+    ({ parts }) => {
+      const message: MicoUIMessage = { id: 'assistant-pending', role: 'assistant', parts }
+      const { rerender } = renderMessageList({
+        isResponding: true,
+        isThinkingEnabled: false,
+        messages: [message]
+      })
+
+      expect(screen.getByRole('status')).toHaveTextContent('Working')
+
+      rerender(
+        <ChatMessageList
+          conversationId="conversation-1"
+          isResponding
+          isThinkingEnabled={false}
+          messages={[{ ...message, parts: [{ type: 'text', text: 'The answer is ready.' }] }]}
+        />
+      )
+
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      expect(screen.getByTestId('answer-content')).toHaveTextContent('The answer is ready.')
+    }
+  )
 
   it('user sees a working status when the effort is off and nothing streams yet, then the wait stays visible', () => {
     const userMessage = {

@@ -19,9 +19,9 @@ import * as React from 'react'
 
 import { Markdown } from '../../markdown/markdown'
 import {
-  AgentLoadingIndicator,
-  AgentActivityTimeline,
   type AgentActivityPart,
+  AgentActivityTimeline,
+  AgentLoadingIndicator,
   type ToolOutputDelta
 } from './agent-activity'
 
@@ -201,7 +201,7 @@ function ChatMessageComponent({
               </div>
             ))
           : null}
-        {!isUser && isStreaming && !message.parts.length ? (
+        {!isUser && isStreaming && !assistantBlocks.length && !documents.length ? (
           <AgentLoadingIndicator label={pendingLabel} />
         ) : null}
         {isUser && (text || !documents.length) ? (
@@ -226,6 +226,11 @@ function ChatMessageComponent({
               </div>
             </BubbleContent>
           </Bubble>
+        ) : null}
+        {!isUser && message.metadata?.completionState === 'stopped' ? (
+          <div className="chat-process-row" data-tone="neutral" role="status">
+            <p className="chat-process-row__label">Response stopped</p>
+          </div>
         ) : null}
         {canCopy && (
           <MessageFooter className="min-h-6 text-text-tertiary opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100">

@@ -3,12 +3,12 @@ import { ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
 
 import {
-  ToolNode,
-  ToolTrace,
   firstErrorLine,
   getToolActivityState,
   type ToolActivityPart,
-  type ToolNodeState
+  ToolNode,
+  type ToolNodeState,
+  ToolTrace
 } from './tool-trace'
 
 /**
@@ -23,8 +23,13 @@ function ToolTraceGroup({
   isLive?: boolean
   parts: ToolActivityPart[]
 }): React.JSX.Element {
-  const [isExpanded, setExpanded] = React.useState(false)
+  const [userExpanded, setExpanded] = React.useState(false)
   const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
+  const isSingle = parts.length === 1
+  const isExpanded = isSingle || userExpanded
+  const preserveReading = (): void => {
+    if (isSingle) setExpanded(true)
+  }
   const states = parts.map((part) => getToolActivityState(part, isLive))
   const isRunning = states.some((state) =>
     ['executing', 'preparing', 'streaming-output'].includes(state)
@@ -61,26 +66,31 @@ function ToolTraceGroup({
     <section
       className="thinking-block agent-activity__trace w-full min-w-0 text-sm"
       data-open={isExpanded}
+      data-single={isSingle}
       data-animate-disclosure={animateDisclosure}
+      onFocusCapture={preserveReading}
+      onClickCapture={preserveReading}
     >
-      <Button
-        aria-controls={contentId}
-        aria-expanded={isExpanded}
-        aria-label={label}
-        className="agent-activity__trigger hover:bg-transparent hover:text-text-secondary aria-expanded:bg-transparent aria-expanded:text-text-secondary"
-        variant="ghost"
-        onClick={(event) => {
-          setAnimateDisclosure(event.detail > 0)
-          setExpanded((current) => !current)
-        }}
-      >
-        <ToolNode state={nodeState} toolName="Read" />
-        <span className="agent-activity__action">{label}</span>
-        <span aria-hidden="true" className="thinking-block__chevron">
-          <ChevronDownIcon className="size-3.5" />
-        </span>
-      </Button>
-      {firstFailure ? (
+      {!isSingle && (
+        <Button
+          aria-controls={contentId}
+          aria-expanded={isExpanded}
+          aria-label={label}
+          className="agent-activity__trigger hover:bg-transparent hover:text-text-secondary aria-expanded:bg-transparent aria-expanded:text-text-secondary"
+          variant="ghost"
+          onClick={(event) => {
+            setAnimateDisclosure(event.detail > 0)
+            setExpanded((current) => !current)
+          }}
+        >
+          <ToolNode state={nodeState} toolName="Read" />
+          <span className="agent-activity__action">{label}</span>
+          <span aria-hidden="true" className="thinking-block__chevron">
+            <ChevronDownIcon className="size-3.5" />
+          </span>
+        </Button>
+      )}
+      {!isSingle && firstFailure ? (
         <div className="agent-activity__result agent-activity__result--error">
           {firstErrorLine(firstFailure.errorText)}
         </div>

@@ -47,7 +47,7 @@
 }
 
 .agent-activity {
-  --activity-panel-surface: color-mix(in srgb, var(--surface-secondary) 54%, transparent);
+  --activity-panel-surface: color-mix(in srgb, var(--surface-primary) 65%, var(--chat-canvas));
   --activity-node-surface: var(--chat-canvas);
   container-type: inline-size;
   width: 100%;
@@ -74,12 +74,58 @@
 
 .agent-activity__trigger {
   width: 100%;
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.375rem;
 }
 
-.agent-activity__trigger {
-  gap: 0.625rem;
-  min-height: 1.875rem;
-  padding: 0.1875rem 0.375rem;
+/* Stable tracks keep streaming targets and disclosure controls in place as
+   state labels and elapsed time change. Thinking and grouped rows stay compact. */
+.agent-activity__trace[data-state] > .agent-activity__trigger {
+  display: grid;
+  grid-template-columns: 1rem auto minmax(0, 1fr) auto 2.5rem 1rem;
+  column-gap: 0.5rem;
+}
+
+.agent-activity__trace[data-state] > .agent-activity__trigger > .agent-activity__node {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.agent-activity__trace[data-state] > .agent-activity__trigger > .agent-activity__action {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.agent-activity__trace[data-state] > .agent-activity__trigger > .agent-activity__summary {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.agent-activity__trace[data-state] > .agent-activity__trigger > .agent-activity__state {
+  grid-column: 4;
+  grid-row: 1;
+  font-size: 0.6875rem;
+  font-weight: 400;
+}
+
+.agent-activity__elapsed {
+  grid-column: 5;
+  grid-row: 1;
+  color: var(--text-tertiary);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.agent-activity__trace[data-state] > .agent-activity__trigger > .thinking-block__chevron {
+  grid-column: 6;
+  grid-row: 1;
+}
+
+.agent-activity__trace[data-state="executing"] .agent-activity__state,
+.agent-activity__trace[data-state="streaming-output"] .agent-activity__state {
+  color: var(--text-secondary);
 }
 
 .agent-activity__node,
@@ -198,7 +244,7 @@
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--surface-secondary) 48%, transparent);
+  background: var(--activity-panel-surface);
 }
 
 .tool-trace__diff-line {
@@ -337,7 +383,41 @@
 }
 
 .thinking-block__panel {
-  margin-left: 2rem;
+  margin-left: 1.875rem;
+}
+
+/* Nested read groups share a guide instead of doubling the detail inset. */
+.agent-activity__trace .thinking-block__panel-inner > .agent-activity__trace {
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.agent-activity__trace
+  .thinking-block__panel-inner
+  > .agent-activity__trace
+  > .thinking-block__panel {
+  margin-left: 0;
+}
+
+/* The stable single-read group adds no visual wrapper or extra indentation. */
+.agent-activity__trace[data-single="true"] > .thinking-block__panel {
+  margin-left: 0;
+}
+
+.agent-activity__trace[data-single="true"]
+  > .thinking-block__panel
+  > .thinking-block__panel-inner
+  > .agent-activity__trace {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.agent-activity__trace[data-single="true"]
+  > .thinking-block__panel
+  > .thinking-block__panel-inner
+  > .agent-activity__trace
+  > .thinking-block__panel {
+  margin-left: 1.875rem;
 }
 
 .agent-activity__detail {
@@ -455,15 +535,27 @@
   transition: none;
 }
 
-@container (max-width: 24rem) {
-  .agent-activity__trigger {
-    flex-wrap: wrap;
+@container (max-width: 30rem) {
+  .agent-activity__trace[data-state] > .agent-activity__trigger {
+    grid-template-columns: 1rem minmax(0, 1fr) auto 2.5rem 1rem;
+    row-gap: 0.125rem;
   }
 
-  .agent-activity__summary:not(:empty) {
-    order: 1;
-    flex-basis: calc(100% - 1.5rem);
-    margin-left: 1.5rem;
+  .agent-activity__trace[data-state] > .agent-activity__trigger > .agent-activity__summary {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+
+  .agent-activity__trace[data-state] > .agent-activity__trigger > .agent-activity__state {
+    grid-column: 3;
+  }
+
+  .agent-activity__elapsed {
+    grid-column: 4;
+  }
+
+  .agent-activity__trace[data-state] > .agent-activity__trigger > .thinking-block__chevron {
+    grid-column: 5;
   }
 }
 
@@ -612,7 +704,7 @@
 }
 
 .agent-activity__trace[data-state="completed"] .agent-activity__action {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .agent-activity__trace[data-state="failed"] .agent-activity__action {

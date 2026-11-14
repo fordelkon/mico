@@ -1,11 +1,10 @@
 import { Button, SearchPopover } from '@mico/ui'
+import { ProviderIcon } from '@renderer/components/providers/provider-icon'
+import type { ProviderCatalog } from '@renderer/components/settings/providers/provider-library'
 import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
 import type { CustomProvider, ModelEntry } from '@shared/data/schemas/provider'
-import type { ProviderCatalog } from '@renderer/components/settings/providers/provider-library'
-import { BoxesIcon, ChevronDownIcon } from 'lucide-react'
+import { BoxesIcon, CheckIcon, ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
-
-import { ProviderIcon } from '@renderer/components/providers/provider-icon'
 
 import { handleComposerListNavigation } from './composer-list-navigation'
 
@@ -88,8 +87,6 @@ function ChatModelSelector({
                 providerId={selectedModel.provider}
               />
             ) : (
-              // A generic model icon keeps the trigger identifiable when the
-              // narrow footer truncates the "Select model" label away.
               <BoxesIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
             )}
             <span className="chat-composer-footer__label truncate">
@@ -148,7 +145,7 @@ function ChatModelSelector({
                           {...getItemProps(modelIndexes.get(model.id) ?? 0)}
                           aria-label={model.displayName}
                           aria-selected={model.id === currentModelId}
-                          className="relative z-10 h-auto min-h-8 w-full justify-between gap-3 px-2 py-1.5 text-left text-sm hover:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent focus-visible:ring-0"
+                          className="relative z-10 h-auto min-h-8 w-full justify-between gap-3 px-2 py-1.5 text-left text-sm hover:bg-transparent focus-visible:bg-accent focus-visible:ring-inset"
                           key={model.id}
                           disabled={disabled}
                           onClick={() => {
@@ -161,8 +158,16 @@ function ChatModelSelector({
                           variant="ghost"
                         >
                           <span className="min-w-0 truncate">{model.displayName}</span>
-                          <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                            {model.modelId}
+                          <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+                            <span className="truncate font-mono text-xs">{model.modelId}</span>
+                            <span
+                              aria-hidden="true"
+                              className="flex size-4 shrink-0 items-center justify-center"
+                            >
+                              {model.id === currentModelId && (
+                                <CheckIcon className="size-3.5 text-foreground" />
+                              )}
+                            </span>
                           </span>
                         </Button>
                       ))}

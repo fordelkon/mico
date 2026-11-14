@@ -266,7 +266,7 @@ function ConversationRowComponent({
           ) : (
             <SidebarMenuButton
               aria-pressed={selected}
-              className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-secondary data-[active=true]:bg-sidebar-row-active data-[active=true]:text-text-secondary"
+              className="h-[34px] rounded-lg px-[10px] pr-[34px] text-[13px] font-normal text-text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-text-primary data-[active=true]:bg-sidebar-row-active data-[active=true]:font-medium data-[active=true]:text-text-primary"
               data-title-overflowing={titleOverflow > 0 || undefined}
               disabled={deleting}
               isActive={selected}

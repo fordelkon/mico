@@ -1,16 +1,16 @@
+import { getToolPresentation } from '@shared/ai/tool-presentation'
 import type { ReasoningUIPart } from 'ai'
 import * as React from 'react'
-import { getToolPresentation } from '@shared/ai/tool-presentation'
 
 import { ThinkingTrace } from './tools/thinking-trace'
-import { ToolTraceGroup } from './tools/trace-group'
 import {
-  getToolActivityState,
   getToolActivityLabel,
-  ToolTrace,
+  getToolActivityState,
   type ToolActivityPart,
-  type ToolOutputDelta
+  type ToolOutputDelta,
+  ToolTrace
 } from './tools/tool-trace'
+import { ToolTraceGroup } from './tools/trace-group'
 
 type AgentActivityPart = ReasoningUIPart | ToolActivityPart
 
@@ -19,7 +19,7 @@ type AgentActivityPart = ReasoningUIPart | ToolActivityPart
 type TimelineSegment =
   | { kind: 'group'; parts: ToolActivityPart[] }
   | { kind: 'reasoning-group'; parts: ReasoningUIPart[] }
-  | { kind: 'single'; part: AgentActivityPart }
+  | { kind: 'single'; part: ToolActivityPart }
 
 function completedToolSummary(tools: ToolActivityPart[]): string {
   const summaries = new Map<string, { count: number; unit: string; verb: string }>()
@@ -39,7 +39,7 @@ function completedToolSummary(tools: ToolActivityPart[]): string {
 function toTimelineSegments(parts: AgentActivityPart[]): TimelineSegment[] {
   const segments: TimelineSegment[] = []
   for (const part of parts) {
-    if (part.type === 'reasoning' && part.state !== 'streaming') {
+    if (part.type === 'reasoning') {
       const last = segments.at(-1)
       if (last?.kind === 'reasoning-group') last.parts.push(part)
       else segments.push({ kind: 'reasoning-group', parts: [part] })
@@ -51,15 +51,9 @@ function toTimelineSegments(parts: AgentActivityPart[]): TimelineSegment[] {
       segments.push({ kind: 'single', part })
     }
   }
-  // A lone read keeps its own invocation header; only runs of two or more
-  // collapse into a group line.
-  return segments.map((segment) =>
-    segment.kind === 'group' && segment.parts.length === 1
-      ? { kind: 'single', part: segment.parts[0] }
-      : segment.kind === 'reasoning-group' && segment.parts.length === 1
-        ? { kind: 'single', part: segment.parts[0] }
-        : segment
-  )
+  // Start groups with their first part so later arrivals retain disclosure
+  // state, focus, and any mounted file or reasoning viewport.
+  return segments
 }
 
 function AgentLoadingIndicator({ label = 'Thinking' }: { label?: string }): React.JSX.Element {
@@ -138,9 +132,7 @@ function AgentActivityTimeline({
                   ? `group-${segment.parts[0]?.toolCallId}`
                   : segment.kind === 'reasoning-group'
                     ? `reasoning-group-${id}-${index}`
-                    : segment.part.type === 'dynamic-tool'
-                      ? segment.part.toolCallId
-                      : `${id}-${index}`
+                    : segment.part.toolCallId
               }
               role="listitem"
             >
@@ -150,15 +142,14 @@ function AgentActivityTimeline({
                 <ThinkingTrace
                   excerptText={segment.parts.at(-1)?.text}
                   id={`${id}-${index}`}
-                  isStreaming={false}
-                  labelOverride={`Reasoning · ${segment.parts.length} steps`}
+                  isStreaming={isLive && segment.parts.at(-1)?.state === 'streaming'}
+                  labelOverride={
+                    segment.parts.length > 1 &&
+                    (!isLive || segment.parts.at(-1)?.state !== 'streaming')
+                      ? `Reasoning · ${segment.parts.length} steps`
+                      : undefined
+                  }
                   text={segment.parts.map((part) => part.text).join('\n\n')}
-                />
-              ) : segment.part.type === 'reasoning' ? (
-                <ThinkingTrace
-                  id={`${id}-${index}`}
-                  isStreaming={isLive && segment.part.state === 'streaming'}
-                  text={segment.part.text}
                 />
               ) : (
                 <ToolTrace isActive={isLive} part={segment.part} />
@@ -172,8 +163,8 @@ function AgentActivityTimeline({
 }
 
 export {
-  AgentLoadingIndicator,
+  type AgentActivityPart,
   AgentActivityTimeline,
-  type ToolOutputDelta,
-  type AgentActivityPart
+  AgentLoadingIndicator,
+  type ToolOutputDelta
 }

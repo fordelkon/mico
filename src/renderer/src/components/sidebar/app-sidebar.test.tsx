@@ -58,6 +58,48 @@ describe('AppSidebar', () => {
     )
   }
 
+  it.each([
+    { platform: 'darwin', shortcut: '{Meta>}k{/Meta}', wrongShortcut: '{Control>}k{/Control}' },
+    { platform: 'win32', shortcut: '{Control>}k{/Control}', wrongShortcut: '{Meta>}k{/Meta}' },
+    { platform: 'linux', shortcut: '{Control>}k{/Control}', wrongShortcut: '{Meta>}k{/Meta}' }
+  ] as const)(
+    'user searches on $platform when pressing the platform shortcut, then Escape closes search',
+    async ({ platform: currentPlatform, shortcut, wrongShortcut }) => {
+      platform = currentPlatform
+      const user = userEvent.setup()
+      renderSidebar()
+
+      await user.keyboard(wrongShortcut)
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+      await user.keyboard(shortcut)
+      expect(screen.getByRole('dialog', { name: 'Search' })).toBeVisible()
+      expect(screen.getByRole('combobox')).toHaveFocus()
+
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    { platform: 'darwin', shortcut: '{Meta>}n{/Meta}', hint: '⌘ N' },
+    { platform: 'win32', shortcut: '{Control>}n{/Control}', hint: 'Ctrl N' },
+    { platform: 'linux', shortcut: '{Control>}n{/Control}', hint: 'Ctrl N' }
+  ] as const)(
+    'user sees the new chat shortcut on $platform when hovering, then that shortcut starts a chat',
+    async ({ platform: currentPlatform, shortcut, hint }) => {
+      platform = currentPlatform
+      const user = userEvent.setup()
+      const onNewChat = vi.fn<() => void>()
+      renderSidebar({ onNewChat })
+
+      await user.hover(screen.getByRole('button', { name: 'New chat' }))
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(hint)
+      await user.keyboard(shortcut)
+      expect(onNewChat).toHaveBeenCalledOnce()
+    }
+  )
+
   it('user collapses a project when another chat responds, then its status stays visible', async () => {
     const user = userEvent.setup()
     renderSidebar({

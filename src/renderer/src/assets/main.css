@@ -59,7 +59,7 @@ body {
   position: relative;
   z-index: 22;
   min-width: 0;
-  margin: 20px 48px 8px;
+  margin: 20px clamp(12px, 2.4vw, 32px) 8px;
   overflow: hidden;
   border-radius: var(--radius-panel);
   background: var(--background);
@@ -69,14 +69,8 @@ body {
 .paper-canvas {
   background-color: var(--chat-canvas);
   background-image: var(--chat-paper-pattern);
-  background-position:
-    12px 12px,
-    12px 12px,
-    0 0;
-  background-size:
-    32px 32px,
-    32px 32px,
-    5px 5px;
+  background-position: 0 0;
+  background-size: 6px 6px;
 }
 
 html[data-navigation-transition="settings"]::view-transition-old(root),
@@ -156,7 +150,7 @@ html[data-navigation-transition="settings"]::view-transition-new(workspace-conte
 
 .home-workspace[data-platform="win32"] .home-workspace__content,
 .home-workspace[data-platform="darwin"] .home-workspace__content {
-  margin: 52px 48px 12px;
+  margin: 52px clamp(12px, 2.4vw, 32px) 12px;
   border-radius: var(--radius-panel);
 }
 

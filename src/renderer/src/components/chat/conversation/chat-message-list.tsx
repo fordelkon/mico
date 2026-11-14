@@ -8,10 +8,9 @@ import {
   MessageScrollerViewport,
   Spinner
 } from '@mico/ui'
-
+import { type ConversationTranscriptSource, useConversationTranscript } from '@renderer/hooks/chat'
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
 import type { TurnFailureCode } from '@shared/ai/turn-failure'
-import { useConversationTranscript, type ConversationTranscriptSource } from '@renderer/hooks/chat'
 import { CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
 
@@ -116,14 +115,10 @@ function ChatMessageList({
   status
 }: ChatMessageListProps): React.JSX.Element {
   const latestMessage = messages.at(-1)
-  const hasEmptyAssistantMessage =
-    isResponding && latestMessage?.role === 'assistant' && latestMessage.parts.length === 0
-  // The pending row marks the gap before any content: "Thinking" names the
-  // expected first activity, and a plain "Working" covers thinking-off sessions
-  // so the wait stays visible either way.
-  const showPendingActivity =
-    isResponding && (latestMessage?.role !== 'assistant' || hasEmptyAssistantMessage)
-  const displayedMessages = hasEmptyAssistantMessage ? messages.slice(0, -1) : messages
+  // Once the assistant exists, its own visible content determines the pending
+  // state so empty protocol events do not replace the mounted message.
+  const showPendingActivity = isResponding && latestMessage?.role !== 'assistant'
+  const pendingLabel = isThinkingEnabled ? undefined : 'Working'
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
@@ -134,14 +129,15 @@ function ChatMessageList({
         <MessageScrollerViewport>
           <MessageScrollerContent
             aria-busy={isResponding}
-            className="mx-auto w-full max-w-[46rem] gap-8 px-5 pb-10 pt-12 sm:px-8"
+            className="mx-auto w-full max-w-[52rem] gap-8 px-4 pb-8 pt-6 sm:max-w-[53rem] sm:px-6"
           >
             {/* Preserve the mounted transcript when a response completes so the browser retains scroll position. */}
             <>
-              {displayedMessages.map((message) => (
+              {messages.map((message) => (
                 <MessageScrollerItem key={message.id} messageId={message.id}>
                   <ChatMessage
                     message={message}
+                    pendingLabel={pendingLabel}
                     isStreaming={
                       isResponding &&
                       message.role === 'assistant' &&
@@ -155,7 +151,7 @@ function ChatMessageList({
                   <ChatMessage
                     isStreaming
                     message={PENDING_ASSISTANT_MESSAGE}
-                    pendingLabel={isThinkingEnabled ? undefined : 'Working'}
+                    pendingLabel={pendingLabel}
                   />
                 </MessageScrollerItem>
               )}
