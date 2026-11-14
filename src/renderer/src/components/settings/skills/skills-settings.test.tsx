@@ -1,4 +1,4 @@
-import type { SkillCatalog } from '@shared/ai/skills'
+import type { SkillCatalog } from '@mico/coding-agent/contracts'
 import type { SkillsAPI } from '@shared/ipc/schemas/skills'
 import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { act, render, screen, within } from '@testing-library/react'

@@ -13,7 +13,7 @@ export default defineConfig({
     },
     build: {
       externalizeDeps: {
-        exclude: ['@mico/ai-providers']
+        exclude: ['@mico/ai-providers', '@mico/agent-core', '@mico/coding-agent']
       },
       rollupOptions: {
         input: {
@@ -23,6 +23,11 @@ export default defineConfig({
     }
   },
   preload: {
+    build: {
+      externalizeDeps: {
+        exclude: ['@mico/coding-agent']
+      }
+    },
     resolve: {
       alias: {
         '@shared': resolve('src/shared')

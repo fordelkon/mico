@@ -192,7 +192,7 @@ this suite. Local protocol tests do not replace real-provider compatibility runs
 
 Skill catalog behavior follows the owning boundaries in [docs/testing.md](../../docs/testing.md)
 instead of an end-to-end duplicate: discovery, shadowing, and containment live in
-`src/main/ai/skills/snapshot.test.ts`, settings browsing and the document
+`packages/coding-agent/src/skills/snapshot.test.ts`, settings browsing and the document
 dialog in `src/renderer/src/components/settings/skills/skills-settings.test.tsx`,
 and skill invocation through the composer and tools in the `$` scenarios above.
 The settings journey keeps no dedicated scenario here.

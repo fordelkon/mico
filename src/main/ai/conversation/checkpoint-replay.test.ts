@@ -6,7 +6,7 @@ import {
 } from '@mico/ai-providers'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SessionDatabase } from '@main/data/session-database'
-import { ModelLoop } from '../execution'
+import { runModelLoop } from '@mico/agent-core'
 import { SessionRuntimeService } from './runtime'
 
 const profile = {
@@ -203,7 +203,7 @@ describe('Checkpoint provider replay', () => {
       }
     }
     await expect(
-      new ModelLoop().run({
+      runModelLoop({
         provider,
         messages: current.replayMessages,
         thinkingEffort: 'none',

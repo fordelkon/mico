@@ -12,7 +12,7 @@ import {
   TooltipTrigger
 } from '@mico/ui'
 import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
+import type { ModelReasoningCapabilities, ThinkingSelection } from '@mico/coding-agent/contracts'
 import { ChevronDownIcon, CircleOffIcon, LightbulbIcon } from 'lucide-react'
 import * as React from 'react'
 

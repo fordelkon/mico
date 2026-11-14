@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
-import type { PermissionResponse, ToolPermissionData } from '@shared/ai/permissions'
-import type { ToolApprovalRequest } from '../tools'
+import type { PermissionResponse, ToolPermissionData } from '@mico/coding-agent/contracts'
+import type { ToolApprovalRequest } from '@mico/coding-agent'
 
 type PendingPermission = {
   ownerId: string
@@ -12,11 +12,11 @@ type PendingPermission = {
 class PermissionRequests {
   readonly #pending = new Map<string, PendingPermission>()
 
-  request(
+  readonly request = (
     request: ToolApprovalRequest & { ownerId: string; sessionId: string; requestId: string },
     signal: AbortSignal,
     emit: (data: ToolPermissionData) => void
-  ): Promise<boolean> {
+  ): Promise<boolean> => {
     signal.throwIfAborted()
     const data: ToolPermissionData = {
       approvalId: randomUUID(),

@@ -1,8 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { ProviderLibraryProvider } from '@renderer/components/settings/providers/provider-library'
-import type { PermissionMode } from '@shared/ai/permissions'
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { PermissionMode, ChatDocumentPart } from '@mico/coding-agent/contracts'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'

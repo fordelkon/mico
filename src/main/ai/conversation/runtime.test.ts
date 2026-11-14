@@ -5,13 +5,12 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { ChatMessage } from '@shared/data/schemas/chat'
+import type { ChatMessage, TurnFailure } from '@mico/coding-agent/contracts'
 import { type ChatProvider, type ChatProviderMessage, providerFinish } from '@mico/ai-providers'
 import { SessionDatabase } from '@main/data/session-database'
 import { sessionMigrations } from '@main/data/session-migrations'
-import { ModelLoop } from '../execution'
+import { runModelLoop } from '@mico/agent-core'
 import { SessionRuntimeService, type ExecutionProfileSnapshot } from './runtime'
-import type { TurnFailure } from '@shared/ai/turn-failure'
 
 const profile: ExecutionProfileSnapshot = {
   modelEntryId: 'ollama:qwen3',
@@ -824,7 +823,7 @@ describe('SessionRuntimeService', () => {
         })()
     }
     await expect(
-      new ModelLoop().run({
+      runModelLoop({
         provider,
         messages: run.replayMessages,
         thinkingEffort: 'none',

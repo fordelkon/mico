@@ -1,8 +1,10 @@
-import type { ToolPermissionData } from '@shared/ai/permissions'
-import type { ChatSkillInvocationPart } from '@shared/ai/skills'
-import type { TurnFailureCode } from '@shared/ai/turn-failure'
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
-import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
+import type {
+  ToolPermissionData,
+  ChatSkillInvocationPart,
+  TurnFailureCode,
+  ChatDocumentPart,
+  ToolOutputDeltaData
+} from '@mico/coding-agent/contracts'
 import type { ProviderMetadata, UIMessage } from 'ai'
 
 type AssistantCompletionState = 'complete' | 'streaming' | 'stopped'

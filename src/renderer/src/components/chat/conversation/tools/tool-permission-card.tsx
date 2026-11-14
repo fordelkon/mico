@@ -1,6 +1,5 @@
 import { Button } from '@mico/ui'
-import type { ToolPermissionData } from '@shared/ai/permissions'
-import { ToolTraceInputSchema } from '@shared/ai/tool-trace'
+import { type ToolPermissionData, ToolTraceInputSchema } from '@mico/coding-agent/contracts'
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import * as React from 'react'
 

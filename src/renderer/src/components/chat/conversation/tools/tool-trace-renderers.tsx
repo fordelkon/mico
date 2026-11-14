@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { ChatToolTracePresentation } from '@shared/data/schemas/chat'
+import type { ChatToolTracePresentation } from '@mico/coding-agent/contracts'
 
 import { BashToolTrace } from './bash-tool-trace'
 import { EditToolTrace } from './edit-tool-trace'

@@ -5,8 +5,7 @@ import {
   type ChatRetryState,
   type MicoUIMessage
 } from '@renderer/types/chat'
-import type { ChatSkillInvocationPart } from '@shared/ai/skills'
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { ChatSkillInvocationPart, ChatDocumentPart } from '@mico/coding-agent/contracts'
 import * as React from 'react'
 import { type ChatCompactionsStore, useChatSessions } from './chat-session-instances'
 import { type ChatActiveSessionSlice, useActiveSession } from './use-active-session'

@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import * as React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { ChatDocumentPart } from '@mico/coding-agent/contracts'
 
 import { ComposerAttachmentList, ComposerAttachments } from './composer-attachments'
 

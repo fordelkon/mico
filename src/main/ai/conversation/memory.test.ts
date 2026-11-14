@@ -1,7 +1,10 @@
 import type { ChatProviderStreamInput, ProviderStreamPart } from '@mico/ai-providers'
 import { providerFinish } from '@mico/ai-providers'
-import { ToolPermissionDataSchema } from '@shared/ai/permissions'
-import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import {
+  ToolPermissionDataSchema,
+  type TurnStartRequest,
+  type TurnStreamEvent
+} from '@mico/coding-agent/contracts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Memories } from '../memory'
 import { Conversations } from './conversations'

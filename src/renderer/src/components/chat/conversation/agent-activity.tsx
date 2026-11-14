@@ -1,4 +1,4 @@
-import { getToolPresentation } from '@shared/ai/tool-presentation'
+import { getToolPresentation } from '@mico/coding-agent/contracts'
 import type { ReasoningUIPart } from 'ai'
 import * as React from 'react'
 

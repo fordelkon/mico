@@ -8,15 +8,18 @@ importers:
 
   .:
     dependencies:
-      '@ai-sdk/provider':
-        specifier: ^4.0.7
-        version: 4.0.7
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@39.8.10(supports-color@7.2.0))
+      '@mico/agent-core':
+        specifier: workspace:*
+        version: link:packages/agent-core
       '@mico/ai-providers':
         specifier: workspace:*
         version: link:packages/ai-providers
+      '@mico/coding-agent':
+        specifier: workspace:*
+        version: link:packages/coding-agent
       '@vscode/ripgrep':
         specifier: 1.18.0
         version: 1.18.0
@@ -29,9 +32,6 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -172,6 +172,31 @@ importers:
         specifier: 4.1.6
         version: 4.1.6(@types/node@22.20.1)(@vitest/coverage-v8@4.1.6)(jsdom@29.1.1(@noble/hashes@2.3.0))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.1))
 
+  packages/agent-core:
+    dependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.7
+        version: 4.0.7
+      '@mico/ai-providers':
+        specifier: workspace:*
+        version: link:../ai-providers
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@vitest/coverage-v8':
+        specifier: 4.1.6
+        version: 4.1.6(vitest@4.1.6)
+      ai:
+        specifier: ^7.0.77
+        version: 7.0.77(zod@4.4.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.6
+        version: 4.1.6(@types/node@22.20.1)(@vitest/coverage-v8@4.1.6)(jsdom@29.1.1(@noble/hashes@2.3.0))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.1))
+
   packages/ai-providers:
     dependencies:
       zod:
@@ -184,6 +209,43 @@ importers:
       ai:
         specifier: ^7.0.77
         version: 7.0.77(zod@4.4.3)
+      vitest:
+        specifier: 4.1.6
+        version: 4.1.6(@types/node@22.20.1)(@vitest/coverage-v8@4.1.6)(jsdom@29.1.1(@noble/hashes@2.3.0))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.1))
+
+  packages/coding-agent:
+    dependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.7
+        version: 4.0.7
+      '@mico/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
+      '@mico/ai-providers':
+        specifier: workspace:*
+        version: link:../ai-providers
+      '@vscode/ripgrep':
+        specifier: 1.18.0
+        version: 1.18.0
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.1
+        version: 22.20.1
+      '@vitest/coverage-v8':
+        specifier: 4.1.6
+        version: 4.1.6(vitest@4.1.6)
+      ai:
+        specifier: ^7.0.77
+        version: 7.0.77(zod@4.4.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
       vitest:
         specifier: 4.1.6
         version: 4.1.6(@types/node@22.20.1)(@vitest/coverage-v8@4.1.6)(jsdom@29.1.1(@noble/hashes@2.3.0))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.1))

@@ -1,6 +1,6 @@
 import type { MicoUIMessage } from '@renderer/types/chat'
-import type { ThinkingSelection } from '@shared/data/schemas/chat'
-import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type { ThinkingSelection, TurnStreamEvent } from '@mico/coding-agent/contracts'
+import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { ChatTransport } from 'ai'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ElectronChatTransport } from './electron-chat-transport'

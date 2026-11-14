@@ -1,6 +1,6 @@
 import { Button, InputGroup, InputGroupAddon, InputGroupInput, Separator, Spinner } from '@mico/ui'
 import { useGlidingHighlight } from '@renderer/hooks/use-gliding-highlight'
-import type { SkillCatalog } from '@shared/ai/skills'
+import type { SkillCatalog } from '@mico/coding-agent/contracts'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import { RefreshCw, ScrollText, Search } from 'lucide-react'
 import * as React from 'react'

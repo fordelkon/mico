@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ToolPermissionData } from '@shared/ai/permissions'
+import type { ToolPermissionData } from '@mico/coding-agent/contracts'
 import { PermissionRequests } from './tool-approvals'
 
 const request = {

@@ -1,9 +1,9 @@
 import type { IpcMainInvokeEvent } from 'electron'
 
 import { IpcChannel } from '@shared/IpcChannel'
-import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type { TurnStreamEvent } from '@mico/coding-agent/contracts'
 
-import type { SessionTitleUpdate } from '../ai/conversation'
+import type { SessionTitleUpdate } from '@mico/coding-agent'
 type TurnSenderConnection = {
   emitTurnEvent: (turnEvent: TurnStreamEvent) => void
   emitTitleUpdate: (titleUpdate: SessionTitleUpdate) => void

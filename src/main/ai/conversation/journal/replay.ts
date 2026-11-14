@@ -1,7 +1,7 @@
 import type { ChatProviderMessage } from '@mico/ai-providers'
-import type { ChatMessage } from '@shared/data/schemas/chat'
+import type { ChatMessage } from '@mico/coding-agent/contracts'
 import type { SessionDatabase } from '@main/data/session-database'
-import { toProviderReplayContext } from '../provider-messages'
+import { toProviderReplayContext } from '@mico/coding-agent'
 import { type RunRow, type SessionEventLog } from './event-log'
 import type { SessionToolJournal } from './tool-journal'
 

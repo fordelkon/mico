@@ -1,14 +1,20 @@
 import type { ChatProviderMessage } from '@mico/ai-providers'
-import type { TurnFailure } from '@shared/ai/turn-failure'
-import type { ChatMessage } from '@shared/data/schemas/chat'
-import type {
-  ExecutionProfileSnapshot,
-  PersistedSession,
-  SessionSummary
-} from '@shared/data/schemas/session'
-import { type SessionRecovery, SessionRecoverySchema } from '@shared/data/schemas/session'
+import {
+  type TurnFailure,
+  type ChatMessage,
+  type ExecutionProfileSnapshot,
+  type PersistedSession,
+  type SessionSummary,
+  type SessionRecovery,
+  SessionRecoverySchema
+} from '@mico/coding-agent/contracts'
 import { SessionDatabase } from '@main/data/session-database'
-import type { ToolExecutionTrace } from '../tools'
+import type { ToolExecutionTrace } from '@mico/agent-core'
+import type {
+  SessionStore,
+  PendingTurnContext,
+  TurnRunHandle as AgentTurnHandle
+} from '@mico/coding-agent'
 import {
   CheckpointBoundaryRejected,
   type CompactionNotice,
@@ -21,12 +27,7 @@ import {
   SessionEventLog
 } from './journal/event-log'
 import { getSessionReplay } from './journal/replay'
-import {
-  type ModelStepAccepted,
-  SessionToolJournal,
-  type ToolExecutionSettled,
-  type ToolExecutionStarted
-} from './journal/tool-journal'
+import { SessionToolJournal } from './journal/tool-journal'
 import { type AgentStep, sanitizeAgentStep, visibleMessage } from './journal/transcript'
 
 type StartedRun = {
@@ -45,48 +46,14 @@ type RunOutcome =
   | { status: 'completed'; assistant: ChatMessage }
   | { status: 'failed'; failure: TurnFailure; assistant?: ChatMessage }
   | { status: 'cancelled'; assistant?: ChatMessage }
-/**
- * One accepted run, scoped to the turn executor's needs. The handle hides the
- * runtime event log: callers record steps and traces and settle the run
- * without knowing event kinds, ordering rules, or payload digests.
- */
-interface PendingTurnContext {
-  cwd: string | null
-  projectId: string | null
-  replayMessages: ChatProviderMessage[]
-  contextMessages: ProviderUserMessage[] | undefined
-  existing: boolean
-  profile: ExecutionProfileSnapshot | undefined
-}
-
-type TurnRunHandle = {
+interface TurnRunHandle extends AgentTurnHandle {
   runId: string
-  profile: ExecutionProfileSnapshot
-  shouldGenerateTitle: boolean
-  cwd: string | null
-  projectId: string | null
-  replayMessages: ChatProviderMessage[]
-  /** Accepted model-only context snapshot; undefined means not yet accepted. Retries reuse it. */
-  contextMessages: ProviderUserMessage[] | undefined
-  recordContext: (messages: ProviderUserMessage[]) => void
-  recordStep: (step: AgentStep) => void
-  recordTrace: (trace: ToolExecutionTrace) => void
-  complete: (assistant: ChatMessage) => void
-  recordModelStep: (step: ModelStepAccepted) => void
-  recordToolExecutionStarted: (execution: ToolExecutionStarted) => void
-  recordToolExecutionSettled: (execution: ToolExecutionSettled) => void
-  fail: (failure: TurnFailure, assistant?: ChatMessage) => void
-  cancel: (assistant?: ChatMessage) => void
+  recordTrace(this: void, trace: ToolExecutionTrace): void
 }
 type SessionRuntimeServiceDependencies = {
   createId?: () => string
   database: SessionDatabase
   now?: () => number
-}
-
-const defaultDependencies = {
-  createId: () => crypto.randomUUID(),
-  now: () => Date.now()
 }
 
 /**
@@ -96,7 +63,7 @@ const defaultDependencies = {
 const UNKNOWN_TOOL_OUTCOME_MESSAGE =
   'A tool execution outcome is unknown. Inspect the workspace files and command results before starting a new request.'
 
-class SessionRuntimeService {
+class SessionRuntimeService implements SessionStore {
   private readonly dependencies: Required<SessionRuntimeServiceDependencies>
   private readonly eventLog: SessionEventLog
   private readonly journal: SessionToolJournal
@@ -108,10 +75,14 @@ class SessionRuntimeService {
    */
   private readonly activeCompactions = new Set<string>()
 
-  constructor(dependencies: SessionRuntimeServiceDependencies) {
-    this.dependencies = { ...defaultDependencies, ...dependencies }
+  constructor({
+    database,
+    createId = () => crypto.randomUUID(),
+    now = () => Date.now()
+  }: SessionRuntimeServiceDependencies) {
+    this.dependencies = { database, createId, now }
     this.eventLog = new SessionEventLog(this.dependencies)
-    this.journal = new SessionToolJournal(dependencies.database, this.eventLog)
+    this.journal = new SessionToolJournal(database, this.eventLog)
   }
 
   createSession({

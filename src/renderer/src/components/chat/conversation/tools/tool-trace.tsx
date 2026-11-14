@@ -1,11 +1,12 @@
 import { Button } from '@mico/ui'
-import type { ToolPermissionData } from '@shared/ai/permissions'
-import { getToolPresentation, toolLabel } from '@shared/ai/tool-presentation'
 import {
+  type ToolPermissionData,
+  getToolPresentation,
+  toolLabel,
   getToolTracePresentation,
   type ToolTraceInput,
   ToolTraceInputSchema
-} from '@shared/ai/tool-trace'
+} from '@mico/coding-agent/contracts'
 import type { DynamicToolUIPart } from 'ai'
 import {
   BookOpenIcon,

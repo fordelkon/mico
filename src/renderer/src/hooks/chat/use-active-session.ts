@@ -1,9 +1,12 @@
 import * as React from 'react'
 
 import type { Conversation } from '@renderer/types/chat'
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
+import type {
+  ModelReasoningCapabilities,
+  ThinkingSelection,
+  PermissionMode
+} from '@mico/coding-agent/contracts'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import type { PermissionMode } from '@shared/ai/permissions'
 
 import type { ChatSessionsStore, ConversationTranscriptSource } from './chat-session-instances'
 

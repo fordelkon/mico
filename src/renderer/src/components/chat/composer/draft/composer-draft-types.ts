@@ -1,4 +1,4 @@
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { ChatDocumentPart } from '@mico/coding-agent/contracts'
 
 type ComposerToken = {
   start: number

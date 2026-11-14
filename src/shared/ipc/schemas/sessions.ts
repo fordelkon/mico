@@ -1,6 +1,6 @@
 import * as z from 'zod'
 import { defineSchema } from '../../data/define'
-import { ProjectIdSchema, SessionIdSchema, SessionTitleSchema } from '../../data/schemas/session'
+import { ProjectIdSchema, SessionIdSchema, SessionTitleSchema } from '@mico/coding-agent/contracts'
 import { IpcChannel } from '../../IpcChannel'
 import type { IpcMethod } from '../contracts'
 

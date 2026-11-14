@@ -1,3 +1,5 @@
+import { CodingAgent } from '@mico/coding-agent'
+import { PermissionRequests } from './tool-approvals'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,8 +9,6 @@ import type { UIMessageChunk } from 'ai'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SessionDatabase } from '@main/data/session-database'
 import { type ExecutionProfileSnapshot, SessionRuntimeService } from './runtime'
-import { SessionCompactor } from './compaction'
-import { SessionModelProfile } from './model-profile'
 import { createModels, removeTemporaryPaths } from './test-helpers'
 
 const profile: ExecutionProfileSnapshot = {
@@ -85,9 +85,8 @@ type Harness = {
   database: SessionDatabase
   runtime: SessionRuntimeService
   session: ReturnType<SessionRuntimeService['createSession']>
-  compactor: SessionCompactor
+  compactor: CodingAgent
   streamCalls: Parameters<ChatProvider['stream']>[0][]
-  isCompacting: (sessionId: string) => boolean
 }
 
 async function createHarness(
@@ -114,8 +113,7 @@ async function createHarness(
     runtime,
     session,
     compactor,
-    streamCalls,
-    isCompacting: (sessionId) => compactor.isCompacting(sessionId)
+    streamCalls
   }
 }
 
@@ -127,11 +125,12 @@ async function createCompactor({
   runtime: SessionRuntimeService
   stream: ChatProvider['stream']
   maxSummaryChars?: number
-}): Promise<SessionCompactor> {
+}): Promise<CodingAgent> {
   const models = await createModels(() => createProvider(stream), configuration)
-  return new SessionCompactor({
+  return new CodingAgent({
     runtime,
-    modelProfile: new SessionModelProfile({ models, runtime }),
+    models,
+    requestApproval: new PermissionRequests().request,
     maxSummaryChars
   })
 }
@@ -406,7 +405,7 @@ describe('SessionCompactor', () => {
     const compactor = await createCompactor({ runtime, stream })
 
     const pending = compactor.compact(session.id)
-    const cancellation = compactor.cancel(session.id)
+    const cancellation = compactor.cancelCompaction(session.id)
     resolve([textDelta('Summary.'), providerFinish({ reason: 'stop' })])
     await cancellation
 
@@ -433,7 +432,7 @@ describe('SessionCompactor', () => {
 
     const pending = compactor.compact(session.id)
     await streamedFirstPart.promise
-    const cancellation = compactor.cancel(session.id)
+    const cancellation = compactor.cancelCompaction(session.id)
     releaseRest.resolve()
     await cancellation
 
@@ -544,9 +543,10 @@ describe('SessionCompactor', () => {
     completeTurn(runtime, session.id, 'first')
     const deferred = deferredStream()
     const models = await createModels(() => createProvider(deferred.stream), configuration)
-    const compactor = new SessionCompactor({
+    const compactor = new CodingAgent({
       runtime,
-      modelProfile: new SessionModelProfile({ models, runtime })
+      models,
+      requestApproval: new PermissionRequests().request
     })
     const capturedProfile = runtime.getDefaultProfile(session.id)
     const pending = compactor.compact(session.id)
@@ -585,7 +585,6 @@ describe('SessionCompactor', () => {
     const first = compactor.compact(session.id)
     firstStream.resolve([providerFinish({ reason: 'length' })])
     await expect(first).rejects.toThrow('notice persistence failed')
-    expect(compactor.isCompacting(session.id)).toBe(false)
     expect(() => beginTurn(runtime, session.id, 'after-failure')).not.toThrow()
     const pendingSecond = compactor.compact(second.id)
     compactor.dispose()
@@ -613,7 +612,7 @@ describe('SessionCompactor', () => {
       'notice persistence failed',
       'notice persistence failed'
     ])
-    expect(compactor.isCompacting(second.id)).toBe(false)
+    expect(() => beginTurn(runtime, second.id, 'after-drain')).not.toThrow()
     await expect(compactor.drain()).resolves.toBeUndefined()
   })
 
@@ -625,7 +624,6 @@ describe('SessionCompactor', () => {
       stream: async () => streamFrom([providerFinish({ reason: 'length' })])
     })
     await compactor.compact(session.id)
-    expect(compactor.isCompacting(session.id)).toBe(false)
     await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'failed' })
   })
 
@@ -664,6 +662,6 @@ describe('SessionCompactor', () => {
     resolve([textDelta('Partial.'), providerFinish({ reason: 'length' })])
 
     await expect(pending).rejects.toThrow(/database/i)
-    expect(compactor.isCompacting(session.id)).toBe(false)
+    await expect(compactor.compact(session.id)).rejects.toThrow(/database/i)
   })
 })

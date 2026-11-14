@@ -2,7 +2,7 @@ import {
   ChatSkillInvocationPartSchema,
   type ChatSkillInvocationPart,
   type SkillCatalog
-} from '@shared/ai/skills'
+} from '@mico/coding-agent/contracts'
 import * as React from 'react'
 import { COMPACT_COMMAND } from './composer-commands'
 

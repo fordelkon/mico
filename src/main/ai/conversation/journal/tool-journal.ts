@@ -1,10 +1,14 @@
 import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
 import * as z from 'zod'
 import type { SessionDatabase } from '@main/data/session-database'
-import type { ModelStepAccepted, ToolExecutionStarted, ToolExecutionSettled } from '../../execution'
+import type {
+  ModelStepAccepted,
+  ToolExecutionStarted,
+  ToolExecutionSettled
+} from '@mico/agent-core'
 import { assertPayloadDigest, canonicalJson, type RunRow, type SessionEventLog } from './event-log'
 import { assembleReplayEvents, parseAgentStepPayload, parseMessagePayload } from './transcript'
-import { toStoredToolTrace } from './tool-trace-presentation'
+import { toStoredToolTrace } from '@mico/coding-agent'
 
 type JournalRow = {
   kind: string

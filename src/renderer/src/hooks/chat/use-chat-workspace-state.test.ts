@@ -1,6 +1,6 @@
-import type { ModelReasoningCapabilities } from '@shared/data/schemas/chat'
+import type { ModelReasoningCapabilities, TurnStreamEvent } from '@mico/coding-agent/contracts'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
-import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { WorkspacesAPI } from '@shared/ipc/schemas/workspaces'
 import { act, renderHook, waitFor } from '@testing-library/react'

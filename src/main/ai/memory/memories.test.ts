@@ -5,12 +5,12 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-  MAX_MEMORY_PREFERENCES_BYTES,
   MAX_MEMORY_SEARCH_BYTES,
-  Memories,
   type MemoryContext,
   type MemoryRememberInput
-} from './index'
+} from '@mico/coding-agent'
+import { Memories } from './index'
+import { MAX_MEMORY_PREFERENCES_BYTES } from './schema'
 
 const preference: MemoryRememberInput = {
   scope: 'user',

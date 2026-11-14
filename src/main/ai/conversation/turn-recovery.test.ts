@@ -1,7 +1,9 @@
+import { PermissionRequests } from './tool-approvals'
+import { CodingAgent } from '@mico/coding-agent'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ChatProvider } from '@mico/ai-providers'
-import type { TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type { TurnStreamEvent } from '@mico/coding-agent/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionDatabase } from '@main/data/session-database'
 import { SessionRuntimeService } from './runtime'
@@ -11,8 +13,6 @@ import {
   isTitleStream,
   removeTemporaryPaths
 } from './test-helpers'
-import { SessionModelProfile } from './model-profile'
-import { TurnExecutor } from './turn'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -44,8 +44,7 @@ async function setup(provider: ChatProvider) {
     configuration,
     'original-entry'
   )
-  const profiles = new SessionModelProfile({ models, runtime })
-  return { database, runtime, session, profiles, models }
+  return { database, runtime, session, models }
 }
 
 describe('TurnExecutor recovery', () => {
@@ -76,15 +75,16 @@ describe('TurnExecutor recovery', () => {
         }
       })
     }
-    const { database, runtime, profiles } = await setup(provider)
+    const { database, runtime, models } = await setup(provider)
     const session = runtime.createSession({
       title: 'Project',
       defaultProfile: null,
       projectId: 'project',
       cwd
     })
-    const executor = new TurnExecutor({
-      profiles,
+    const executor = new CodingAgent({
+      requestApproval: new PermissionRequests().request,
+      models,
       runtime,
       toolHooks: {
         preToolUse: [
@@ -137,8 +137,12 @@ describe('TurnExecutor recovery', () => {
         }
       })
     }
-    const { database, runtime, session, profiles } = await setup(provider)
-    const executor = new TurnExecutor({ profiles, runtime })
+    const { database, runtime, session, models } = await setup(provider)
+    const executor = new CodingAgent({
+      requestApproval: new PermissionRequests().request,
+      models,
+      runtime
+    })
     const events: TurnStreamEvent[] = []
     executor.startTurn(
       {
@@ -170,7 +174,7 @@ describe('TurnExecutor recovery', () => {
         sessionId: session.id,
         requestId: 'next',
         userMessage: message,
-        profile: profiles.toProfile(configuration, 'original-entry', 'none')
+        profile: models.toProfile(configuration, 'original-entry', 'none')
       })
     ).not.toThrow()
     database.close()
@@ -182,8 +186,12 @@ describe('TurnExecutor recovery', () => {
       getModelCapabilities: async () => null,
       stream: () => streams[calls++].promise
     }
-    const { database, runtime, session, profiles } = await setup(provider)
-    const executor = new TurnExecutor({ profiles, runtime })
+    const { database, runtime, session, models } = await setup(provider)
+    const executor = new CodingAgent({
+      requestApproval: new PermissionRequests().request,
+      models,
+      runtime
+    })
     vi.useFakeTimers()
     try {
       const request = {
@@ -230,11 +238,15 @@ describe('TurnExecutor recovery', () => {
     const stream = vi.fn<ChatProvider['stream']>(async () => ({
       async *[Symbol.asyncIterator]() {}
     }))
-    const { database, runtime, session, profiles } = await setup({
+    const { database, runtime, session, models } = await setup({
       stream,
       getModelCapabilities: () => capabilities.promise
     })
-    const executor = new TurnExecutor({ profiles, runtime })
+    const executor = new CodingAgent({
+      requestApproval: new PermissionRequests().request,
+      models,
+      runtime
+    })
     vi.useFakeTimers()
     try {
       const events: TurnStreamEvent[] = []

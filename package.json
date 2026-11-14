@@ -13,7 +13,7 @@
     "format:check": "biome format && biome lint",
     "test": "vitest run && pnpm --filter @mico/ui test && pnpm --filter @mico/ai-providers test",
     "test:coverage:app": "vitest run --coverage",
-    "test:coverage": "pnpm test:coverage:app && pnpm --filter @mico/ui test:coverage && pnpm --filter @mico/ai-providers test:coverage",
+    "test:coverage": "pnpm test:coverage:app && pnpm -r --filter \"./packages/*\" --workspace-concurrency=1 run test:coverage",
     "lint": "oxlint --fix && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --cache && pnpm format",
     "test:lint": "oxlint --deny-warnings && eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --cache",
     "test:e2e": "playwright test",
@@ -21,7 +21,7 @@
     "typecheck:providers": "pnpm --filter @mico/ai-providers typecheck",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck:ui": "pnpm --filter @mico/ui typecheck",
-    "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web && pnpm run typecheck:ui && pnpm run typecheck:providers",
+    "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web && pnpm --filter \"./packages/*\" typecheck",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "icons": "pnpm dlx electron-icon-builder -i build/icon.png -o build --flatten && uv run scripts/gen-tray-icons.py && node scripts/sync-electron-dev-icon.mjs",
@@ -33,14 +33,14 @@
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^4.0.7",
     "@electron-toolkit/utils": "^4.0.0",
+    "@mico/agent-core": "workspace:*",
     "@mico/ai-providers": "workspace:*",
+    "@mico/coding-agent": "workspace:*",
     "@vscode/ripgrep": "1.18.0",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "yaml": "^2.9.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

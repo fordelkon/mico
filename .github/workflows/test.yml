@@ -31,6 +31,12 @@ jobs:
           - project: app
             command: pnpm test:coverage:app
             coverage: coverage/
+          - project: agent-core
+            command: pnpm --filter @mico/agent-core test:coverage
+            coverage: packages/agent-core/coverage/
+          - project: coding-agent
+            command: pnpm --filter @mico/coding-agent test:coverage
+            coverage: packages/coding-agent/coverage/
           - project: ui
             command: pnpm --filter @mico/ui test:coverage
             coverage: packages/ui/coverage/

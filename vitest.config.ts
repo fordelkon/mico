@@ -14,15 +14,23 @@ export default defineConfig({
   test: {
     // Coverage must stay scoped to the sources these projects execute. Without
     // an explicit include, the default pulls every TS file in the repo —
-    // including packages/* that only their own vitest projects test — and
+    // including provider and UI packages with separate coverage reports — and
     // reports them as 0% in the root report.
     coverage: {
-      include: ['src/main/**/*.{ts,tsx}', 'src/renderer/**/*.{ts,tsx}', 'src/shared/**/*.ts'],
+      include: [
+        'src/main/**/*.{ts,tsx}',
+        'src/renderer/**/*.{ts,tsx}',
+        'src/shared/**/*.ts',
+        'packages/agent-core/src/**/*.ts',
+        'packages/coding-agent/src/**/*.ts'
+      ],
       reporter: ['text', 'html', 'json-summary'],
       reportOnFailure: true,
       thresholds: { statements: 80, branches: 77, functions: 80, lines: 85 }
     },
     projects: [
+      './packages/agent-core/vitest.config.ts',
+      './packages/coding-agent/vitest.config.ts',
       {
         extends: true,
         test: {

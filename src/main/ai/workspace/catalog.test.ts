@@ -69,36 +69,6 @@ describe('Workspaces', () => {
     })
   })
 
-  it('user changes guidance when a snapshot exists, then its captured sources remain stable', async () => {
-    const { service } = await createService()
-    const cwd = service.getDefaultWorkspacePath()
-    const base = join(cwd, '.agents', 'skills', 'review')
-    await mkdir(base, { recursive: true })
-    const path = join(base, 'SKILL.md')
-    await writeFile(
-      path,
-      '---\nname: review\ndescription: Original description\n---\nOriginal body'
-    )
-    await writeFile(join(cwd, 'AGENTS.md'), 'Original guidance')
-    const turn = await service.prepareSources(cwd)
-    await writeFile(path, '---\nname: review\ndescription: Changed description\n---\nChanged body')
-    await writeFile(join(cwd, 'AGENTS.md'), 'Changed guidance')
-
-    expect(turn.projectInstructions).toContain('Original guidance')
-    expect(turn.skills.skills.find((skill) => skill.name === 'review')?.description).toBe(
-      'Original description'
-    )
-    expect(await turn.loadInvokedSkill('project-agents:review', 'review')).toContain(
-      'Original body'
-    )
-    expect(await turn.skills.load('project-agents:review')).toContain('Original body')
-    const refreshed = await Workspaces.prepareSources(cwd)
-    expect(refreshed.projectInstructions).toContain('Changed guidance')
-    expect(await refreshed.loadInvokedSkill('project-agents:review', 'review')).toContain(
-      'Changed body'
-    )
-  })
-
   it('user browses an archived project when skills change, then catalogs and documents reflect its registered root', async () => {
     const { service, userDataPath } = await createService({ createId: () => 'project-1' })
     const projectPath = join(userDataPath, 'project')
@@ -128,23 +98,6 @@ describe('Workspaces', () => {
       await service.readSkillDocument(project.id, 'project-agents:workspace-only')
     ).toMatchObject({ body: 'Changed body' })
     await expect(service.skillCatalog(projectPath)).rejects.toThrow('Project does not exist.')
-  })
-
-  it('user invokes a stale identity when a turn starts, then names cannot select another skill', async () => {
-    const { service } = await createService()
-    const cwd = service.getDefaultWorkspacePath()
-    const base = join(cwd, '.agents', 'skills', 'review')
-    await mkdir(base, { recursive: true })
-    await writeFile(
-      join(base, 'SKILL.md'),
-      '---\nname: review\ndescription: Review\n---\nInstructions'
-    )
-    const turn = await Workspaces.prepareSources(cwd)
-
-    await expect(turn.loadInvokedSkill('review', 'review')).rejects.toThrow('Unknown skill')
-    await expect(turn.loadInvokedSkill('project-agents:review', 'renamed')).rejects.toThrow(
-      'The selected skill identity changed.'
-    )
   })
 
   it('user can re-add an archived project when adding its path again, then its rootPath is preserved', async () => {

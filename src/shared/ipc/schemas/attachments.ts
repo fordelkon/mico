@@ -2,7 +2,7 @@ import { IpcChannel } from '../../IpcChannel'
 import type { IpcMethod } from '../contracts'
 import * as z from 'zod'
 
-import { ChatDocumentPartSchema, CodeDocumentsMaxTextBytes } from '../../data/schemas/chat'
+import { ChatDocumentPartSchema, CodeDocumentsMaxTextBytes } from '@mico/coding-agent/contracts'
 import { defineSchema } from '../../data/define'
 
 const CodeDocumentPartsSchema = defineSchema(

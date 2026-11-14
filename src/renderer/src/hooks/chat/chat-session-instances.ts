@@ -6,9 +6,12 @@ import {
   isActiveChatResponse,
   type MicoUIMessage
 } from '@renderer/types/chat'
-import type { PermissionMode } from '@shared/ai/permissions'
-import type { ChatMessage, ThinkingSelection } from '@shared/data/schemas/chat'
-import type { SessionRecovery } from '@shared/data/schemas/session'
+import type {
+  PermissionMode,
+  ChatMessage,
+  ThinkingSelection,
+  SessionRecovery
+} from '@mico/coding-agent/contracts'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import * as React from 'react'
 

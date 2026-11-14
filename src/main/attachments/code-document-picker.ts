@@ -8,9 +8,9 @@ import {
   CodeDocumentExtensions,
   CodeDocumentMaxNameLength,
   CodeDocumentMaxTextBytes,
-  CodeDocumentsMaxTextBytes
-} from '@shared/data/schemas/chat'
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+  CodeDocumentsMaxTextBytes,
+  type ChatDocumentPart
+} from '@mico/coding-agent/contracts'
 
 type IpcFileHandle = Pick<Awaited<ReturnType<typeof open>>, 'close' | 'read'>
 type CodeDocumentPickerDependencies = {

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatAPI } from '@shared/ipc/schemas/chat'
-import type { ToolPermissionData } from '@shared/ai/permissions'
+import type { ToolPermissionData } from '@mico/coding-agent/contracts'
 import { ToolPermissionCard } from './tool-permission-card'
 
 const permission: ToolPermissionData = {

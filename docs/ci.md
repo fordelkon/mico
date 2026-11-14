@@ -7,7 +7,7 @@
 | `workflows.yml` | Validate GitHub Actions with actionlint | Pull requests and main pushes affecting `.github/`; manual |
 | `lint.yml` | Independent formatting and lint checks | Pull requests, main pushes, manual, reusable release validation |
 | `typecheck.yml` | Workspace type checks | Pull requests, main pushes, manual, reusable release validation |
-| `test.yml` | Parallel app, UI, and provider coverage tests | Pull requests, main pushes, manual, reusable release validation |
+| `test.yml` | Parallel application, agent-core, coding-agent, UI, and provider coverage tests | Pull requests, main pushes, manual, reusable release validation |
 | `e2e.yml` | Source regression and internal packaged smoke on Windows and macOS | Pull requests, main pushes, manual |
 | `provider-checks.yml` | Tests against configured paid provider endpoints | Manual only |
 | `release.yml` | Validate a version tag, build installers, verify applications, and publish assets | Version-tag pushes; manual for an existing tag |
@@ -27,12 +27,11 @@ Release validation always checks the resolved tag commit in full.
 
 Replace the former combined `Static checks` requirement in branch protection with
 `Formatting`, `Lint`, and `Typecheck`. Require `Tests` for the aggregate result of
-all three coverage projects. If E2E or packaging jobs were required previously,
+all five coverage jobs. If E2E or packaging jobs were required previously,
 update those requirements to the job names displayed by the new E2E workflow.
 Removing a workflow does not update repository rules automatically.
 
-Coverage projects run independently and upload their own reports. Coverage
-thresholds and source scopes belong to each project's Vitest configuration.
+Each coverage job uploads its own report. See [coverage gates and local commands](testing.md#coverage-gate) for source scopes and the relationship between package and application coverage.
 Pinned Action revisions are maintained through Dependabot.
 
 ## Internal application verification

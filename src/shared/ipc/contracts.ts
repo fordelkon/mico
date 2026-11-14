@@ -1,31 +1,31 @@
 import * as z from 'zod'
-import { PermissionResponseSchema } from '../ai/permissions'
 import {
+  ModelEntryIdSchema,
+  PermissionResponseSchema,
   SkillCatalogRequestSchema,
   SkillCatalogSchema,
   SkillDocumentRequestSchema,
-  SkillDocumentSchema
-} from '../ai/skills'
-import { ModelReasoningCapabilitiesSchema, ThinkingSelectionSchema } from '../data/schemas/chat'
-import { AppearancePreferenceSchema } from '../data/schemas/preference'
-import {
-  ModelEntryIdSchema,
-  ModelEntrySchema,
-  ProviderConfigurationSchema,
-  ProviderLibrarySchema
-} from '../data/schemas/provider'
-import {
+  SkillDocumentSchema,
+  ModelReasoningCapabilitiesSchema,
+  ThinkingSelectionSchema,
   PersistedSessionSchema,
   ProjectIdSchema,
   SessionIdSchema,
   SessionSummarySchema,
-  SessionTitleSchema
-} from '../data/schemas/session'
+  SessionTitleSchema,
+  TurnRequestIdSchema,
+  TurnStartRequestSchema
+} from '@mico/coding-agent/contracts'
+import { AppearancePreferenceSchema } from '../data/schemas/preference'
+import {
+  ModelEntrySchema,
+  ProviderConfigurationSchema,
+  ProviderLibrarySchema
+} from '../data/schemas/provider'
 import { ThemePreferencesSchema, ThemeStateSchema } from '../data/schemas/theme'
 import { WorkspaceProjectSchema } from '../data/schemas/workspace'
 import { IpcChannel } from '../IpcChannel'
 import { CodeDocumentPartsSchema } from './schemas/attachments'
-import { TurnRequestIdSchema, TurnStartRequestSchema } from './schemas/chat'
 import {
   AddModelRequestSchema,
   DiscoveredModelSchema,

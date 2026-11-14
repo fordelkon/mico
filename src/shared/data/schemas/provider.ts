@@ -1,4 +1,5 @@
 import * as z from 'zod'
+import { ModelEntryIdSchema } from '@mico/coding-agent/contracts'
 
 import { defineSchema } from '../define'
 
@@ -75,7 +76,6 @@ const ProviderConfigurationSchema = defineSchema(
     })
   ])
 )
-const ModelEntryIdSchema = defineSchema(z.string().trim().min(1))
 const ProviderModelIdSchema = defineSchema(z.string().trim().min(1))
 const ModelDisplayNameSchema = defineSchema(z.string().trim().min(1))
 const ModelEntrySchema = defineSchema(
@@ -135,7 +135,6 @@ export {
   CustomProviderIconSchema,
   CustomProviderIdSchema,
   CustomProviderSchema,
-  ModelEntryIdSchema,
   ModelEntrySchema,
   ProviderBaseUrlSchema,
   ProviderApiKeySchema,

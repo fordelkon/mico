@@ -1,0 +1,25 @@
+{
+  "name": "@mico/agent-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "^4.0.7",
+    "@mico/ai-providers": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "4.1.6",
+    "ai": "^7.0.77",
+    "typescript": "^5.9.3",
+    "vitest": "4.1.6"
+  }
+}

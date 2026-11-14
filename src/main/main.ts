@@ -44,7 +44,6 @@ async function createMainServices(): Promise<MainServices> {
   const conversations = new Conversations({
     database: sessionDatabase,
     models,
-    workspace,
     memories
   })
   conversations.recoverInterruptedRuns()

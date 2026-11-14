@@ -1,8 +1,12 @@
 import type { MicoUIMessage } from '@renderer/types/chat'
-import type { ContextMeasurement } from '@shared/ai/context-measurement'
-import type { PermissionMode } from '@shared/ai/permissions'
-import type { ChatUserMessage, ThinkingSelection } from '@shared/data/schemas/chat'
-import type { ChatAPI, TurnStartRequest } from '@shared/ipc/schemas/chat'
+import type {
+  ContextMeasurement,
+  PermissionMode,
+  ChatUserMessage,
+  ThinkingSelection,
+  TurnStartRequest
+} from '@mico/coding-agent/contracts'
+import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { ChatTransport, UIMessageChunk } from 'ai'
 
 function toLatestUserMessage(messages: MicoUIMessage[]): ChatUserMessage {

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { ChatDocumentPart } from '@mico/coding-agent/contracts'
 import { chatComposerDrafts, composerDraftKey, useChatComposerDraft } from './composer-drafts'
 
 const key = composerDraftKey('in-flight-draft')

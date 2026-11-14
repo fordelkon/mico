@@ -1,7 +1,7 @@
 import { useConversationTranscript, type ConversationTranscriptSource } from '@renderer/hooks/chat'
 import * as React from 'react'
 
-import type { ToolPermissionData } from '@shared/ai/permissions'
+import type { ToolPermissionData } from '@mico/coding-agent/contracts'
 import { ToolPermissionCard } from '../conversation/tools/tool-permission-card'
 
 /** Pending decisions belong to the active turn's composer, outside the transcript scroll area. */

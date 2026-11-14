@@ -1,4 +1,4 @@
-import type { SkillSource } from '@shared/ai/skills'
+import type { SkillSource } from '@mico/coding-agent/contracts'
 
 const sourceLabels = {
   'project-agents': 'Workspace · .agents',

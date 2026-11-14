@@ -5,23 +5,25 @@ import { join, resolve } from 'node:path'
 import { JsonDocument } from '@main/data/atomic-json'
 
 import {
-  MAX_MEMORY_DOCUMENT_BYTES,
-  MAX_MEMORY_PREFERENCES_BYTES,
-  MAX_MEMORY_RECORDS,
   MAX_MEMORY_SEARCH_BYTES,
-  MemoryDocumentSchema,
   MemoryForgetInputSchema,
   MemoryRememberInputSchema,
   MemorySearchInputSchema,
   type MemoryContext,
-  type MemoryDocument,
   type MemoryForgetInput,
   type MemoryReceipt,
   type MemoryRecord,
   type MemoryRememberInput,
   type MemoryScope,
   type MemorySearchInput,
-  type MemorySearchResult,
+  type MemorySearchResult
+} from '@mico/coding-agent'
+import {
+  MAX_MEMORY_DOCUMENT_BYTES,
+  MAX_MEMORY_PREFERENCES_BYTES,
+  MAX_MEMORY_RECORDS,
+  MemoryDocumentSchema,
+  type MemoryDocument,
   type StoredRecord
 } from './schema'
 
@@ -250,4 +252,3 @@ class Memories {
 }
 
 export { Memories }
-export type { MemoriesOptions, MemoryBinding }

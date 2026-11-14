@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import { ProviderDatabase } from '@main/data/provider-database'
 import { Models } from './models'
-import { ModelSelectionError } from './selection'
+import { ModelSelectionError } from '@mico/coding-agent'
 
 type CreatedProvider = Pick<ChatProvider, 'getModelCapabilities' | 'stream'>
 

@@ -10,14 +10,14 @@ import {
   Spinner,
   Textarea
 } from '@mico/ui'
-import type { PermissionMode } from '@shared/ai/permissions'
-import type { ChatSkillInvocationPart } from '@shared/ai/skills'
-
 import type {
+  PermissionMode,
+  ChatSkillInvocationPart,
   ChatDocumentPart,
   ModelReasoningCapabilities,
   ThinkingSelection
-} from '@shared/data/schemas/chat'
+} from '@mico/coding-agent/contracts'
+
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import { ArrowUpIcon, ShieldCheckIcon, ShieldIcon, SquareIcon } from 'lucide-react'
 import * as React from 'react'

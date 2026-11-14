@@ -1,72 +1,48 @@
-import { isBuiltin } from 'node:module'
+import { createRequire, isBuiltin } from 'node:module'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
-const locations = {
-  main: 'src/main/',
-  preload: 'src/preload/',
-  renderer: 'src/renderer/',
-  shared: 'src/shared/',
-  ui: 'packages/ui/',
-  providers: 'packages/ai-providers/'
-}
+const workspace = createRequire(import.meta.url)
+const aliases = { '@main': 'src/main', '@renderer': 'src/renderer/src', '@shared': 'src/shared' }
 const allowed = {
-  main: new Set(['main', 'shared', 'providers']),
-  preload: new Set(['preload', 'shared']),
-  renderer: new Set(['renderer', 'shared', 'ui']),
-  shared: new Set(['shared']),
-  ui: new Set(['ui']),
-  providers: new Set(['providers'])
+  main: ['main', 'shared', 'agent-core', 'ai-providers', 'coding-agent', 'contracts'],
+  preload: ['preload', 'shared', 'contracts'],
+  renderer: ['renderer', 'shared', 'ui', 'contracts'],
+  shared: ['shared', 'contracts'],
+  ui: ['ui'],
+  'agent-core': ['agent-core', 'ai-providers'],
+  'coding-agent': ['coding-agent', 'contracts', 'agent-core', 'ai-providers'],
+  contracts: ['contracts'],
+  'ai-providers': ['ai-providers']
 }
 
-function owner(filename) {
-  const path = relative(root, filename).replaceAll('\\', '/')
-  return Object.entries(locations).find(([, prefix]) => path.startsWith(prefix))?.[0]
+function projectPath(filename) {
+  return relative(root, filename).replaceAll('\\', '/')
 }
 
-const aiDependencies = {
-  conversation: new Set([
-    'models',
-    'workspace',
-    'skills',
-    'tools',
-    'execution',
-    'context',
-    'prompt',
-    'memory'
-  ]),
-  models: new Set(),
-  workspace: new Set(['skills']),
-  skills: new Set(),
-  tools: new Set(['execution', 'skills', 'memory']),
-  execution: new Set(),
-  context: new Set(),
-  prompt: new Set(),
-  memory: new Set()
-}
-const portableAiModules = new Set(['execution', 'context', 'prompt'])
-
-function aiModule(filename) {
-  const path = relative(root, filename).replaceAll('\\', '/')
-  const match = /^src\/main\/ai\/([^/]+)(?:\/(.*))?$/.exec(path)
-  return match && Object.hasOwn(aiDependencies, match[1])
-    ? { name: match[1], entry: match[2] }
-    : undefined
+function owner(path) {
+  if (/^packages\/coding-agent\/src\/contracts(?:\/|$)/.test(path)) return 'contracts'
+  return /^(?:src|packages)\/([^/]+)/.exec(path)?.[1]
 }
 
-function chatRuntime(filename) {
-  const path = relative(root, filename).replaceAll('\\', '/')
-  const match = /^src\/renderer\/src\/hooks\/chat(?:\/(.*))?$/.exec(path)
-  return match ? { entry: match[1] } : undefined
+const chat = 'src/renderer/src/hooks/chat'
+const conversation = 'src/main/ai/conversation'
+
+function moduleRoot(path) {
+  if (path === chat || path.startsWith(`${chat}/`)) return chat
+  return /^src\/main\/ai\/(?:conversation|models|workspace|memory)(?=\/|$)/.exec(path)?.[0]
 }
 
-function ownsChatSdk(filename) {
-  const path = relative(root, filename).replaceAll('\\', '/')
-  return (
-    path.startsWith('src/renderer/src/hooks/chat/') ||
-    /^src\/renderer\/src\/services\/ai-transport\/[^/]+\.test\.[jt]s$/.test(path)
-  )
+function resolveImport(specifier, filename) {
+  if (specifier.startsWith('.')) return projectPath(resolve(dirname(filename), specifier))
+  if (specifier.startsWith('@mico/')) {
+    // Node resolves the same workspace export map used by the application.
+    return projectPath(workspace.resolve(specifier))
+  }
+  const [alias, ...parts] = specifier.split('/')
+  if (Object.hasOwn(aliases, alias))
+    return projectPath(resolve(root, aliases[alias], parts.join('/')))
 }
 
 const processImports = {
@@ -77,126 +53,91 @@ const processImports = {
       forbidden:
         '{{source}} must not import {{target}}. Use its owning process or package interface.',
       privatePackage: 'Consume workspace packages through their public exports.',
-      privateAiModule: 'Consume {{target}} through its public module root.',
-      privateChatRuntime: 'Consume the renderer chat runtime through its public module root.',
+      privateModule: 'Consume {{target}} through its public module root.',
       chatSdk: 'Keep SDK Chat instances and subscriptions inside the renderer chat runtime.',
       aiDirection:
-        '{{source}} must not import {{target}}. AI module dependencies must remain acyclic.'
+        '{{source}} must not import {{target}}. Conversation composes the desktop AI modules.'
     }
   },
   create(context) {
-    const source = owner(context.filename)
-    if (!source) return {}
-    const check = (node) => {
+    const filename = context.filename
+    const path = projectPath(filename)
+    const source = owner(path)
+    if (!Object.hasOwn(allowed, source)) return {}
+    const sourceModule = moduleRoot(path)
+    const isTest = /\.test\.[cm]?[jt]sx?$/.test(path)
+    const ownsSdk =
+      sourceModule === chat ||
+      /^src\/renderer\/src\/services\/ai-transport\/[^/]+\.test\.[jt]s$/.test(path)
+
+    function check(node) {
       const specifier = node?.value
-      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- ESLint supplies literals of several types; only strings identify imports.
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Only string literals identify imports.
       if (typeof specifier !== 'string') return
-      const native =
-        isBuiltin(specifier) || specifier === 'electron' || specifier.startsWith('electron/')
-      const electron =
-        specifier === 'electron' ||
-        specifier.startsWith('electron/') ||
-        specifier.startsWith('@electron-toolkit/')
-      const browser = ['react', 'react-dom', '@ai-sdk/react'].some(
-        (name) => specifier === name || specifier.startsWith(`${name}/`)
-      )
+      const sdk = /^@ai-sdk\/react(?:\/|$)/.test(specifier)
+      if (source === 'renderer' && sdk && !ownsSdk) {
+        context.report({ node, messageId: 'chatSdk' })
+        return
+      }
+      let targetPath
+      try {
+        targetPath = resolveImport(specifier, filename)
+      } catch {
+        context.report({ node, messageId: 'privatePackage' })
+        return
+      }
+      const target = targetPath && owner(targetPath)
+      const native = isBuiltin(specifier)
+      const electron = /^(?:electron(?:\/|$)|@electron-toolkit\/)/.test(specifier)
+      const restrictedExternal =
+        source === 'contracts' &&
+        !target &&
+        specifier !== 'zod' &&
+        !(specifier === 'ai' && node.parent.importKind === 'type') &&
+        !(specifier === 'vitest' && isTest)
       if (
-        (native && ['renderer', 'shared', 'ui'].includes(source)) ||
-        (electron && !['main', 'preload'].includes(source)) ||
-        (browser && source === 'shared')
+        (target && !allowed[source].includes(target)) ||
+        (electron && source !== 'main' && source !== 'preload') ||
+        (native &&
+          (['renderer', 'shared', 'ui'].includes(source) ||
+            (source === 'agent-core' && !isTest))) ||
+        (source === 'shared' && (sdk || /^react(?:-dom)?(?:\/|$)/.test(specifier))) ||
+        restrictedExternal
       ) {
         context.report({ node, messageId: 'forbidden', data: { source, target: specifier } })
         return
       }
+      if (!targetPath) return
       if (
-        source === 'renderer' &&
-        (specifier === '@ai-sdk/react' || specifier.startsWith('@ai-sdk/react/')) &&
-        !ownsChatSdk(context.filename)
-      ) {
-        context.report({ node, messageId: 'chatSdk' })
-        return
-      }
-      const resolvedPath = specifier.startsWith('.')
-        ? resolve(dirname(context.filename), specifier)
-        : specifier.startsWith('@main/')
-          ? resolve(root, 'src/main', specifier.slice('@main/'.length))
-          : specifier.startsWith('@renderer/')
-            ? resolve(root, 'src/renderer/src', specifier.slice('@renderer/'.length))
-            : specifier.startsWith('@shared/')
-              ? resolve(root, 'src/shared', specifier.slice('@shared/'.length))
-              : undefined
-      const targetChat = resolvedPath ? chatRuntime(resolvedPath) : undefined
-      if (
-        targetChat &&
-        !chatRuntime(context.filename) &&
-        targetChat.entry &&
-        !/^index(?:\.[cm]?[jt]sx?)?$/.test(targetChat.entry)
-      ) {
-        context.report({ node, messageId: 'privateChatRuntime' })
-        return
-      }
-      const targetAi = resolvedPath ? aiModule(resolvedPath) : undefined
-      const sourceAi = aiModule(context.filename)
-      const isTest = /\.test\.[cm]?[jt]sx?$/.test(context.filename)
-      const portable = sourceAi && portableAiModules.has(sourceAi.name) && !isTest
-      if (
-        portable &&
-        (native ||
-          electron ||
-          (resolvedPath && owner(resolvedPath) === 'main' && !targetAi) ||
-          (resolvedPath &&
-            relative(root, resolvedPath).replaceAll('\\', '/').startsWith('src/shared/ipc/')))
-      ) {
-        context.report({
-          node,
-          messageId: 'forbidden',
-          data: { source: sourceAi.name, target: specifier }
-        })
-        return
-      }
-      if (targetAi && sourceAi?.name !== targetAi.name) {
-        if (sourceAi && !isTest && !aiDependencies[sourceAi.name].has(targetAi.name)) {
-          context.report({
-            node,
-            messageId: 'aiDirection',
-            data: { source: sourceAi.name, target: targetAi.name }
-          })
-          return
-        }
-        if (targetAi.entry && !/^index(?:\.[cm]?[jt]sx?)?$/.test(targetAi.entry)) {
-          context.report({
-            node,
-            messageId: 'privateAiModule',
-            data: { target: targetAi.name }
-          })
-          return
-        }
-      }
-      let target
-      if (resolvedPath) target = owner(resolvedPath)
-      else if (specifier === '@mico/ai-providers' || specifier.startsWith('@mico/ai-providers/'))
-        target = 'providers'
-      else if (specifier === '@mico/ui' || specifier.startsWith('@mico/ui/')) target = 'ui'
-      if (target && !allowed[source].has(target)) {
-        context.report({ node, messageId: 'forbidden', data: { source, target } })
-      } else if (
-        (specifier.startsWith('.') && source !== target && ['ui', 'providers'].includes(target)) ||
-        specifier.startsWith('@mico/ai-providers/') ||
-        specifier.startsWith('@mico/ui/src/')
+        targetPath.startsWith('packages/') &&
+        !specifier.startsWith('@mico/') &&
+        source !== target &&
+        !(source === 'coding-agent' && target === 'contracts')
       ) {
         context.report({ node, messageId: 'privatePackage' })
+        return
+      }
+      const targetModule = moduleRoot(targetPath)
+      if (!targetModule || targetModule === sourceModule) return
+      if (source === 'main' && sourceModule && sourceModule !== conversation && !isTest) {
+        context.report({
+          node,
+          messageId: 'aiDirection',
+          data: { source: sourceModule, target: targetModule }
+        })
+      } else if (
+        targetPath !== targetModule &&
+        !/^\/index(?:\.[cm]?[jt]sx?)?$/.test(targetPath.slice(targetModule.length))
+      ) {
+        context.report({ node, messageId: 'privateModule', data: { target: targetModule } })
       }
     }
     return {
-      ImportDeclaration: (node) => check(node.source),
-      ExportNamedDeclaration: (node) => check(node.source),
-      ExportAllDeclaration: (node) => check(node.source),
-      ImportExpression: (node) => check(node.source),
+      'ImportDeclaration, ExportNamedDeclaration, ExportAllDeclaration, ImportExpression': (node) =>
+        check(node.source),
       TSExternalModuleReference: (node) => check(node.expression),
-      CallExpression: (node) => {
-        if (node.callee.type === 'Identifier' && node.callee.name === 'require')
-          check(node.arguments[0])
-      }
+      "CallExpression[callee.type='Identifier'][callee.name='require']": (node) =>
+        check(node.arguments[0])
     }
   }
 }

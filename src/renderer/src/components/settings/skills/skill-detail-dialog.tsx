@@ -7,7 +7,7 @@ import {
   DialogTitle,
   Spinner
 } from '@mico/ui'
-import type { SkillCatalog, SkillDocument } from '@shared/ai/skills'
+import type { SkillCatalog, SkillDocument } from '@mico/coding-agent/contracts'
 import { FileText, ScrollText } from 'lucide-react'
 import * as React from 'react'
 import { Markdown } from '../../markdown/markdown'

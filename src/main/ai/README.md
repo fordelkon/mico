@@ -1,21 +1,14 @@
-# Main AI Modules
+# Desktop AI Host
 
-Each module owns behavior behind its public root. Use relative imports inside an owner and public roots across owners. The architecture lint rule enforces the dependency graph and keeps portable model execution free of native persistence and IPC.
+The main process connects the coding agent to desktop storage, approvals, and event delivery.
 
-| Root | Owns |
+| Module | Responsibility |
 | --- | --- |
-| `conversation` | Session transactions and replay, turn admission, compaction orchestration, profiles, display, approvals, and shutdown |
-| `execution` | Agent loop, bounded text requests, retry policy, execution facts, and the tool execution port |
-| `context` | Provider request projection, observation budgets, summary input bounds, and approximate measurement |
-| `prompt` | Harness policy and dedicated auxiliary-task instructions |
-| `tools` | Capability composition, validation, authorization, hooks, tool execution, and path safety |
-| `skills` | Discovery, snapshots, instruction documents, and contained resource reads |
-| `workspace` | Registered project roots and captured workspace sources |
-| `memory` | User/project knowledge, bounded retrieval, atomic revisions, and persistent deletion |
-| `models` | Provider library, discovery, probes, provider resolution, and profile validation |
+| `conversation` | SQLite session transactions, journal and replay, pending window approvals, and composition of the coding agent |
+| `models` | Provider settings, model discovery, provider construction, and saved profile resolution |
+| `workspace` | Registered project roots and workspace selection |
+| `memory` | Atomic user and project memory storage, revision checks, and deletion |
 
-Conversation composes the other owners. Tools depend on execution contracts, skills, and memory; workspace depends on skills. Other AI modules have no cross-owner AI dependencies. Tests may compose real adapters across these directions while retaining public-root imports.
+[`@mico/coding-agent`](../../../packages/coding-agent/README.md) owns tools, skill discovery, prompts, context projection, and session orchestration. The host implements its interfaces and forwards events through the typed IPC surface. The environment-neutral `@mico/coding-agent/contracts` entry supplies the schemas used by main, preload, and renderer.
 
-The loop emits execution facts through synchronous acknowledgements; conversation decides how to persist them. Context receives tool definitions and budget values, not an execution registry. Workspace supplies sources, not a configured agent. Memory never edits session history or checkpoints.
-
-`main.ts` owns application composition and storage lifetime. IPC owns trusted sender identity, shared request validation, event delivery, and window ownership. See [design contracts](../../../docs/design.md#main-ai-modules) for automatic compaction, memory behavior, and lifecycle invariants; [testing principles](../../../docs/testing.md) own verification. Commands live in the root [package.json](../../../package.json).
+See [design and lifecycle contracts](../../../docs/design.md#main-ai-modules) for the ownership of admission, compaction, recovery, and shutdown.

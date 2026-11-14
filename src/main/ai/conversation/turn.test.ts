@@ -1,3 +1,5 @@
+import { PermissionRequests } from './tool-approvals'
+import { CodingAgent } from '@mico/coding-agent'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -12,13 +14,11 @@ import {
 afterEach(removeTemporaryPaths)
 
 import { type ChatProvider, type ProviderStreamPart, providerFinish } from '@mico/ai-providers'
-import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type { TurnStartRequest, TurnStreamEvent } from '@mico/coding-agent/contracts'
 import type { UIMessageChunk } from 'ai'
 import { SessionDatabase } from '@main/data/session-database'
 import { type ExecutionProfileSnapshot, SessionRuntimeService } from './runtime'
 import { Models } from '../models'
-import { SessionModelProfile } from './model-profile'
-import { TurnExecutor } from './turn'
 
 const request: TurnStartRequest = {
   sessionId: 'session-1',
@@ -65,7 +65,7 @@ async function createSession(
 async function createExecutor(
   resolveProvider: () => ChatProvider,
   options: { maxAttempts?: number; retryDelayMs?: number } = {}
-): Promise<TurnExecutor> {
+): Promise<CodingAgent> {
   const { runtime } = await createRuntime([request.sessionId, 'session-2'])
   runtime.createSession({ title: 'Session', defaultProfile: null })
   runtime.createSession({ title: 'Second', defaultProfile: null })
@@ -79,8 +79,9 @@ async function createExecutor(
       }
     }
   })
-  return new TurnExecutor({
-    profiles: new SessionModelProfile({ models, runtime }),
+  return new CodingAgent({
+    requestApproval: new PermissionRequests().request,
+    models,
     runtime,
     ...options
   })
@@ -94,10 +95,11 @@ async function createConfiguredExecutor(
     maxAttempts?: number
     retryDelayMs?: number
   } = {}
-): Promise<TurnExecutor> {
+): Promise<CodingAgent> {
   const models = await createModels(() => createProvider(stream))
-  return new TurnExecutor({
-    profiles: new SessionModelProfile({ models, runtime }),
+  return new CodingAgent({
+    requestApproval: new PermissionRequests().request,
+    models,
     runtime,
     maxAssistantTextChars: options.maxAssistantTextChars,
     maxAttempts: options.maxAttempts,
@@ -163,7 +165,7 @@ function partialPendingStream(signal: AbortSignal): AsyncIterable<UIMessageChunk
   }
 }
 
-describe('TurnExecutor', () => {
+describe('Coding agent turns', () => {
   it('user invokes a manual skill when retrying after reload, then accepted instructions stay durable', async () => {
     const cwd = await createTemporaryWorkspace('mico-explicit-skill-')
     const base = join(cwd, '.agents/skills/manual')
@@ -418,8 +420,9 @@ describe('TurnExecutor', () => {
       selectedModelId: 'global-model'
     })
     const recorded = collectEvents()
-    const service = new TurnExecutor({
-      profiles: new SessionModelProfile({ models, runtime }),
+    const service = new CodingAgent({
+      requestApproval: new PermissionRequests().request,
+      models,
       runtime
     })
 
@@ -438,10 +441,12 @@ describe('TurnExecutor', () => {
     await models.saveLibrary({ ...models.getLibrary(), selectedModelId: null })
     const { runtime } = await createRuntime([request.sessionId])
     runtime.createSession({ title: 'Session', defaultProfile: null })
-    const profiles = new SessionModelProfile({ models, runtime })
-
-    await expect(profiles.getCapabilities()).resolves.toBeNull()
-    const service = new TurnExecutor({ profiles, runtime })
+    const service = new CodingAgent({
+      requestApproval: new PermissionRequests().request,
+      models,
+      runtime
+    })
+    await expect(service.getCapabilities()).resolves.toBeNull()
     service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
 
     await recorded.terminal
@@ -539,7 +544,7 @@ describe('TurnExecutor', () => {
                 {
                   type: 'text-delta',
                   id: 'title-part',
-                  delta: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab'
+                  delta: `Title: "${'😀'.repeat(51)}"!`
                 },
                 providerFinish({ reason: 'stop' })
               ]
@@ -556,9 +561,39 @@ describe('TurnExecutor', () => {
     )
 
     await titleGenerated.promise
-    expect(runtime.loadSession(session.id).title).toBe(
-      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    expect(runtime.loadSession(session.id).title).toBe('😀'.repeat(50))
+  })
+
+  it('user renames a chat when title generation is pending, then the manual title is preserved', async () => {
+    const { runtime, session } = await createSession('New chat')
+    const recorded = collectEvents()
+    const titleStarted = createDeferred()
+    const releaseTitle = createDeferred()
+    const service = await createConfiguredExecutor(async (input) => {
+      if (!isTitleStream(input)) return streamFrom([textChunk])
+      titleStarted.resolve()
+      await releaseTitle.promise
+      return streamFrom([
+        { type: 'text-delta', id: 'title', delta: 'Generated title' },
+        providerFinish({ reason: 'stop' })
+      ])
+    }, runtime)
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
     )
+    await Promise.all([recorded.terminal, titleStarted.promise])
+    runtime.renameSession(session.id, 'My title')
+    const renameAttempt = createDeferred()
+    const rename = runtime.renameSessionIfCurrentTitle.bind(runtime)
+    vi.spyOn(runtime, 'renameSessionIfCurrentTitle').mockImplementation((...args) => {
+      const result = rename(...args)
+      renameAttempt.resolve()
+      return result
+    })
+    releaseTitle.resolve()
+    await renameAttempt.promise
+    expect(runtime.loadSession(session.id).title).toBe('My title')
   })
 
   it('user quits after a reply when its title is pending, then shutdown aborts and drains the title', async () => {

@@ -7,11 +7,15 @@ import {
   type ChatActiveSessionSlice,
   type ChatResponseSlice
 } from '@renderer/hooks/chat'
-import type { ChatAPI, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type {
+  TurnStreamEvent,
+  ToolPermissionData,
+  ModelReasoningCapabilities,
+  ThinkingSelection
+} from '@mico/coding-agent/contracts'
+import type { ChatAPI } from '@shared/ipc/schemas/chat'
 import type { SessionsAPI } from '@shared/ipc/schemas/sessions'
 import type { MicoUIMessage } from '@renderer/types/chat'
-import type { ToolPermissionData } from '@shared/ai/permissions'
-import type { ModelReasoningCapabilities, ThinkingSelection } from '@shared/data/schemas/chat'
 import type { WorkspaceProject } from '@shared/data/schemas/workspace'
 import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

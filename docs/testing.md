@@ -84,21 +84,23 @@ Never edit source or tests while Vitest is running in the checkout. After an aud
 | Deterministic waiting | `anti-slop/no-sleep-in-tests` — detects named sleep helpers, member timer calls, and member `waitFor` calls with timeout options |
 | Vitest hygiene | `vitest/no-focused-tests`, `no-disabled-tests`, `no-identical-title`, `no-commented-out-tests`, `expect-expect`, `no-conditional-expect`, `no-test-prefixes`, `valid-title` |
 
-The custom rules live in [tools/oxlint/anti-slop](../tools/oxlint/anti-slop). Detection is syntactic and does not prove test value, faithful fakes, complete timer coverage, or typed stubs. Review enforces those standards even when lint passes. Shared test helpers live next to the domain they serve (`src/main/ai/tools/test-helpers.ts`, `packages/ai-providers/src/__tests__/test-helpers.ts`); consolidate repeated setup when it represents the same domain scenario without adding flags for unrelated callers.
+The custom rules live in [tools/oxlint/anti-slop](../tools/oxlint/anti-slop). Detection is syntactic and does not prove test value, faithful fakes, complete timer coverage, or typed stubs. Review enforces those standards even when lint passes. Shared test helpers live next to the domain they serve (`packages/coding-agent/src/tools/test-helpers.ts`, `packages/ai-providers/src/__tests__/test-helpers.ts`); consolidate repeated setup when it represents the same domain scenario without adding flags for unrelated callers.
 
 ## Coverage Gate
 
-CI runs `pnpm test:coverage` and uploads HTML and JSON summary reports for the
-application, UI package, and provider package. Each Vitest configuration owns its
-source scope and thresholds. Application coverage includes TypeScript sources;
-UI coverage excludes Storybook stories. Untested production sources remain in the
-reports.
+Run `pnpm test:coverage` from the workspace root for all five reports. CI runs the same suites as parallel matrix jobs and uploads HTML and JSON summaries for each one.
 
-The application branch and UI package thresholds currently preserve the measured
-baseline below the 80% target. These are regression floors, not evidence that the
-80% target is met. Raise them as independent behavioral coverage is added; do not
-exclude production code or add implementation-mirroring tests to improve the
-number. Provider thresholds already meet or exceed the target for all metrics.
+| Report | Local command | What it measures |
+| --- | --- | --- |
+| Application | `pnpm test:coverage:app` | App sources and both agent packages across the main, renderer, and agent test projects. Includes the SQLite integration scenarios. |
+| Agent core | `pnpm --filter @mico/agent-core test:coverage` | Agent-core sources exercised by its own model-loop, retry, and text-generation tests. |
+| Coding agent | `pnpm --filter @mico/coding-agent test:coverage` | Coding-agent sources exercised by its own tools, skills, context, and conversation tests. |
+| UI | `pnpm --filter @mico/ui test:coverage` | Shared UI components, excluding Storybook stories. |
+| Providers | `pnpm --filter @mico/ai-providers test:coverage` | Provider adapters and protocols. |
+
+Each report writes `coverage/index.html` and `coverage/coverage-summary.json` under its project directory. The application report answers how much agent code the integrated workspace exercises. The package reports show what each package verifies on its own. Their source scopes overlap, so read their percentages separately.
+
+Vitest enforces statements, branches, functions, and lines for each report. Floors below the 80% target preserve measured baselines. Raise them as behavioral tests add coverage, keeping untested production files in scope. See the [agent-core guide](../packages/agent-core/README.md) and [coding-agent guide](../packages/coding-agent/README.md) for package entry points.
 
 ## Verify the Changed Contract
 

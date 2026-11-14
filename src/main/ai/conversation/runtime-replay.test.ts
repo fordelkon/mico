@@ -1,4 +1,3 @@
-import { createWorkspaceTools } from '../tools'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,9 +9,8 @@ import {
 } from '@mico/ai-providers'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SessionDatabase } from '@main/data/session-database'
-import { TurnDisplayAssembler } from './display'
-import { ModelLoop } from '../execution'
-import { Workspaces } from '../workspace'
+import { createWorkspaceTools } from '@mico/coding-agent'
+import { runModelLoop } from '@mico/agent-core'
 import { SessionRuntimeService } from './runtime'
 
 const profile = {
@@ -170,7 +168,8 @@ describe('Session runtime replay', () => {
     paths.push(cwd)
     await writeFile(join(cwd, 'a.txt'), 'contents')
     const handle = begin('first')
-    const result = await new ModelLoop().run({
+    let visibleText = ''
+    await runModelLoop({
       provider: scripted([
         [
           { type: 'text-delta', id: 'intro', delta: 'Inspecting.' },
@@ -192,16 +191,16 @@ describe('Session runtime replay', () => {
         response('Final answer.', 'final-response')
       ]),
       messages: handle.replayMessages,
-      registry: createWorkspaceTools(cwd, {
-        skills: (await Workspaces.prepareSources(cwd)).skills
-      }),
+      registry: createWorkspaceTools(cwd),
       thinkingEffort: 'none',
       signal: new AbortController().signal,
-      emit: () => undefined,
+      emit: (chunk) => {
+        if (chunk.type === 'text-delta') visibleText += chunk.delta
+      },
       onStep: handle.recordStep,
       onToolResult: handle.recordTrace
     })
-    handle.complete({ role: 'assistant', parts: [{ type: 'text', text: result.assistantText }] })
+    handle.complete({ role: 'assistant', parts: [{ type: 'text', text: visibleText }] })
     const reloaded = new SessionRuntimeService({ database })
     const next = reloaded.beginTurn({
       sessionId: session.id,
@@ -218,8 +217,11 @@ describe('Session runtime replay', () => {
       'user'
     ])
     expect(next.replayMessages[2]).toMatchObject({ role: 'tool', parts: [{ output: 'contents' }] })
-    expect(next.replayMessages[3]).toEqual(result.finalAssistant)
-    expect(next.replayMessages[3]).toMatchObject({ replay: { responseId: 'final-response' } })
+    expect(next.replayMessages[3]).toEqual({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Final answer.' }],
+      replay: { provider: 'openai-responses', responseId: 'final-response' }
+    })
   })
 
   it.each(['completed', 'failed', 'cancelled'] as const)(
@@ -227,17 +229,20 @@ describe('Session runtime replay', () => {
     async (status) => {
       const { begin } = await setup()
       const handle = begin('first')
-      const result = await new ModelLoop().run({
+      let visibleText = ''
+      await runModelLoop({
         provider: scripted([response('Partial ', 'partial', 'length'), response('final', 'final')]),
         messages: handle.replayMessages,
         thinkingEffort: 'none',
         signal: new AbortController().signal,
-        emit: () => undefined,
+        emit: (chunk) => {
+          if (chunk.type === 'text-delta') visibleText += chunk.delta
+        },
         onStep: handle.recordStep
       })
       const visible = {
         role: 'assistant' as const,
-        parts: [{ type: 'text' as const, text: result.assistantText }]
+        parts: [{ type: 'text' as const, text: visibleText }]
       }
       if (status === 'failed') handle.fail({ code: 'provider_error', message: 'Offline' })
       else if (status === 'cancelled') handle.cancel(visible)
@@ -259,7 +264,11 @@ describe('Session runtime replay', () => {
             }
           ]
         },
-        result.finalAssistant,
+        {
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'final' }],
+          replay: { provider: 'openai-responses', responseId: 'final' }
+        },
         ...(status === 'failed' ? [] : [prompt])
       ])
     }
@@ -283,7 +292,7 @@ describe('Session runtime replay', () => {
           })()
       }
       await expect(
-        new ModelLoop().run({
+        runModelLoop({
           provider,
           messages: handle.replayMessages,
           thinkingEffort: 'none',
@@ -322,7 +331,7 @@ describe('Session runtime replay', () => {
     const { begin } = await setup()
     const handle = begin('first')
     await expect(
-      new ModelLoop().run({
+      runModelLoop({
         provider: scripted([response('One', 'one', 'length'), response('Two', 'two', 'length')]),
         messages: handle.replayMessages,
         thinkingEffort: 'none',
@@ -348,9 +357,7 @@ describe('Session runtime replay', () => {
     async (status) => {
       const { begin } = await setup()
       const handle = begin('first')
-      const assembler = new TurnDisplayAssembler(8)
       const text = 'Inspecting the complete file.'
-      assembler.appendText(text)
       const assistant: Extract<ChatProviderMessage, { role: 'assistant' }> = {
         role: 'assistant',
         parts: [
@@ -373,9 +380,8 @@ describe('Session runtime replay', () => {
       handle.recordStep({ index: 1, assistant, toolResults: [tool] })
       const visible = {
         role: 'assistant' as const,
-        parts: [{ type: 'text' as const, text: assembler.text() }]
+        parts: [{ type: 'text' as const, text: 'Inspect…' }]
       }
-      expect(assembler.text()).toBe('Inspect…')
       if (status === 'completed') handle.complete(visible)
       else handle.cancel(visible)
       expect(begin('next').replayMessages).toEqual([
@@ -457,7 +463,7 @@ describe('Session runtime replay', () => {
       profile,
       retry: false
     })
-    await new ModelLoop().run({
+    await runModelLoop({
       provider: scripted([
         [
           // SAFETY: this fixture matches the provider's documented completed tool-call chunk.
@@ -476,9 +482,7 @@ describe('Session runtime replay', () => {
         ]
       ]),
       messages: handle.replayMessages,
-      registry: createWorkspaceTools(workspace, {
-        skills: (await Workspaces.prepareSources(workspace)).skills
-      }),
+      registry: createWorkspaceTools(workspace),
       thinkingEffort: 'none',
       signal: new AbortController().signal,
       emit: () => undefined,
@@ -562,7 +566,7 @@ describe('Session runtime replay', () => {
         })()
       }
     }
-    await new ModelLoop().run({
+    await runModelLoop({
       provider,
       messages: handle.replayMessages,
       thinkingEffort: 'none',
@@ -613,7 +617,7 @@ describe('Session runtime replay', () => {
         })()
     }
     await expect(
-      new ModelLoop().run({
+      runModelLoop({
         provider,
         messages: handle.replayMessages,
         thinkingEffort: 'none',
@@ -647,7 +651,7 @@ describe('Session runtime replay', () => {
   it('user gets no usage recorded when the provider finishes without usage, then the accepted step stays usage-free', async () => {
     const { database, begin } = await setup()
     const handle = begin('first')
-    await new ModelLoop().run({
+    await runModelLoop({
       provider: scripted([response('done', 'answer')]),
       messages: handle.replayMessages,
       thinkingEffort: 'none',

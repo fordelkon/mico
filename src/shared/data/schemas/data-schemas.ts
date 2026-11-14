@@ -1,16 +1,17 @@
 import type { ZodType } from 'zod'
 
-import { chatDataSchemas } from './chat'
-import { AppearancePreferenceSchema, AppearanceSchema } from './preference'
-import { providerDataSchemas } from './provider'
-import { ThemePreferencesSchema, ThemeStateSchema } from './theme'
 import {
+  ChatMessageSchema,
+  ModelReasoningCapabilitiesSchema,
   ExecutionProfileSnapshotSchema,
   PersistedSessionSchema,
   SessionIdSchema,
   SessionSummarySchema,
   SessionTitleSchema
-} from './session'
+} from '@mico/coding-agent/contracts'
+import { AppearancePreferenceSchema, AppearanceSchema } from './preference'
+import { providerDataSchemas } from './provider'
+import { ThemePreferencesSchema, ThemeStateSchema } from './theme'
 
 const dataSchemas = {
   appearance: AppearanceSchema,
@@ -22,7 +23,8 @@ const dataSchemas = {
   sessionTitle: SessionTitleSchema,
   themePreferences: ThemePreferencesSchema,
   themeState: ThemeStateSchema,
-  ...chatDataSchemas,
+  chatMessage: ChatMessageSchema,
+  modelReasoningCapabilities: ModelReasoningCapabilitiesSchema,
   ...providerDataSchemas
 } satisfies Record<string, ZodType>
 type DataSchemas = typeof dataSchemas

@@ -1,17 +1,18 @@
 import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
-import { type ChatSkillInvocationPart, ChatSkillInvocationPartSchema } from '@shared/ai/skills'
 import {
+  type ChatSkillInvocationPart,
+  ChatSkillInvocationPartSchema,
   ChatDocumentPartSchema,
   type ChatMessage,
   ChatMessageRoleSchema,
   ChatReasoningPartSchema,
   type ChatToolTracePart,
   ChatToolTracePartSchema
-} from '@shared/data/schemas/chat'
+} from '@mico/coding-agent/contracts'
 import * as z from 'zod'
-import type { AgentStep } from '../../execution'
+import type { AgentStep } from '@mico/agent-core'
 
-import { parseToolTracePayload, toToolTracePart } from './tool-trace-presentation'
+import { parseToolTracePayload, toToolTracePart } from '@mico/coding-agent'
 
 /**
  * The renderer-visible form of a persisted chat message: the parts that carry

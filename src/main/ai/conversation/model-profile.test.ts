@@ -1,5 +1,6 @@
+import { CodingAgent } from '@mico/coding-agent'
+import { PermissionRequests } from './tool-approvals'
 import { afterEach, describe, expect, it } from 'vitest'
-import { SessionModelProfile } from './model-profile'
 import { createModels, createRuntime, removeTemporaryPaths } from './test-helpers'
 
 const configuration = {
@@ -32,17 +33,22 @@ async function setup() {
   })
   const { runtime } = await createRuntime()
   const session = runtime.createSession({ title: 'Session', defaultProfile: null })
-  return { models, runtime, session, profiles: new SessionModelProfile({ models, runtime }) }
+  const agent = new CodingAgent({
+    models,
+    runtime,
+    requestApproval: new PermissionRequests().request
+  })
+  return { models, runtime, session, agent }
 }
 
 describe('SessionModelProfile', () => {
   afterEach(removeTemporaryPaths)
 
   it('user changes the session model when effort was saved, then the new profile preserves effort', async () => {
-    const { runtime, session, profiles } = await setup()
-    profiles.updateSessionModelEntry(session.id, 'original-entry')
-    profiles.updateSessionThinkingEffort(session.id, 'high')
-    profiles.updateSessionModelEntry(session.id, 'other-entry')
+    const { runtime, session, agent } = await setup()
+    agent.setSessionModelEntry(session.id, 'original-entry')
+    agent.setSessionThinkingEffort(session.id, 'high')
+    agent.setSessionModelEntry(session.id, 'other-entry')
     expect(runtime.loadSession(session.id).defaultProfile).toMatchObject({
       modelEntryId: 'other-entry',
       modelId: 'other',
@@ -51,8 +57,8 @@ describe('SessionModelProfile', () => {
   })
 
   it('user selects a disabled model when a session profile exists, then the saved profile is retained', async () => {
-    const { models, runtime, session, profiles } = await setup()
-    profiles.updateSessionModelEntry(session.id, 'original-entry')
+    const { models, runtime, session, agent } = await setup()
+    agent.setSessionModelEntry(session.id, 'original-entry')
     const original = runtime.getDefaultProfile(session.id)
     await models.saveLibrary({
       ...models.getLibrary(),
@@ -60,15 +66,13 @@ describe('SessionModelProfile', () => {
         .getLibrary()
         .models.map((model) => (model.id === 'other-entry' ? { ...model, enabled: false } : model))
     })
-    expect(() => profiles.updateSessionModelEntry(session.id, 'other-entry')).toThrow(
-      'enabled model'
-    )
+    expect(() => agent.setSessionModelEntry(session.id, 'other-entry')).toThrow('enabled model')
     expect(runtime.getDefaultProfile(session.id)).toEqual(original)
   })
 
   it('user changes effort before choosing a session model when no profile exists, then selection guidance is shown', async () => {
-    const { runtime, session, profiles } = await setup()
-    expect(() => profiles.updateSessionThinkingEffort(session.id, 'high')).toThrow(
+    const { runtime, session, agent } = await setup()
+    expect(() => agent.setSessionThinkingEffort(session.id, 'high')).toThrow(
       'Select an enabled model for this session'
     )
     expect(runtime.getDefaultProfile(session.id)).toBeNull()

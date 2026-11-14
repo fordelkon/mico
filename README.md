@@ -75,13 +75,13 @@ Model availability, tool calling, and reasoning support depend on the provider a
 | `pnpm lint` | Apply lint fixes and formatting |
 | `pnpm typecheck` | Check the application and workspace packages |
 | `pnpm test:lint` | Check lint without modifying files |
-| `pnpm test` | Run application, UI, and provider unit tests |
+| `pnpm test` | Run application and workspace unit tests |
 | `pnpm build` | Type-check and build the application |
 | `pnpm test:e2e --project=electron` | Run local Electron scenarios after building |
 
 For packaging, use `pnpm build:mac`, `pnpm build:win`, or `pnpm build:linux` on the appropriate platform. See [CI and release procedures](docs/ci.md) for packaging and signing details.
 
-The renderer owns the interface, the preload bridge exposes typed application capabilities, and the main process owns persistence and agent execution. Shared components live in [`@mico/ui`](packages/ui/README.md); protocol adapters live in [`@mico/ai-providers`](packages/ai-providers/README.md).
+The Electron host owns storage, approvals, and event delivery. [`@mico/coding-agent`](packages/coding-agent/README.md) orchestrates coding sessions, tools, skills, and context compaction. It runs the model loop from [`@mico/agent-core`](packages/agent-core/README.md) against [`@mico/ai-providers`](packages/ai-providers/README.md). The renderer uses shared components from [`@mico/ui`](packages/ui/README.md).
 
 - [Design and ownership](docs/design.md)
 - [Development and verification](docs/agent-guide.md)

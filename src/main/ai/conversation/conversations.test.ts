@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ChatProvider, ChatProviderStreamInput, ProviderStreamPart } from '@mico/ai-providers'
 import { providerFinish } from '@mico/ai-providers'
-import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
+import type { TurnStartRequest, TurnStreamEvent } from '@mico/coding-agent/contracts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Conversations } from './index'
 import {

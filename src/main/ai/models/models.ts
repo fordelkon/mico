@@ -18,10 +18,10 @@ import type {
   SyncModelsRequest,
   TestModelRequest
 } from '@shared/ipc/schemas/providers'
-import type { ExecutionProfileSnapshot } from '@shared/data/schemas/session'
+import type { ExecutionProfileSnapshot } from '@mico/coding-agent/contracts'
 import { ModelLibrary, testModelByStreaming, type ModelLibraryDependencies } from './library'
 import { createModelResolver, type ModelResolver } from './resolver'
-import { ModelSelectionError, type ModelSelection } from './selection'
+import { ModelSelectionError, type ModelSelection } from '@mico/coding-agent'
 
 type ModelsDependencies = ModelLibraryDependencies & {
   createChatProvider?: (
@@ -167,5 +167,4 @@ class Models {
   }
 }
 
-export type { ModelsDependencies }
 export { Models }

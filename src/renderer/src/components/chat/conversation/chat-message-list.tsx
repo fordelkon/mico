@@ -10,7 +10,7 @@ import {
 } from '@mico/ui'
 import { type ConversationTranscriptSource, useConversationTranscript } from '@renderer/hooks/chat'
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
-import type { TurnFailureCode } from '@shared/ai/turn-failure'
+import type { TurnFailureCode } from '@mico/coding-agent/contracts'
 import { CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
 

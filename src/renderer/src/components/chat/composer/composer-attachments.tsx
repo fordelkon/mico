@@ -16,7 +16,7 @@ import {
 import { FileTextIcon, PlusIcon, XIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { CodeDocumentsMaxTextBytes, type ChatDocumentPart } from '@shared/data/schemas/chat'
+import { CodeDocumentsMaxTextBytes, type ChatDocumentPart } from '@mico/coding-agent/contracts'
 
 type ComposerAttachmentProps = {
   disabled?: boolean

@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto'
 import type { ChatProviderMessage } from '@mico/ai-providers'
-import { toolLabel } from '@shared/ai/tool-presentation'
-import type { ChatMessage } from '@shared/data/schemas/chat'
-import type { ExecutionProfileSnapshot } from '@shared/data/schemas/session'
+import {
+  toolLabel,
+  type ChatMessage,
+  type ExecutionProfileSnapshot
+} from '@mico/coding-agent/contracts'
 import * as z from 'zod'
 import type { SessionDatabase } from '@main/data/session-database'
-import { toProviderReplayContext } from '../provider-messages'
-import type { ToolExecutionTrace } from '../../tools'
+import { toProviderReplayContext } from '@mico/coding-agent'
+import type { ToolExecutionTrace } from '@mico/agent-core'
 import {
   type AgentStep,
   assembleReplayEvents,
@@ -17,15 +19,10 @@ import {
   type VisibleMessage,
   visibleMessage
 } from './transcript'
-import {
-  parseToolTracePayload,
-  type StoredToolTrace,
-  toStoredToolTrace
-} from './tool-trace-presentation'
+import { parseToolTracePayload, type StoredToolTrace, toStoredToolTrace } from '@mico/coding-agent'
 
-type ProviderUserMessage = Extract<ChatProviderMessage, { role: 'system' | 'user' }> & {
-  role: 'user'
-}
+import type { ProviderUserMessage } from '@mico/coding-agent'
+
 const ContextPayloadSchema = z.object({
   messages: z.array(
     z.object({

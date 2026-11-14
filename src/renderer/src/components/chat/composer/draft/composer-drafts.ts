@@ -1,5 +1,4 @@
-import type { ChatSkillInvocationPart } from '@shared/ai/skills'
-import type { ChatDocumentPart } from '@shared/data/schemas/chat'
+import type { ChatSkillInvocationPart, ChatDocumentPart } from '@mico/coding-agent/contracts'
 import * as React from 'react'
 import { readCompactCommand } from '../composer-commands'
 import { expandPasteTokens, pasteTokenIssue } from '../composer-paste-tokens'
