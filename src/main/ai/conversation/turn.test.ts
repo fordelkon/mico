@@ -11,7 +11,7 @@ import {
 
 afterEach(removeTemporaryPaths)
 
-import type { ChatProvider } from '@mico/ai-providers'
+import { type ChatProvider, type ProviderStreamPart, providerFinish } from '@mico/ai-providers'
 import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { UIMessageChunk } from 'ai'
 import { SessionDatabase } from '@main/data/session-database'
@@ -132,9 +132,9 @@ function collectEvents() {
   }
 }
 
-function streamFrom(chunks: UIMessageChunk[]): AsyncIterable<UIMessageChunk> {
+function streamFrom(chunks: ProviderStreamPart[]): AsyncIterable<ProviderStreamPart> {
   return {
-    async *[Symbol.asyncIterator](): AsyncIterator<UIMessageChunk> {
+    async *[Symbol.asyncIterator](): AsyncIterator<ProviderStreamPart> {
       yield* chunks
     }
   }
@@ -314,7 +314,10 @@ describe('TurnExecutor', () => {
     const recorded = collectEvents()
     const service = await createConfiguredExecutor(async (input) => {
       calls.push(input)
-      return streamFrom([{ type: 'text-delta', id: 'part-1', delta: 'Review code' }])
+      return streamFrom([
+        { type: 'text-delta', id: 'part-1', delta: 'Review code' },
+        providerFinish({ reason: 'stop' })
+      ])
     }, runtime)
     service.startTurn(
       {
@@ -503,7 +506,10 @@ describe('TurnExecutor', () => {
     const service = await createConfiguredExecutor(async ({ messages }) => {
       if (messages[0]?.role === 'system') {
         titleInstructions = messages[0].parts[0]?.type === 'text' ? messages[0].parts[0].text : ''
-        return streamFrom([{ type: 'text-delta', id: 'title-part', delta: 'Greet the user' }])
+        return streamFrom([
+          { type: 'text-delta', id: 'title-part', delta: 'Greet the user' },
+          providerFinish({ reason: 'stop' })
+        ])
       }
       return streamFrom([textChunk])
     }, runtime)
@@ -534,7 +540,8 @@ describe('TurnExecutor', () => {
                   type: 'text-delta',
                   id: 'title-part',
                   delta: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab'
-                }
+                },
+                providerFinish({ reason: 'stop' })
               ]
             : [textChunk]
         ),
@@ -552,6 +559,50 @@ describe('TurnExecutor', () => {
     expect(runtime.loadSession(session.id).title).toBe(
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     )
+  })
+
+  it('user quits after a reply when its title is pending, then shutdown aborts and drains the title', async () => {
+    const { runtime, session } = await createSession('New chat')
+    const recorded = collectEvents()
+    const titleStarted = createDeferred()
+    const released = createDeferred()
+    let titleSignal: AbortSignal | undefined
+    const service = await createConfiguredExecutor(async (input) => {
+      if (!isTitleStream(input)) return streamFrom([textChunk])
+      titleSignal = input.signal
+      return {
+        async *[Symbol.asyncIterator]() {
+          titleStarted.resolve()
+          await released.promise
+          yield { type: 'text-delta' as const, id: 'title', delta: 'Late title' }
+          yield providerFinish({ reason: 'stop' })
+        }
+      }
+    }, runtime)
+    service.startTurn(
+      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
+      recorded.emit
+    )
+    await Promise.all([recorded.terminal, titleStarted.promise])
+    let drained = false
+    let pending: Promise<void> | undefined
+    try {
+      service.dispose()
+      expect(titleSignal?.aborted).toBe(true)
+      pending = service.drain().then(() => {
+        drained = true
+      })
+      await Promise.resolve()
+      expect(drained).toBe(false)
+      released.resolve()
+      await pending
+      expect(runtime.loadSession(session.id).title).toBe('New chat')
+      expect(recorded.events.at(-1)?.type).toBe('finish')
+    } finally {
+      released.resolve()
+      service.dispose()
+      await (pending ?? service.drain())
+    }
   })
 
   it('user sees assistant text capped when it exceeds the maximum, then the persisted reply is truncated', async () => {

@@ -17,7 +17,10 @@ type SessionModelProfileDependencies = {
     | 'getCapabilities'
     | 'getChatConfigurationForModelEntry'
   >
-  runtime: Pick<SessionRuntimeService, 'getDefaultProfile' | 'updateDefaultProfile'>
+  runtime: Pick<
+    SessionRuntimeService,
+    'getDefaultProfile' | 'updateDefaultProfile' | 'updateDefaultProfileIfCurrent'
+  >
 }
 
 /** Owns session profile persistence; model selection and configuration identity belong to Models. */
@@ -47,6 +50,18 @@ class SessionModelProfile {
     thinkingEffort: ExecutionProfileSnapshot['thinkingEffort']
   ): ExecutionProfileSnapshot {
     return this.dependencies.models.toProfile(configuration, modelEntryId, thinkingEffort)
+  }
+
+  getStoredProfile(sessionId: string): ExecutionProfileSnapshot | null {
+    return this.dependencies.runtime.getDefaultProfile(sessionId)
+  }
+
+  acceptSessionProfile(
+    sessionId: string,
+    expected: ExecutionProfileSnapshot | null,
+    profile: ExecutionProfileSnapshot
+  ): void {
+    this.dependencies.runtime.updateDefaultProfileIfCurrent(sessionId, expected, profile)
   }
 
   persistSessionProfile(sessionId: string, profile: ExecutionProfileSnapshot): void {

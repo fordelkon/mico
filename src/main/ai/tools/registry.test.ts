@@ -1,3 +1,4 @@
+import { createWorkspaceTools } from './workspace-tools'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -21,7 +22,7 @@ describe('ToolRegistry', () => {
       clock += 100
       vi.setSystemTime(clock)
     }
-    const registry = ToolRegistry.forWorkspace(cwd, {
+    const registry = createWorkspaceTools(cwd, {
       permissionMode: 'acceptEdits',
       hooks: { preToolUse: [advanceClock], postToolUse: [advanceClock] }
     })
@@ -56,7 +57,7 @@ describe('ToolRegistry', () => {
   })
 
   async function createRegistry(): Promise<ToolRegistry> {
-    return ToolRegistry.forWorkspace(await createTemporaryWorkspace('mico-tool-registry-'), {
+    return createWorkspaceTools(await createTemporaryWorkspace('mico-tool-registry-'), {
       requestApproval: async () => true
     })
   }
@@ -138,7 +139,7 @@ describe('ToolRegistry', () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'big.txt'), 'x'.repeat(200 * 1024))
     await writeFile(join(cwd, 'small.txt'), 'small')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = createWorkspaceTools(cwd)
 
     const results = (
       await registry.executeBatch(
@@ -159,7 +160,7 @@ describe('ToolRegistry', () => {
     await writeFile(join(cwd, 'a.txt'), 'content')
     const prepared: string[] = []
     const ready = Promise.withResolvers<void>()
-    const registry = ToolRegistry.forWorkspace(cwd, {
+    const registry = createWorkspaceTools(cwd, {
       requestApproval: async () => true,
       hooks: {
         preToolUse: [
@@ -193,7 +194,7 @@ describe('ToolRegistry', () => {
     const cwd = await createTemporaryWorkspace('mico-tool-registry-')
     await writeFile(join(cwd, 'preview.txt'), 'preview text')
     const deltas: unknown[] = []
-    const { result } = await ToolRegistry.forWorkspace(cwd).execute(
+    const { result } = await createWorkspaceTools(cwd).execute(
       { toolCallId: 'call-preview', toolName: 'Read', input: { file_path: 'preview.txt' } },
       new AbortController().signal,
       (delta) => deltas.push(delta)

@@ -1,10 +1,11 @@
+import { createWorkspaceTools } from './workspace-tools'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createSkillSnapshot } from '../skills/snapshot'
+import { createSkillSnapshot } from '../skills'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
-import { type ToolCall, ToolRegistry } from './registry'
+import type { ToolCall } from './registry'
 
 afterEach(removeTemporaryPaths)
 
@@ -21,8 +22,8 @@ describe('skill tools', () => {
     await writeFile(join(base, 'reference.md'), 'Manual reference')
     const snapshot = await createSkillSnapshot(cwd, home)
     const signal = new AbortController().signal
-    const blocked = ToolRegistry.forWorkspace(cwd, { skills: snapshot })
-    const authorized = ToolRegistry.forWorkspace(cwd, {
+    const blocked = createWorkspaceTools(cwd, { skills: snapshot })
+    const authorized = createWorkspaceTools(cwd, {
       skills: snapshot,
       authorizedSkillIds: ['project-agents:manual']
     })
@@ -48,7 +49,7 @@ describe('skill tools', () => {
     const cwd = await createTemporaryWorkspace('mico-skill-budget-')
     const home = await createTemporaryWorkspace('mico-skill-home-')
     const snapshot = await createSkillSnapshot(cwd, home)
-    const registry = ToolRegistry.forWorkspace(cwd, { skills: snapshot })
+    const registry = createWorkspaceTools(cwd, { skills: snapshot })
 
     expect(registry.historyBudgetFor('LoadSkill')).toBe(256 * 1024)
     expect(registry.historyBudgetFor('ReadSkillResource')).toBe(256 * 1024)
@@ -67,7 +68,7 @@ describe('skill tools', () => {
     )
     await writeFile(join(base, 'reference.md'), 'Reference text')
     const snapshot = await createSkillSnapshot(cwd, home)
-    const registry = ToolRegistry.forWorkspace(cwd, { skills: snapshot })
+    const registry = createWorkspaceTools(cwd, { skills: snapshot })
     const signal = new AbortController().signal
     const loaded = await registry.execute(
       { toolCallId: 'load', toolName: 'LoadSkill', input: { skill_id: 'user-agents:review' } },

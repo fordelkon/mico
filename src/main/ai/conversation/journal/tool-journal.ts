@@ -1,27 +1,11 @@
-import type {
-  ChatProviderMessage,
-  ChatProviderToolResultPart,
-  ProviderUsage
-} from '@mico/ai-providers'
+import type { ChatProviderMessage, ChatProviderToolResultPart } from '@mico/ai-providers'
 import * as z from 'zod'
 import type { SessionDatabase } from '@main/data/session-database'
-import type { ToolExecutionTrace } from '../../workspace'
+import type { ModelStepAccepted, ToolExecutionStarted, ToolExecutionSettled } from '../../execution'
 import { assertPayloadDigest, canonicalJson, type RunRow, type SessionEventLog } from './event-log'
-import {
-  type AgentStep,
-  assembleReplayEvents,
-  parseAgentStepPayload,
-  parseMessagePayload
-} from './transcript'
+import { assembleReplayEvents, parseAgentStepPayload, parseMessagePayload } from './transcript'
 import { toStoredToolTrace } from './tool-trace-presentation'
 
-type ModelStepAccepted = Pick<AgentStep, 'index' | 'assistant'> & { usage?: ProviderUsage }
-type ToolExecutionStarted = { index: number; toolCallId: string; startedAt: number }
-type ToolExecutionSettled = {
-  index: number
-  result: ChatProviderToolResultPart
-  trace: ToolExecutionTrace
-}
 type JournalRow = {
   kind: string
   payload_json: string

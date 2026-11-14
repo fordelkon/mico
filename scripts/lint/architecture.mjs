@@ -26,15 +26,33 @@ function owner(filename) {
 }
 
 const aiDependencies = {
-  conversation: new Set(['models', 'workspace']),
+  conversation: new Set([
+    'models',
+    'workspace',
+    'skills',
+    'tools',
+    'execution',
+    'context',
+    'prompt',
+    'memory'
+  ]),
   models: new Set(),
-  workspace: new Set()
+  workspace: new Set(['skills']),
+  skills: new Set(),
+  tools: new Set(['execution', 'skills', 'memory']),
+  execution: new Set(),
+  context: new Set(),
+  prompt: new Set(),
+  memory: new Set()
 }
+const portableAiModules = new Set(['execution', 'context', 'prompt'])
 
 function aiModule(filename) {
   const path = relative(root, filename).replaceAll('\\', '/')
-  const match = /^src\/main\/ai\/(conversation|models|workspace)(?:\/(.*))?$/.exec(path)
-  return match ? { name: match[1], entry: match[2] } : undefined
+  const match = /^src\/main\/ai\/([^/]+)(?:\/(.*))?$/.exec(path)
+  return match && Object.hasOwn(aiDependencies, match[1])
+    ? { name: match[1], entry: match[2] }
+    : undefined
 }
 
 function chatRuntime(filename) {
@@ -119,8 +137,25 @@ const processImports = {
       }
       const targetAi = resolvedPath ? aiModule(resolvedPath) : undefined
       const sourceAi = aiModule(context.filename)
+      const isTest = /\.test\.[cm]?[jt]sx?$/.test(context.filename)
+      const portable = sourceAi && portableAiModules.has(sourceAi.name) && !isTest
+      if (
+        portable &&
+        (native ||
+          electron ||
+          (resolvedPath && owner(resolvedPath) === 'main' && !targetAi) ||
+          (resolvedPath &&
+            relative(root, resolvedPath).replaceAll('\\', '/').startsWith('src/shared/ipc/')))
+      ) {
+        context.report({
+          node,
+          messageId: 'forbidden',
+          data: { source: sourceAi.name, target: specifier }
+        })
+        return
+      }
       if (targetAi && sourceAi?.name !== targetAi.name) {
-        if (sourceAi && !aiDependencies[sourceAi.name].has(targetAi.name)) {
+        if (sourceAi && !isTest && !aiDependencies[sourceAi.name].has(targetAi.name)) {
           context.report({
             node,
             messageId: 'aiDirection',

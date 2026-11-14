@@ -8,7 +8,7 @@ import type {
 } from '@shared/data/schemas/session'
 import { type SessionRecovery, SessionRecoverySchema } from '@shared/data/schemas/session'
 import { SessionDatabase } from '@main/data/session-database'
-import type { ToolExecutionTrace } from '../workspace'
+import type { ToolExecutionTrace } from '../tools'
 import {
   CheckpointBoundaryRejected,
   type CompactionNotice,
@@ -50,11 +50,21 @@ type RunOutcome =
  * runtime event log: callers record steps and traces and settle the run
  * without knowing event kinds, ordering rules, or payload digests.
  */
+interface PendingTurnContext {
+  cwd: string | null
+  projectId: string | null
+  replayMessages: ChatProviderMessage[]
+  contextMessages: ProviderUserMessage[] | undefined
+  existing: boolean
+  profile: ExecutionProfileSnapshot | undefined
+}
+
 type TurnRunHandle = {
   runId: string
   profile: ExecutionProfileSnapshot
   shouldGenerateTitle: boolean
   cwd: string | null
+  projectId: string | null
   replayMessages: ChatProviderMessage[]
   /** Accepted model-only context snapshot; undefined means not yet accepted. Retries reuse it. */
   contextMessages: ProviderUserMessage[] | undefined
@@ -204,6 +214,30 @@ class SessionRuntimeService {
     )
   }
 
+  /** Projects a new request without allocating a run, accepting context, or choosing a new pin. */
+  previewTurn(sessionId: string, requestId: string, userMessage: ChatMessage): PendingTurnContext {
+    const session = this.findSession(sessionId)
+    const existing = this.eventLog.findRunByRequestId(sessionId, requestId)
+    return {
+      cwd: session.cwd,
+      projectId: session.project_id,
+      replayMessages: existing
+        ? this.getReplayMessages(existing.id)
+        : getSessionReplay(this.dependencies.database, this.eventLog, this.journal, {
+            sessionId,
+            userMessage
+          }),
+      contextMessages: existing ? this.eventLog.getTurnContext(existing.turn_id) : undefined,
+      existing: existing !== undefined,
+      profile: existing ? this.eventLog.getExecutionProfile(existing.id) : undefined
+    }
+  }
+
+  getLatestCheckpointCoverage(sessionId: string): number {
+    this.findSession(sessionId)
+    return this.eventLog.getLatestCheckpoint(sessionId)?.coverage.throughSequence ?? 0
+  }
+
   getCompactionSource(sessionId: string): {
     throughSequence: number
     sourceDigest: string
@@ -243,9 +277,10 @@ class SessionRuntimeService {
     summary: string
     coverage: { throughSequence: number }
     sourceDigest: string
+    trigger?: 'manual' | 'auto'
   }): { checkpointEventId: string } {
     const payload = ContextCheckpointSchema.parse({
-      trigger: 'manual',
+      trigger: input.trigger ?? 'manual',
       summary: input.summary,
       coverage: input.coverage,
       sourceDigest: input.sourceDigest
@@ -342,6 +377,18 @@ class SessionRuntimeService {
       .run(canonicalJson(defaultProfile), now, sessionId)
     if (!result.changes) throw new Error('Session does not exist.')
     return toSessionSummary(this.findSession(sessionId))
+  }
+
+  updateDefaultProfileIfCurrent(
+    sessionId: string,
+    expected: ExecutionProfileSnapshot | null,
+    profile: ExecutionProfileSnapshot
+  ): boolean {
+    return this.dependencies.database.transaction(() => {
+      if (canonicalJson(this.getDefaultProfile(sessionId)) !== canonicalJson(expected)) return false
+      this.updateDefaultProfile(sessionId, profile)
+      return true
+    })
   }
 
   renameSessionIfCurrentTitle(
@@ -491,13 +538,14 @@ class SessionRuntimeService {
             profile: input.profile
           })
     this.markRequestStarted(started.runId)
-    const { cwd } = this.findSession(input.sessionId)
+    const { cwd, project_id: projectId } = this.findSession(input.sessionId)
     const runId = started.runId
     return {
       runId,
       profile: started.profile,
       shouldGenerateTitle: started.shouldGenerateTitle,
       cwd,
+      projectId,
       replayMessages: this.getReplayMessages(runId),
       recordModelStep: (step) =>
         this.dependencies.database.transaction(() =>

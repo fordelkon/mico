@@ -1,9 +1,9 @@
+import { createWorkspaceTools } from './workspace-tools'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
-import { ToolRegistry } from './registry'
 
 const commandCleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -17,7 +17,7 @@ describe('Tool execution journal boundary', () => {
     const controller = new AbortController()
     const starts: string[] = []
     const settlements: string[] = []
-    const outcome = ToolRegistry.forWorkspace(cwd).executeBatch(
+    const outcome = createWorkspaceTools(cwd).executeBatch(
       [
         { toolCallId: 'first', toolName: 'Read', input: { file_path: 'a' } },
         { toolCallId: 'second', toolName: 'Read', input: { file_path: 'a' } }
@@ -43,7 +43,7 @@ describe('Tool execution journal boundary', () => {
     const controller = new AbortController()
     const starts: string[] = []
     const settlements: string[] = []
-    const registry = ToolRegistry.forWorkspace(cwd, { requestApproval: async () => true })
+    const registry = createWorkspaceTools(cwd, { requestApproval: async () => true })
     const pending = registry.execute(
       {
         toolCallId: 'command',
@@ -79,7 +79,7 @@ describe('Tool execution journal boundary', () => {
   })
   it('user cannot write when durable start fails, then no side effect occurs', async () => {
     const cwd = await createTemporaryWorkspace('mico-journal-')
-    const registry = ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' })
+    const registry = createWorkspaceTools(cwd, { permissionMode: 'acceptEdits' })
     await expect(
       registry.execute(
         { toolCallId: 'write', toolName: 'Write', input: { file_path: 'a', content: 'data' } },
@@ -97,7 +97,7 @@ describe('Tool execution journal boundary', () => {
   it('user retains a successful write when post hooks fail, then settlement stays successful', async () => {
     const cwd = await createTemporaryWorkspace('mico-journal-')
     const observations: boolean[] = []
-    const registry = ToolRegistry.forWorkspace(cwd, {
+    const registry = createWorkspaceTools(cwd, {
       permissionMode: 'acceptEdits',
       hooks: {
         postToolUse: [

@@ -1,15 +1,21 @@
 # Main AI Modules
 
-Main composes three module roots. Import another module through its root; sibling files and private implementation details use relative imports within their module.
+Each module owns behavior behind its public root. Use relative imports inside an owner and public roots across owners. The architecture lint rule enforces the dependency graph and keeps portable model execution free of native persistence and IPC.
 
-| Root | Public entry | Owns |
-| --- | --- | --- |
-| `conversation` | `Conversations` | Session lifecycle, turn execution, replay, session model profiles, manual compaction, and execution shutdown |
-| `workspace` | `Workspaces` | Project catalog, skill discovery and documents, project guidance, tool preparation and execution, authorization, and path safety |
-| `models` | `Models` | Provider library, discovery and model probes, cached provider instances, and execution-profile validation |
+| Root | Owns |
+| --- | --- |
+| `conversation` | Session transactions and replay, turn admission, compaction orchestration, profiles, display, approvals, and shutdown |
+| `execution` | Agent loop, bounded text requests, retry policy, execution facts, and the tool execution port |
+| `context` | Provider request projection, observation budgets, summary input bounds, and approximate measurement |
+| `prompt` | Harness policy and dedicated auxiliary-task instructions |
+| `tools` | Capability composition, validation, authorization, hooks, tool execution, and path safety |
+| `skills` | Discovery, snapshots, instruction documents, and contained resource reads |
+| `workspace` | Registered project roots and captured workspace sources |
+| `memory` | User/project knowledge, bounded retrieval, atomic revisions, and persistent deletion |
+| `models` | Provider library, discovery, probes, provider resolution, and profile validation |
 
-`conversation` depends on `workspace` and `models`. Neither depends on conversation state or on the other. The architecture lint rule enforces this direction and public-root imports, including tests across modules.
+Conversation composes the other owners. Tools depend on execution contracts, skills, and memory; workspace depends on skills. Other AI modules have no cross-owner AI dependencies. Tests may compose real adapters across these directions while retaining public-root imports.
 
-`main.ts` owns application composition and storage lifetime. IPC owns typed request validation, trusted senders, renderer event delivery, and window ownership of pending requests.
+The loop emits execution facts through synchronous acknowledgements; conversation decides how to persist them. Context receives tool definitions and budget values, not an execution registry. Workspace supplies sources, not a configured agent. Memory never edits session history or checkpoints.
 
-See [design contracts](../../../docs/design.md#main-ai-modules) for interface ownership and [testing principles](../../../docs/testing.md) for verification. Commands live in the root [package.json](../../../package.json).
+`main.ts` owns application composition and storage lifetime. IPC owns trusted sender identity, shared request validation, event delivery, and window ownership. See [design contracts](../../../docs/design.md#main-ai-modules) for automatic compaction, memory behavior, and lifecycle invariants; [testing principles](../../../docs/testing.md) own verification. Commands live in the root [package.json](../../../package.json).

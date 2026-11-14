@@ -6,7 +6,7 @@ import type { ExecutionProfileSnapshot } from '@shared/data/schemas/session'
 import * as z from 'zod'
 import type { SessionDatabase } from '@main/data/session-database'
 import { toProviderReplayContext } from '../provider-messages'
-import type { ToolExecutionTrace } from '../../workspace'
+import type { ToolExecutionTrace } from '../../tools'
 import {
   type AgentStep,
   assembleReplayEvents,
@@ -47,7 +47,7 @@ const ContextPayloadSchema = z.object({
 
 const ContextCheckpointSchema = z
   .object({
-    trigger: z.literal('manual'),
+    trigger: z.enum(['manual', 'auto']),
     summary: z
       .string()
       .min(1)
@@ -247,8 +247,12 @@ class SessionEventLog {
     return ContextPayloadSchema.parse(JSON.parse(row.payload_json)).messages
   }
 
-  getReplayMessages(run: RunRow): ChatProviderMessage[] {
-    const runId = run.id
+  getReplayMessages(
+    target: RunRow | { sessionId: string; userMessage: ChatMessage }
+  ): ChatProviderMessage[] {
+    const run = 'id' in target ? target : undefined
+    const runId = run?.id ?? null
+    const sessionId = 'id' in target ? target.session_id : target.sessionId
     // Checkpoint-pinned replay is assembled by replay.ts; this legacy
     // assembly always replays the full raw history from the session start.
     // SAFETY: this fixed query returns only accepted-run identity columns. An accepted run joins
@@ -256,31 +260,30 @@ class SessionEventLog {
     // the actual conversation order after a late retry.
     const priorRuns = this.dependencies.database.connection
       .prepare(
-        `WITH current_run AS (
-           SELECT runs.session_id, started.session_sequence AS started_sequence
-           FROM runs
-           JOIN runtime_events AS started
-             ON started.run_id = runs.id AND started.kind = 'run_started'
-           WHERE runs.id = ?
-         )
-         SELECT accepted_run.id, accepted_run.turn_id
-         FROM current_run
-         JOIN runs AS accepted_run
-           ON accepted_run.session_id = current_run.session_id
-          AND accepted_run.id <> ?
+        `SELECT accepted_run.id, accepted_run.turn_id
+         FROM runs AS accepted_run
          JOIN runtime_events AS terminal
            ON terminal.run_id = accepted_run.id
           AND terminal.kind IN ('run_completed', 'run_cancelled')
-          AND terminal.session_sequence < current_run.started_sequence
+         WHERE accepted_run.session_id = ?
+          AND (? IS NULL OR accepted_run.id <> ?)
+          AND terminal.session_sequence < COALESCE(
+            (SELECT session_sequence FROM runtime_events WHERE run_id = ? AND kind = 'run_started'),
+            9007199254740991)
           AND terminal.session_sequence > 0
          ORDER BY terminal.session_sequence`
       )
-      .all(runId, runId) as Array<{ id: string; turn_id: string }>
+      .all(sessionId, runId, runId, runId) as Array<{ id: string; turn_id: string }>
     const messages: ChatProviderMessage[] = []
     for (const prior of priorRuns) {
       messages.push(toProviderReplayContext(this.getTurnUserMessage(prior.turn_id)))
       messages.push(...(this.getTurnContext(prior.turn_id) ?? []))
       messages.push(...this.getRunReplayEvents(prior.id))
+    }
+    if (!run) {
+      if (!('userMessage' in target)) throw new Error('Pending replay requires a user message.')
+      messages.push(toProviderReplayContext(target.userMessage))
+      return messages
     }
     messages.push(toProviderReplayContext(this.getTurnUserMessage(run.turn_id)))
     messages.push(...(this.getTurnContext(run.turn_id) ?? []))
@@ -290,6 +293,16 @@ class SessionEventLog {
       .all(run.turn_id, run.attempt) as Array<{ id: string }>
     for (const retry of retryRuns) messages.push(...this.getRunReplayEvents(retry.id))
     return messages
+  }
+
+  getLatestCheckpoint(sessionId: string): ContextCheckpoint | undefined {
+    // SAFETY: the fixed SELECT returns only a schema-owned event identity.
+    const row = this.dependencies.database.connection
+      .prepare(
+        "SELECT id FROM runtime_events WHERE session_id = ? AND kind = 'context_checkpoint_recorded' ORDER BY session_sequence DESC LIMIT 1"
+      )
+      .get(sessionId) as { id: string } | undefined
+    return row ? this.getCheckpoint(row.id, sessionId) : undefined
   }
 
   getTurnCheckpoint(turnId: string): ContextCheckpoint | undefined {

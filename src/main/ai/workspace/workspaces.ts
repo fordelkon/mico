@@ -1,5 +1,10 @@
 import type { SkillCatalog, SkillDocument } from '@shared/ai/skills'
-import { createProjectAgentInstructions } from './agent-instructions'
+import {
+  createSkillSnapshot,
+  skillCatalog,
+  skillSettingsCatalog,
+  type SkillSnapshot
+} from '../skills'
 import {
   WorkspaceCatalog,
   type WorkspaceContext,
@@ -7,19 +12,16 @@ import {
   type WorkspacesDependencies
 } from './catalog'
 import { loadProjectInstructions } from './project-guidance'
-import { createSkillSnapshot, skillCatalog, skillSettingsCatalog } from './skills/snapshot'
-import { ToolRegistry, type ToolRegistryOptions } from './tools/registry'
 
-/** A turn captures guidance and skills once; resource reads remain on demand. */
-type WorkspaceTurn = {
-  registry: ToolRegistry
+/** Workspace sources are captured once; consumers compose policy and execution separately. */
+interface WorkspaceSources {
+  cwd: string
+  skills: SkillSnapshot
   projectInstructions: string | null
-  systemInstructions(): string
   loadInvokedSkill(skillId: string, displayName: string): Promise<string>
 }
-type WorkspaceTurnOptions = Omit<ToolRegistryOptions, 'skills'>
 
-/** Owns registered roots, their catalogs, and the capabilities available in a turn. */
+/** Owns registered roots and their constrained source snapshots, without model execution. */
 class Workspaces {
   private readonly catalog: WorkspaceCatalog
 
@@ -47,7 +49,6 @@ class Workspaces {
     return this.catalog.getActiveProjectContext(projectId)
   }
 
-  /** Existing conversations may still resolve their archived project's root. */
   getProjectContext(projectId: string): WorkspaceContext {
     return this.catalog.getProjectContext(projectId)
   }
@@ -83,30 +84,22 @@ class Workspaces {
     return (await createSkillSnapshot(rootPath)).readDocument(skillId)
   }
 
-  enterTurn(cwd: string, options: WorkspaceTurnOptions = {}): Promise<WorkspaceTurn> {
-    return Workspaces.enterTurn(cwd, options)
+  prepareSources(cwd: string): Promise<WorkspaceSources> {
+    return Workspaces.prepareSources(cwd)
   }
 
-  /** Also supports turns without a catalog service, using an already resolved root. */
-  static async enterTurn(
-    this: void,
-    cwd: string,
-    options: WorkspaceTurnOptions = {}
-  ): Promise<WorkspaceTurn> {
-    const [snapshot, projectInstructions] = await Promise.all([
+  static async prepareSources(this: void, cwd: string): Promise<WorkspaceSources> {
+    const [skills, projectInstructions] = await Promise.all([
       createSkillSnapshot(cwd),
       loadProjectInstructions(cwd)
     ])
-    const registry = ToolRegistry.forWorkspace(cwd, { ...options, skills: snapshot })
     return {
-      registry,
+      cwd,
+      skills,
       projectInstructions,
-      systemInstructions(): string {
-        return createProjectAgentInstructions(cwd, registry.definitions, snapshot)
-      },
       async loadInvokedSkill(skillId: string, displayName: string): Promise<string> {
-        const body = await snapshot.loadForUser(skillId)
-        if (snapshot.skills.find(({ id }) => id === skillId)?.name !== displayName)
+        const body = await skills.loadForUser(skillId)
+        if (skills.skills.find(({ id }) => id === skillId)?.name !== displayName)
           throw new Error(
             'The selected skill identity changed. Refresh the catalog and select it again.'
           )
@@ -117,4 +110,4 @@ class Workspaces {
 }
 
 export { Workspaces }
-export type { WorkspaceTurn, WorkspaceTurnOptions }
+export type { WorkspaceSources }

@@ -21,6 +21,8 @@ Mico is an early-stage, open-source project built with Electron, React, and Type
 - **Inspect the work behind the answer.** Browse file reads, edits, search results, and shell output in expandable tool details.
 - **Choose your models.** Connect Ollama, LM Studio, or endpoints using OpenAI Responses, Chat Completions, and Anthropic Messages. Adjust reasoning effort where supported.
 - **Bring project context and skills.** Use project instructions and invoke discovered skills with `$`. Use `/` for conversation commands, including manual context compaction.
+- **Continue longer conversations.** Mico can summarize completed history before accepting a new turn above its application input budget.
+- **Reuse saved preferences.** Ask Mico to remember, find, or forget user and project knowledge. Memory writes require approval, and new turns can reuse saved preferences.
 - **Make the workspace comfortable.** Choose light, dark, or system appearance, theme presets, and code highlighting themes. Resize the sidebar and navigate with keyboard shortcuts.
 
 ## See what changed

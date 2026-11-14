@@ -1,5 +1,25 @@
 import type { ChatProviderTool } from '@mico/ai-providers'
-import type { SkillSnapshot } from './skills/snapshot'
+import type { SkillSource } from '@shared/ai/skills'
+
+/** Discovery values only; rendering cannot load or authorize a skill. */
+interface PromptSkill {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  readonly source: SkillSource
+  readonly baseDirectory: string
+  readonly disableModelInvocation: boolean
+}
+
+interface PromptDiagnostic {
+  readonly path: string
+  readonly message: string
+}
+
+interface PromptSkillCatalog {
+  readonly skills: readonly PromptSkill[]
+  readonly diagnostics: readonly PromptDiagnostic[]
+}
 
 const MAX_CATALOG_BYTES = 24 * 1024
 const MAX_DIAGNOSTIC_BYTES = 4 * 1024
@@ -25,7 +45,7 @@ function boundedEntries(entries: readonly string[], maxBytes: number): string {
 function createProjectAgentInstructions(
   cwd: string,
   tools?: readonly ChatProviderTool[],
-  skills?: SkillSnapshot
+  skills?: PromptSkillCatalog
 ): string {
   const toolContext = tools
     ? tools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')
@@ -101,3 +121,4 @@ ${diagnostics}`
 }
 
 export { createProjectAgentInstructions }
+export type { PromptDiagnostic, PromptSkill, PromptSkillCatalog }

@@ -1,9 +1,13 @@
 import type { ChatProvider, ChatProviderStreamInput, ProviderStreamPart } from '@mico/ai-providers'
 import { ProviderError } from '@mico/ai-providers'
-import { toTurnFailure } from './turn-failure'
+import { classifyProviderFailure } from './errors'
 
-type RetryEvent = { attempt: number; maxAttempts: number; retryDelayMs: number }
-type RetryOptions = {
+interface RetryEvent {
+  attempt: number
+  maxAttempts: number
+  retryDelayMs: number
+}
+interface RetryOptions {
   maxAttempts: number
   retryDelayMs: number
   onRetry?: (event: RetryEvent) => void
@@ -56,7 +60,7 @@ class ModelStepRetry {
           observed ||
           attempt >= maxAttempts ||
           this.retries >= maxAttempts - 1 ||
-          !toTurnFailure(error instanceof Error ? error : new Error()).retryable
+          !classifyProviderFailure(error instanceof Error ? error : new Error()).retryable
         )
           throw error
         const backoff = Math.min(MAX_BACKOFF_MS, retryDelayMs * 2 ** (attempt - 1))
@@ -77,5 +81,5 @@ class ModelStepRetry {
   }
 }
 
-export type { RetryEvent }
+export type { RetryEvent, RetryOptions }
 export { ModelStepRetry }

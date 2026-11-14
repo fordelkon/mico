@@ -6,7 +6,7 @@ import {
 } from '@mico/ai-providers'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SessionDatabase } from '@main/data/session-database'
-import { ModelLoop } from './model-loop'
+import { ModelLoop } from '../execution'
 import { SessionRuntimeService } from './runtime'
 
 const profile = {

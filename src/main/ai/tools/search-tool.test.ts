@@ -1,8 +1,8 @@
+import { createWorkspaceTools } from './workspace-tools'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { ToolRegistry } from './registry'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('workspace search tools', () => {
@@ -11,7 +11,7 @@ describe('workspace search tools', () => {
   it('user searches a regex when case differs, then flags control matching and line numbers', async () => {
     const cwd = await createTemporaryWorkspace('mico-search-')
     await writeFile(join(cwd, 'example.ts'), 'other\nconst key = "A.B"\nconst similar = "axb"')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = createWorkspaceTools(cwd)
     const signal = new AbortController().signal
     const { result } = await registry.execute(
       {
@@ -54,7 +54,7 @@ describe('workspace search tools', () => {
     await writeFile(join(cwd, 'node_modules', 'dependency.ts'), 'dependency')
     await writeFile(join(outside, 'secret.ts'), 'external')
     await symlink(outside, join(cwd, 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
-    const { result } = await ToolRegistry.forWorkspace(cwd).execute(
+    const { result } = await createWorkspaceTools(cwd).execute(
       { toolCallId: 'files', toolName: 'Glob', input: { pattern: '**/*.ts' } },
       new AbortController().signal
     )
@@ -68,7 +68,7 @@ describe('workspace search tools', () => {
     const cwd = await createTemporaryWorkspace('mico-search-')
     await writeFile(join(cwd, 'a.txt'), 'match\nmatch\nmatch')
     await writeFile(join(cwd, 'b.txt'), 'match')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = createWorkspaceTools(cwd)
     const signal = new AbortController().signal
     const { result: content } = await registry.execute(
       {
@@ -106,7 +106,7 @@ describe('workspace search tools', () => {
 
   it('user supplies an invalid regex or external path when searching, then the tool returns an actionable error', async () => {
     const cwd = await createTemporaryWorkspace('mico-search-')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = createWorkspaceTools(cwd)
     const signal = new AbortController().signal
     const { result: invalid } = await registry.execute(
       {
@@ -133,7 +133,7 @@ describe('workspace search tools', () => {
   it('user requests context and multiline matches when searching, then results honor those options', async () => {
     const cwd = await createTemporaryWorkspace('mico-search-')
     await writeFile(join(cwd, 'a.ts'), 'before\nstart\nend\nafter')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = createWorkspaceTools(cwd)
     const signal = new AbortController().signal
     const { result: context } = await registry.execute(
       {

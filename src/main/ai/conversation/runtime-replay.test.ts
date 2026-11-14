@@ -1,3 +1,4 @@
+import { createWorkspaceTools } from '../tools'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +11,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest'
 import { SessionDatabase } from '@main/data/session-database'
 import { TurnDisplayAssembler } from './display'
-import { ModelLoop } from './model-loop'
+import { ModelLoop } from '../execution'
 import { Workspaces } from '../workspace'
 import { SessionRuntimeService } from './runtime'
 
@@ -191,7 +192,9 @@ describe('Session runtime replay', () => {
         response('Final answer.', 'final-response')
       ]),
       messages: handle.replayMessages,
-      registry: (await Workspaces.enterTurn(cwd)).registry,
+      registry: createWorkspaceTools(cwd, {
+        skills: (await Workspaces.prepareSources(cwd)).skills
+      }),
       thinkingEffort: 'none',
       signal: new AbortController().signal,
       emit: () => undefined,
@@ -473,7 +476,9 @@ describe('Session runtime replay', () => {
         ]
       ]),
       messages: handle.replayMessages,
-      registry: (await Workspaces.enterTurn(workspace)).registry,
+      registry: createWorkspaceTools(workspace, {
+        skills: (await Workspaces.prepareSources(workspace)).skills
+      }),
       thinkingEffort: 'none',
       signal: new AbortController().signal,
       emit: () => undefined,

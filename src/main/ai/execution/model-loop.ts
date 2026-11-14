@@ -2,7 +2,6 @@ import type {
   ChatProvider,
   ChatProviderMessage,
   ChatProviderReasoningPart,
-  ChatProviderStreamInput,
   ChatProviderTextPart,
   ChatProviderToolCallPart,
   ChatProviderToolResultPart,
@@ -10,54 +9,53 @@ import type {
   ThinkingSelection
 } from '@mico/ai-providers'
 import { isProviderFinish, ProviderError } from '@mico/ai-providers'
-import type { ContextMeasurement } from '@shared/ai/context-measurement'
-import { ToolOutputDeltaDataSchema } from '@shared/ipc/schemas/chat'
 import type { ProviderMetadata, UIMessageChunk } from 'ai'
 import * as z from 'zod'
-import { estimatePreparedContextTokens } from './context-estimator'
 import { ModelStepRetry, type RetryEvent } from './model-step-retry'
-import { AgentBudgetError } from './turn-failure'
+import { AgentBudgetError } from './errors'
 import type {
-  ModelStepAccepted,
-  ToolExecutionStarted,
-  ToolExecutionSettled
-} from './journal/tool-journal'
-import type { AgentStep } from './journal/transcript'
-import {
-  MAX_TOOL_RESULT_HISTORY_BYTES,
-  type ToolExecutionTrace,
-  type ToolCall,
-  type ToolRegistry
-} from '../workspace'
+  AgentStep,
+  ExecutionJournal,
+  PrepareStep,
+  ToolExecutionTrace,
+  ToolCall,
+  ToolExecutionPort
+} from './contracts'
 
-// OUTPUT_TOKEN_RECOVERY is a model-only continuation after a length stop; it is
-// bounded independently of successful tool rounds.
 const MAX_OUTPUT_TOKEN_RECOVERIES = 1
-const TOOL_RESULT_TRUNCATION_MARKER = '\n\n[Tool output shortened for model context.]\n\n'
 const OUTPUT_TOKEN_RECOVERY_MESSAGE =
   'Output token limit hit. Resume directly from where you stopped. Do not apologize or recap.'
 
-type ModelLoopInput = {
+interface ModelLoopInput {
   provider: ChatProvider
   messages: ChatProviderMessage[]
-  registry?: ToolRegistry
+  registry?: ToolExecutionPort
   thinkingEffort: ThinkingSelection
   signal: AbortSignal
   emit: (chunk: UIMessageChunk) => void
   onStep?: (step: AgentStep) => void
   onToolResult?: (trace: ToolExecutionTrace) => void
-  journal?: {
-    recordModelStep: (step: ModelStepAccepted) => void
-    recordToolExecutionStarted: (execution: ToolExecutionStarted) => void
-    recordToolExecutionSettled: (execution: ToolExecutionSettled) => void
-  }
-  prepareMessages?: (history: readonly ChatProviderMessage[]) => ChatProviderMessage[]
+  journal?: ExecutionJournal
+  prepareStep?: PrepareStep
   maxAttempts?: number
   retryDelayMs?: number
   onRetry?: (event: RetryEvent) => void
-  onContextMeasurement?: (measurement: ContextMeasurement) => void
 }
 
+interface ModelLoopResult {
+  assistantText: string
+  finalAssistant: Extract<ChatProviderMessage, { role: 'assistant' }>
+}
+
+const ToolOutputDeltaSchema = z.object({
+  toolCallId: z.string().trim().min(1).max(200),
+  toolName: z.string().trim().min(1).max(100),
+  stream: z.enum(['preview', 'stderr', 'stdout']),
+  delta: z
+    .string()
+    .min(1)
+    .max(64 * 1024)
+})
 const ToolInputAvailableChunkSchema = z.object({
   type: z.literal('tool-input-available'),
   toolCallId: z.string().min(1),
@@ -99,40 +97,20 @@ class ModelLoop {
     onStep,
     onToolResult,
     journal,
-    prepareMessages = (history) => [...history],
+    prepareStep = (history) => ({ messages: [...history] }),
     maxAttempts = 5,
     retryDelayMs = 1_000,
-    onRetry,
-    onContextMeasurement
-  }: ModelLoopInput): Promise<{
-    assistantText: string
-    finalAssistant: Extract<ChatProviderMessage, { role: 'assistant' }>
-  }> {
-    // A tool owns its history budget; fresh and replayed observations follow it alike.
-    // Without a workspace there are no skill tools, so only the generic fallback applies.
-    const boundForHistory = (result: ChatProviderToolResultPart): ChatProviderToolResultPart =>
-      boundToolResultForHistory(
-        result,
-        registry?.historyBudgetFor(result.toolName) ?? MAX_TOOL_RESULT_HISTORY_BYTES
-      )
-    let history = messages.map((message) =>
-      message.role === 'tool' ? { ...message, parts: message.parts.map(boundForHistory) } : message
-    )
+    onRetry
+  }: ModelLoopInput): Promise<ModelLoopResult> {
+    let history = messages
     const retry = new ModelStepRetry({ maxAttempts, retryDelayMs, onRetry })
     let assistantText = ''
     let outputTokenRecoveries = 0
     let responseCount = 0
-    // Interactive tasks continue until the model finishes, the user cancels, or a
-    // real failure occurs. Successful tool use must not silently remove capabilities.
     for (;;) {
       signal.throwIfAborted()
-      const request: ChatProviderStreamInput = {
-        messages: prepareMessages(history),
-        thinkingEffort,
-        signal
-      }
-      if (registry) request.tools = registry.definitions
-      onContextMeasurement?.(estimatePreparedContextTokens(request.messages, request.tools))
+      // Projection runs once per logical step; retries reuse this exact request.
+      const request = { ...prepareStep(history), thinkingEffort, signal }
       const stream = retry.stream(provider, request)
       const invalidResults: ChatProviderToolResultPart[] = []
       const calls: ToolCall[] = []
@@ -144,8 +122,6 @@ class ModelLoop {
       let continuation: Extract<ChatProviderMessage, { role: 'assistant' }>['replay']
       let usage: ProviderUsage | undefined
       for await (const chunk of stream) {
-        // Provider-finish is protocol state for the runner. It must never cross
-        // the main/renderer boundary as an AI SDK UI message chunk.
         if (isProviderFinish(chunk)) {
           if (chunk.reason === 'unknown' || chunk.reason === 'content-filter')
             throw new ProviderError('provider')
@@ -258,9 +234,6 @@ class ModelLoop {
             'token_limit',
             'The model reached its output token limit twice. Lower thinking effort or increase the model output limit and try again.'
           )
-        // Preserve the partial provider-visible response before asking the model
-        // to continue. The single-retry cap prevents a provider limit from
-        // turning one user request into an unbounded hidden conversation.
         history = [
           ...history,
           replayAssistant,
@@ -292,15 +265,9 @@ class ModelLoop {
             calls,
             signal,
             (delta) => {
-              // The renderer reads message parts, so each delta must append there.
-              // A shared id would replace earlier deltas; transient parts only reach
-              // onData. Durable history still stores the completed tool trace.
-              const parsed = ToolOutputDeltaDataSchema.safeParse(delta)
+              const parsed = ToolOutputDeltaSchema.safeParse(delta)
               if (!parsed.success) return
-              emit({
-                type: 'data-tool-output-delta',
-                data: parsed.data
-              })
+              emit({ type: 'data-tool-output-delta', data: parsed.data })
             },
             {
               onExecutionStarted: (call, startedAt) =>
@@ -316,45 +283,18 @@ class ModelLoop {
             }
           )
         : []
-      const orderedResults = parts.flatMap((part) =>
+      const results = parts.flatMap((part) =>
         part.type === 'tool-call'
           ? [...invalidResults, ...executions.map((execution) => execution.result)].filter(
               (result) => result.toolCallId === part.toolCallId
             )
           : []
       )
-      const results = orderedResults.map(boundForHistory)
+      // Facts and history retain complete evidence; prepareStep owns request-only budgets.
       onStep?.({ index: responseCount, assistant: replayAssistant, toolResults: results })
       for (const { result } of executions) emitToolResult(result, emit)
-      history = [
-        ...history,
-        replayAssistant,
-        {
-          role: 'tool',
-          parts: results
-        }
-      ]
+      history = [...history, replayAssistant, { role: 'tool', parts: results }]
     }
-  }
-}
-
-function boundToolResultForHistory(
-  result: ChatProviderToolResultPart,
-  maxBytes: number
-): ChatProviderToolResultPart {
-  if (Buffer.byteLength(result.output) <= maxBytes) return result
-  const bytes = Buffer.from(result.output)
-  const markerBytes = Buffer.byteLength(TOOL_RESULT_TRUNCATION_MARKER)
-  const contentBytes = maxBytes - markerBytes
-  const headBytes = Math.floor(contentBytes * 0.75)
-  const tailBytes = contentBytes - headBytes
-  let headEnd = headBytes
-  while (headEnd > 0 && (bytes[headEnd] & 0xc0) === 0x80) headEnd -= 1
-  let tailStart = bytes.byteLength - tailBytes
-  while (tailStart < bytes.byteLength && (bytes[tailStart] & 0xc0) === 0x80) tailStart += 1
-  return {
-    ...result,
-    output: `${bytes.subarray(0, headEnd).toString()}${TOOL_RESULT_TRUNCATION_MARKER}${bytes.subarray(tailStart).toString()}`
   }
 }
 
@@ -388,5 +328,5 @@ function emitToolResult(result: ChatProviderToolResultPart, emit: ModelLoopInput
   })
 }
 
-export type { AgentStep }
 export { ModelLoop }
+export type { AgentStep, ModelLoopInput, ModelLoopResult }

@@ -1,8 +1,8 @@
+import { createWorkspaceTools } from './workspace-tools'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { ToolRegistry } from './registry'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
 describe('workspace tool protocol', () => {
@@ -10,7 +10,7 @@ describe('workspace tool protocol', () => {
 
   it('user creates and edits a file when using Claude Code arguments, then replacements preserve surrounding content', async () => {
     const cwd = await createTemporaryWorkspace('mico-protocol-')
-    const registry = ToolRegistry.forWorkspace(cwd, { permissionMode: 'acceptEdits' })
+    const registry = createWorkspaceTools(cwd, { permissionMode: 'acceptEdits' })
     const signal = new AbortController().signal
     const file_path = join(cwd, 'file.txt')
     const results = (
@@ -56,7 +56,7 @@ describe('workspace tool protocol', () => {
 
   it('user submits empty edit arguments when calling a tool, then field errors explain how to retry', async () => {
     const cwd = await createTemporaryWorkspace('mico-protocol-')
-    const { result } = await ToolRegistry.forWorkspace(cwd).execute(
+    const { result } = await createWorkspaceTools(cwd).execute(
       { toolCallId: 'empty', toolName: 'Edit', input: {} },
       new AbortController().signal
     )

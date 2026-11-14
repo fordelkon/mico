@@ -33,7 +33,6 @@ function estimatePreparedContextTokens(
     count(tool.name)
     count(tool.description)
     // Iterative traversal avoids stack overflow and serialization of large schemas.
-    // Count JSON keys and scalar values once; cap nodes across each definition.
     const pending: unknown[] = [tool.inputSchema]
     let visited = 0
     while (pending.length && visited < MAX_SCHEMA_NODES) {

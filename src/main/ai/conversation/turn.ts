@@ -2,12 +2,22 @@ import type { PermissionResponse } from '@shared/ai/permissions'
 import type { TurnStartRequest, TurnStreamEvent, TurnTerminalEvent } from '@shared/ipc/schemas/chat'
 import type { SessionRuntimeService, TurnRunHandle } from './runtime'
 import { PermissionRequests } from './tool-approvals'
-import { ModelLoop } from './model-loop'
-import { type ToolHooks, Workspaces } from '../workspace'
+import { ModelLoop, TextGeneration } from '../execution'
+import { Workspaces } from '../workspace'
+import type { ToolHooks } from '../tools'
+import type { Memories } from '../memory'
+import { prepareProviderInput } from '../context'
 import { getMessageText } from './provider-messages'
 import { resolveEffectiveThinkingEffort, SessionModelProfile } from './model-profile'
 import { type SessionTitleUpdate, TitleGenerator } from './title-generator'
-import { type EnterTurn, prepareTurnContext } from './turn-context'
+import {
+  captureTurnContext,
+  type CapturedTurnContext,
+  type EnterTurn,
+  prepareTurnContext
+} from './turn-context'
+import { CompactionPersistenceFailed, type SessionCompactor } from './compaction'
+import { compactPendingContext, validateApplicationInputBudget } from './auto-compaction'
 import { TurnDisplayAssembler } from './display'
 import { toTurnFailure } from './turn-failure'
 
@@ -18,6 +28,7 @@ type ActiveTurn = {
   handle: TurnRunHandle | null
   ownerId: string
   requestId: string
+  sessionId: string
   terminal: boolean
   canPersist: boolean
 }
@@ -26,9 +37,17 @@ type TurnExecutorOptions = {
   profiles: SessionModelProfile
   runtime: Pick<
     SessionRuntimeService,
-    'beginTurn' | 'renameSessionIfCurrentTitle' | 'getRetryProfile'
+    | 'beginTurn'
+    | 'renameSessionIfCurrentTitle'
+    | 'getRetryProfile'
+    | 'previewTurn'
+    | 'getCompactionSource'
+    | 'getLatestCheckpointCoverage'
   >
+  compactor?: Pick<SessionCompactor, 'compact'>
+  applicationInputBudgetTokens?: number | false
   enterTurn?: EnterTurn
+  memories?: Memories
   toolHooks?: ToolHooks
   maxAssistantTextChars?: number
   maxAttempts?: number
@@ -43,6 +62,7 @@ const DEFAULT_MAX_ASSISTANT_TEXT_CHARS = 256 * 1024
 class TurnExecutor {
   private readonly permissions = new PermissionRequests()
   private readonly titleGenerator: TitleGenerator
+  private readonly textGeneration = new TextGeneration()
   private readonly activeTurns = new Map<string, ActiveTurn>()
   private readonly executions = new Map<Promise<void>, ActiveTurn>()
   private isDisposed = false
@@ -54,11 +74,17 @@ class TurnExecutor {
   private readonly runtime: TurnExecutorOptions['runtime']
   private readonly toolHooks: ToolHooks
   private readonly enterTurn: EnterTurn
+  private readonly memories: Memories | undefined
+  private readonly compactor: TurnExecutorOptions['compactor']
+  private readonly applicationInputBudgetTokens: number | false
 
   constructor({
     profiles,
     runtime,
-    enterTurn = Workspaces.enterTurn,
+    compactor,
+    applicationInputBudgetTokens = false,
+    enterTurn = Workspaces.prepareSources,
+    memories,
     toolHooks = {},
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
     maxAssistantTextChars = DEFAULT_MAX_ASSISTANT_TEXT_CHARS,
@@ -66,12 +92,16 @@ class TurnExecutor {
   }: TurnExecutorOptions) {
     this.profiles = profiles
     this.runtime = runtime
+    this.compactor = compactor
+    this.applicationInputBudgetTokens = validateApplicationInputBudget(applicationInputBudgetTokens)
     this.enterTurn = enterTurn
+    this.memories = memories
     this.toolHooks = toolHooks
     this.maxAttempts = maxAttempts
     this.maxAssistantTextChars = maxAssistantTextChars
     this.retryDelayMs = retryDelayMs
     this.titleGenerator = new TitleGenerator({
+      textGeneration: this.textGeneration,
       renameIfCurrentTitle: (sessionId, currentTitle, title) =>
         this.isDisposed ? null : runtime.renameSessionIfCurrentTitle(sessionId, currentTitle, title)
     })
@@ -84,6 +114,19 @@ class TurnExecutor {
   ): void {
     if (this.isDisposed)
       throw new Error('The application is shutting down. New turns cannot start.')
+    const previous: Promise<void>[] = []
+    for (const [execution, turn] of this.executions) {
+      const sameRequest = turn.ownerId === ownerId && turn.requestId === request.requestId
+      if (
+        turn.sessionId === request.sessionId &&
+        !sameRequest &&
+        this.activeTurns.get(this.getTurnKey(turn.ownerId, turn.requestId)) === turn
+      )
+        throw new Error(
+          'Session already has an active request. Wait for it to settle before sending.'
+        )
+      if (sameRequest) previous.push(execution)
+    }
     for (const turn of this.executions.values()) {
       if (turn.ownerId === ownerId && turn.requestId === request.requestId) this.cancelTurn(turn)
     }
@@ -96,11 +139,12 @@ class TurnExecutor {
       handle: null,
       ownerId,
       requestId: request.requestId,
+      sessionId: request.sessionId,
       terminal: false,
       canPersist: true
     }
     this.activeTurns.set(key, turn)
-    const execution = this.execute({ key, request, turn, emit, onTitleUpdated })
+    const execution = this.execute({ key, request, turn, emit, onTitleUpdated, previous })
     this.executions.set(execution, turn)
     void execution.then(
       () => this.executions.delete(execution),
@@ -109,6 +153,10 @@ class TurnExecutor {
         console.error('Failed to settle chat turn', error)
       }
     )
+  }
+
+  isSessionExecuting(sessionId: string): boolean {
+    return [...this.activeTurns.values()].some((turn) => turn.sessionId === sessionId)
   }
 
   async abortTurn({ ownerId, requestId }: { ownerId: string; requestId: string }): Promise<void> {
@@ -135,7 +183,7 @@ class TurnExecutor {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
-        Promise.allSettled(this.executions.keys()),
+        Promise.allSettled([...this.executions.keys(), this.textGeneration.drain()]),
         new Promise<void>((resolve) => {
           timer = setTimeout(() => {
             console.warn('Chat shutdown drain timed out; unresolved tool outcomes remain unknown.')
@@ -151,6 +199,7 @@ class TurnExecutor {
 
   dispose(): void {
     this.isDisposed = true
+    this.textGeneration.dispose()
     for (const turn of this.activeTurns.values()) {
       this.cancelTurn(turn)
     }
@@ -161,39 +210,93 @@ class TurnExecutor {
     request,
     turn,
     emit,
-    onTitleUpdated
+    onTitleUpdated,
+    previous
   }: {
     key: string
     request: TurnStartRequest
     turn: ActiveTurn
     emit: (event: TurnStreamEvent) => void
     onTitleUpdated?: (update: SessionTitleUpdate) => void
+    previous: Promise<void>[]
   }): Promise<void> {
     try {
+      await Promise.all(previous)
+      this.assertCanAccept(turn)
       const isRetry = request.retry === true || request.retryRunId !== undefined
+      const preview = isRetry
+        ? undefined
+        : this.runtime.previewTurn(request.sessionId, request.requestId, request.userMessage)
       const retryProfile = isRetry
         ? this.runtime.getRetryProfile(request.sessionId, request.retryRunId)
-        : undefined
+        : preview?.profile
       const selection = retryProfile
         ? this.profiles.resolveForProfile(retryProfile)
         : this.profiles.resolveForSession(request.sessionId)
       const provider = selection.provider
+      const originalDefaultProfile = this.profiles.getStoredProfile(request.sessionId)
 
-      const requestedThinkingEffort = request.thinkingEffort ?? 'default'
+      const requestedThinkingEffort =
+        retryProfile?.thinkingEffort ?? request.thinkingEffort ?? 'default'
       let effectiveThinkingEffort = requestedThinkingEffort
       const { configuration, modelEntryId } = selection
-      if (!isRetry) {
+      if (!isRetry && !preview?.existing) {
         effectiveThinkingEffort = await resolveEffectiveThinkingEffort(
           provider,
           requestedThinkingEffort
         )
         turn.controller.signal.throwIfAborted()
         if (!turn.canPersist) throw new Error('Turn setup cannot continue after shutdown.')
-        this.profiles.persistSessionProfile(
-          request.sessionId,
-          this.profiles.toProfile(configuration, modelEntryId, requestedThinkingEffort)
+      }
+      const preparationOptions: Parameters<typeof prepareTurnContext>[2] = {
+        memories: this.memories,
+        permissionMode: request.permissionMode ?? 'default',
+        hooks: this.toolHooks,
+        requestApproval: (call, signal) =>
+          this.permissions.request(
+            {
+              ...call,
+              ownerId: turn.ownerId,
+              sessionId: request.sessionId,
+              requestId: request.requestId
+            },
+            signal,
+            (data) =>
+              emit({
+                type: 'chunk',
+                requestId: request.requestId,
+                chunk: { type: 'data-tool-permission', id: data.approvalId, data }
+              })
+          )
+      }
+      let captured: CapturedTurnContext | undefined
+      if (preview && !preview.existing) {
+        captured = await captureTurnContext(
+          request.userMessage,
+          preview,
+          preparationOptions,
+          turn.controller.signal,
+          this.enterTurn
+        )
+        this.assertCanAccept(turn)
+        await compactPendingContext({
+          sessionId: request.sessionId,
+          budget: this.applicationInputBudgetTokens,
+          captured,
+          replay: () =>
+            this.runtime.previewTurn(request.sessionId, request.requestId, request.userMessage)
+              .replayMessages,
+          runtime: this.runtime,
+          compactor: this.compactor,
+          thinkingEffort: effectiveThinkingEffort,
+          signal: turn.controller.signal
+        })
+        this.assertCanAccept(turn)
+        this.profiles.resolveForProfile(
+          this.profiles.toProfile(configuration, modelEntryId, effectiveThinkingEffort)
         )
       }
+      this.assertCanAccept(turn)
       const handle = this.runtime.beginTurn({
         sessionId: request.sessionId,
         requestId: request.requestId,
@@ -203,35 +306,23 @@ class TurnExecutor {
         retryRunId: request.retryRunId
       })
       turn.handle = handle
+      if (!isRetry && !preview?.existing)
+        this.profiles.acceptSessionProfile(
+          request.sessionId,
+          originalDefaultProfile,
+          this.profiles.toProfile(configuration, modelEntryId, requestedThinkingEffort)
+        )
       effectiveThinkingEffort = handle.profile.thinkingEffort
 
-      turn.controller.signal.throwIfAborted()
-      const context = await prepareTurnContext(
-        request.userMessage,
-        handle,
-        {
-          permissionMode: request.permissionMode ?? 'default',
-          hooks: this.toolHooks,
-          requestApproval: (call, signal) =>
-            this.permissions.request(
-              {
-                ...call,
-                ownerId: turn.ownerId,
-                sessionId: request.sessionId,
-                requestId: request.requestId
-              },
-              signal,
-              (data) =>
-                emit({
-                  type: 'chunk',
-                  requestId: request.requestId,
-                  chunk: { type: 'data-tool-permission', id: data.approvalId, data }
-                })
-            )
-        },
-        turn.controller.signal,
-        this.enterTurn
-      )
+      const context = captured
+        ? captured.accept(handle)
+        : await prepareTurnContext(
+            request.userMessage,
+            handle,
+            preparationOptions,
+            turn.controller.signal,
+            this.enterTurn
+          )
       turn.controller.signal.throwIfAborted()
       if (handle.shouldGenerateTitle)
         this.titleGenerator.maybeGenerate({
@@ -248,14 +339,26 @@ class TurnExecutor {
         const runnerInput: Parameters<ModelLoop['run']>[0] = {
           provider,
           messages,
-          prepareMessages: context.messages,
+          prepareStep: (history) => {
+            const prepared = prepareProviderInput({
+              purpose: 'turn',
+              history,
+              prepareMessages: context.messages,
+              toolContext: registry,
+              thinkingEffort: effectiveThinkingEffort,
+              signal: turn.controller.signal
+            })
+            if (!turn.controller.signal.aborted && !turn.terminal)
+              emit({
+                type: 'context-measurement',
+                requestId: request.requestId,
+                measurement: prepared.measurement
+              })
+            return prepared.request
+          },
           maxAttempts: this.maxAttempts,
           retryDelayMs: this.retryDelayMs,
           onRetry: (event) => emit({ type: 'retry', requestId: request.requestId, ...event }),
-          onContextMeasurement: (measurement) => {
-            if (turn.controller.signal.aborted || turn.terminal) return
-            emit({ type: 'context-measurement', requestId: request.requestId, measurement })
-          },
           thinkingEffort: effectiveThinkingEffort,
           signal: turn.controller.signal,
           emit: (chunk) => {
@@ -308,10 +411,17 @@ class TurnExecutor {
           message: failure.message
         })
       }
+      if (error instanceof CompactionPersistenceFailed) throw error
     } finally {
       if (turn.controller.signal.aborted && turn.canPersist) this.cancelPersistedRun(turn)
       if (this.activeTurns.get(key) === turn) this.activeTurns.delete(key)
     }
+  }
+
+  private assertCanAccept(turn: ActiveTurn): void {
+    turn.controller.signal.throwIfAborted()
+    if (this.isDisposed || !turn.canPersist)
+      throw new Error('Turn setup cannot continue after shutdown.')
   }
 
   private getTurnKey(ownerId: string, requestId: string): string {

@@ -1,3 +1,4 @@
+import { createWorkspaceTools } from './workspace-tools'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -5,7 +6,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createEditTool } from './edit-tool'
 import { createReadTool } from './read-tool'
-import { ToolRegistry } from './registry'
 import { createWriteTool } from './write-tool'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
 
@@ -58,7 +58,7 @@ describe('workspace file tools', () => {
   it('user gets a recovery hint when an edit changes nothing, then the tool refuses before writing', async () => {
     const cwd = await createTemporaryWorkspace('mico-file-tool-')
     await writeFile(join(cwd, 'a.txt'), 'unchanged\n')
-    const registry = ToolRegistry.forWorkspace(cwd)
+    const registry = createWorkspaceTools(cwd)
 
     const { result } = await registry.execute(
       {

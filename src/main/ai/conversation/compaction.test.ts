@@ -148,6 +148,21 @@ function completeTurn(runtime: SessionRuntimeService, sessionId: string, request
   beginTurn(runtime, sessionId, requestId).complete(assistantMessage)
 }
 
+function completeToolTurn(runtime: SessionRuntimeService, sessionId: string, output: string): void {
+  const handle = beginTurn(runtime, sessionId, 'large-result')
+  handle.recordStep({
+    index: 1,
+    assistant: {
+      role: 'assistant',
+      parts: [{ type: 'tool-call', toolCallId: 'read', toolName: 'Read', argumentsJson: '{}' }]
+    },
+    toolResults: [
+      { type: 'tool-result', toolCallId: 'read', toolName: 'Read', output, isError: false }
+    ]
+  })
+  handle.complete(assistantMessage)
+}
+
 type CheckpointPayload = {
   trigger: 'manual'
   summary: string
@@ -307,6 +322,38 @@ describe('SessionCompactor', () => {
     expect(outcome.status).toBe('failed')
     expect(notices(database, session.id)[0]?.reason).toBe('rejected')
     expect(checkpoints(database, session.id)).toEqual([])
+  })
+
+  it('user summarizes a large tool result when input fits, then the summary receives its complete evidence', async () => {
+    const { database, runtime, session, compactor, streamCalls } = await createHarness()
+    const output = `${'x'.repeat(40 * 1024)}MIDDLE-EVIDENCE${'y'.repeat(40 * 1024)}`
+    completeToolTurn(runtime, session.id, output)
+
+    await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'accepted' })
+
+    const source = streamCalls[0]?.messages[1]?.parts[0]
+    expect(source?.type === 'text' ? source.text : '').toContain(output)
+    expect(checkpoints(database, session.id)).toHaveLength(1)
+  })
+
+  it('user summarizes oversized history when the input exceeds its byte budget, then history remains intact', async () => {
+    const { database, runtime, session, compactor, streamCalls } = await createHarness()
+    const output = '界'.repeat(400_000)
+    completeToolTurn(runtime, session.id, output)
+    const original = runtime.getCompactionSource(session.id)
+
+    await expect(compactor.compact(session.id)).resolves.toMatchObject({
+      status: 'failed',
+      message: expect.stringContaining('1 MiB')
+    })
+
+    expect(streamCalls).toHaveLength(0)
+    expect(checkpoints(database, session.id)).toEqual([])
+    expect(notices(database, session.id)).toEqual([
+      expect.objectContaining({ reason: 'rejected', sourceDigest: original?.sourceDigest })
+    ])
+    expect(runtime.getCompactionSource(session.id)?.messages).toEqual(original?.messages)
+    expect(() => beginTurn(runtime, session.id, 'after-refusal')).not.toThrow()
   })
 
   it('user changes covered history when a summary runs, then the stale summary is discarded with a durable notice', async () => {

@@ -1,34 +1,18 @@
 import type { ChatProviderTool, ChatProviderToolResultPart } from '@mico/ai-providers'
-import type { ToolOutputDeltaData } from '@shared/ipc/schemas/chat'
+import type { ToolOutputDeltaData, ToolExecution, ToolExecutionCallbacks } from '../execution'
 
-import type { SkillSnapshot } from '../skills/snapshot'
-import { createBashTool } from './bash-tool'
-import { createEditTool } from './edit-tool'
-import { createReadTool } from './read-tool'
-import { createGlobTool, createGrepTool } from './search-tool'
-import { createLoadSkillTool, createReadSkillResourceTool } from './skill-tools'
 import {
   MAX_TOOL_RESULT_HISTORY_BYTES,
   type RegisteredAgentTool,
-  registerTool,
   type ToolCall,
-  type ToolExecutionTrace,
   type ToolInput,
   type ToolOutputDelta
 } from './contract'
 import { runPostToolUse, runPreToolUse, type ToolHooks } from './hooks'
 import { authorizeTool, type ToolPermissionOptions } from './permissions'
-import { createWriteTool } from './write-tool'
 
 type ToolRegistryOptions = ToolPermissionOptions & {
   hooks?: ToolHooks
-  skills?: SkillSnapshot
-  authorizedSkillIds?: readonly string[]
-}
-type ToolExecution = { result: ChatProviderToolResultPart; trace: ToolExecutionTrace }
-type ToolExecutionCallbacks = {
-  onExecutionStarted?: (call: ToolCall, startedAt: number) => void
-  onExecutionSettled?: (execution: ToolExecution) => void
 }
 
 // A UTF-16 slice may encode to up to four bytes per code unit. Keep each IPC
@@ -41,31 +25,14 @@ class ToolRegistry {
   readonly #cwd: string
   readonly #options: ToolRegistryOptions
 
-  private constructor(cwd: string, tools: RegisteredAgentTool[], options: ToolRegistryOptions) {
+  constructor(cwd: string, tools: RegisteredAgentTool[], options: ToolRegistryOptions = {}) {
     this.#cwd = cwd
     this.#tools = new Map(tools.map((tool) => [tool.definition.name, tool]))
     this.#options = options
   }
 
-  static forWorkspace(cwd: string, options: ToolRegistryOptions = {}): ToolRegistry {
-    return new ToolRegistry(
-      cwd,
-      [
-        registerTool(createReadTool()),
-        registerTool(createGlobTool()),
-        registerTool(createGrepTool()),
-        registerTool(createEditTool()),
-        registerTool(createWriteTool()),
-        registerTool(createBashTool()),
-        ...(options.skills
-          ? [
-              registerTool(createLoadSkillTool(options.skills, options.authorizedSkillIds)),
-              registerTool(createReadSkillResourceTool(options.skills, options.authorizedSkillIds))
-            ]
-          : [])
-      ],
-      options
-    )
+  get historyBudgets(): ReadonlyMap<string, number> {
+    return new Map([...this.#tools].map(([name, tool]) => [name, tool.maxHistoryOutputBytes]))
   }
 
   /** Fixed tool-owned allowance, also used when replaying an earlier tool output. */

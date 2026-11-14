@@ -12,7 +12,7 @@ import {
   type ChatToolTracePresentation,
   type ChatToolTracePart
 } from '@shared/data/schemas/chat'
-import type { ToolExecutionTrace } from '../../workspace'
+import type { ToolExecutionTrace } from '../../tools'
 
 type StoredToolTrace = {
   toolCallId: string

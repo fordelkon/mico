@@ -1,4 +1,5 @@
 import type { ChatProviderTool, JsonObject } from '@mico/ai-providers'
+import type { ToolCall, ToolExecutionTrace } from '../execution'
 
 import * as z from 'zod'
 
@@ -25,24 +26,14 @@ type ToolExecutionContext = {
   onOutputDelta?: (delta: ToolOutputDelta) => void
 }
 type ToolExecutionResult = { output: string }
-/** Complete fact emitted once a tool call has settled. */
-type ToolExecutionTrace = {
-  toolCallId: string
-  toolName: string
-  input: ToolInput
-  isError: boolean
-  output: string
-  startedAt: number
-  finishedAt: number
-}
 type ToolInput = JsonObject
-type ToolCall = { toolCallId: string; toolName: string; input: ToolInput }
 /** Effects derived from schema-validated input, independent of provider tool names. */
 type ToolOperation =
   | { kind: 'read-only' }
   | { kind: 'file-read'; path: string }
   | { kind: 'file-write'; path: string; allowMissing: boolean }
   | { kind: 'command' }
+  | { kind: 'memory-write'; scope: 'user' | 'project' }
   | { kind: 'unknown' }
 /** A semantic rejection with a model-facing hint for recovering on retry. */
 type ToolValidationFailure = { message: string }

@@ -1,7 +1,7 @@
 import type { ChatMessage } from '@shared/data/schemas/chat'
 import type { UIMessageChunk } from 'ai'
 import { toDisplayToolTrace } from './journal/tool-trace-presentation'
-import type { ToolExecutionTrace } from '../workspace'
+import type { ToolExecutionTrace } from '../tools'
 
 type Chain<T> = { readonly value: T; readonly previous: Chain<T> | undefined }
 type DisplayPart = { type: 'text' | 'reasoning'; key: string } | { type: 'tool'; key: string }

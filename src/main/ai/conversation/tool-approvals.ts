@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type { PermissionResponse, ToolPermissionData } from '@shared/ai/permissions'
-import type { ToolApprovalRequest } from '../workspace'
+import type { ToolApprovalRequest } from '../tools'
 
 type PendingPermission = {
   ownerId: string

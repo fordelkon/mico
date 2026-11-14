@@ -39,9 +39,11 @@ async function authorizeTool(
       : undefined) ??
     (operation.kind === 'command'
       ? 'This command runs on your computer without a sandbox and may access files outside this workspace.'
-      : target?.isProtected
-        ? 'This operation changes a protected configuration path and requires your approval.'
-        : 'This operation changes workspace files and requires your approval.')
+      : operation.kind === 'memory-write'
+        ? `This operation changes persistent ${operation.scope} memory and requires your approval.`
+        : target?.isProtected
+          ? 'This operation changes a protected configuration path and requires your approval.'
+          : 'This operation changes workspace files and requires your approval.')
   if (!options.requestApproval)
     throw new Error(
       `Permission required for ${call.toolName}. No approval interface is available; the operation was not executed.`

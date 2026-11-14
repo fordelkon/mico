@@ -69,7 +69,7 @@ describe('Workspaces', () => {
     })
   })
 
-  it('user changes guidance when a turn exists, then tools and invocation keep its captured contents', async () => {
+  it('user changes guidance when a snapshot exists, then its captured sources remain stable', async () => {
     const { service } = await createService()
     const cwd = service.getDefaultWorkspacePath()
     const base = join(cwd, '.agents', 'skills', 'review')
@@ -80,24 +80,19 @@ describe('Workspaces', () => {
       '---\nname: review\ndescription: Original description\n---\nOriginal body'
     )
     await writeFile(join(cwd, 'AGENTS.md'), 'Original guidance')
-    const turn = await service.enterTurn(cwd)
+    const turn = await service.prepareSources(cwd)
     await writeFile(path, '---\nname: review\ndescription: Changed description\n---\nChanged body')
     await writeFile(join(cwd, 'AGENTS.md'), 'Changed guidance')
 
     expect(turn.projectInstructions).toContain('Original guidance')
-    expect(turn.systemInstructions()).toContain('Original description')
+    expect(turn.skills.skills.find((skill) => skill.name === 'review')?.description).toBe(
+      'Original description'
+    )
     expect(await turn.loadInvokedSkill('project-agents:review', 'review')).toContain(
       'Original body'
     )
-    const execution = await turn.registry.execute(
-      { toolCallId: 'load', toolName: 'LoadSkill', input: { skill_id: 'project-agents:review' } },
-      new AbortController().signal
-    )
-    expect(execution.result).toMatchObject({
-      isError: false,
-      output: expect.stringContaining('Original body')
-    })
-    const refreshed = await Workspaces.enterTurn(cwd)
+    expect(await turn.skills.load('project-agents:review')).toContain('Original body')
+    const refreshed = await Workspaces.prepareSources(cwd)
     expect(refreshed.projectInstructions).toContain('Changed guidance')
     expect(await refreshed.loadInvokedSkill('project-agents:review', 'review')).toContain(
       'Changed body'
@@ -144,7 +139,7 @@ describe('Workspaces', () => {
       join(base, 'SKILL.md'),
       '---\nname: review\ndescription: Review\n---\nInstructions'
     )
-    const turn = await Workspaces.enterTurn(cwd)
+    const turn = await Workspaces.prepareSources(cwd)
 
     await expect(turn.loadInvokedSkill('review', 'review')).rejects.toThrow('Unknown skill')
     await expect(turn.loadInvokedSkill('project-agents:review', 'renamed')).rejects.toThrow(

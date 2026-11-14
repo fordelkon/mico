@@ -8,17 +8,24 @@ import type {
 import type { TurnStartRequest, TurnStreamEvent } from '@shared/ipc/schemas/chat'
 import type { SessionDatabase } from '@main/data/session-database'
 import type { Models } from '../models'
-import type { ToolHooks, Workspaces } from '../workspace'
+import type { Workspaces } from '../workspace'
+import type { ToolHooks } from '../tools'
+import type { Memories } from '../memory'
 import { SessionCompactor, type SessionCompactionOutcome } from './compaction'
 import { SessionModelProfile } from './model-profile'
 import { SessionRuntimeService } from './runtime'
 import type { SessionTitleUpdate } from './title-generator'
 import { TurnExecutor } from './turn'
+import {
+  DEFAULT_APPLICATION_INPUT_BUDGET_TOKENS,
+  validateApplicationInputBudget
+} from './auto-compaction'
 
 interface ConversationsOptions {
   database: SessionDatabase
   models: Models
   workspace?: Workspaces
+  memories?: Memories
   createId?: () => string
   now?: () => number
   toolHooks?: ToolHooks
@@ -26,6 +33,8 @@ interface ConversationsOptions {
   maxAttempts?: number
   retryDelayMs?: number
   maxSummaryChars?: number
+  /** Application policy based on approximate input measurement; false disables automatic compaction. */
+  applicationInputBudgetTokens?: number | false
 }
 
 interface CreateSessionInput {
@@ -54,24 +63,27 @@ class Conversations {
     if (options.now) runtimeOptions.now = options.now
     this.runtime = new SessionRuntimeService(runtimeOptions)
     this.profiles = new SessionModelProfile({ models: options.models, runtime: this.runtime })
-    const workspace = options.workspace
-    const turnOptions: ConstructorParameters<typeof TurnExecutor>[0] = {
-      profiles: this.profiles,
-      runtime: this.runtime,
-      toolHooks: options.toolHooks,
-      maxAssistantTextChars: options.maxAssistantTextChars,
-      maxAttempts: options.maxAttempts,
-      retryDelayMs: options.retryDelayMs
-    }
-    if (workspace)
-      turnOptions.enterTurn = (cwd, preparationOptions) =>
-        workspace.enterTurn(cwd, preparationOptions)
-    this.executor = new TurnExecutor(turnOptions)
     this.compactor = new SessionCompactor({
       runtime: this.runtime,
       modelProfile: this.profiles,
       maxSummaryChars: options.maxSummaryChars
     })
+    const workspace = options.workspace
+    const turnOptions: ConstructorParameters<typeof TurnExecutor>[0] = {
+      profiles: this.profiles,
+      runtime: this.runtime,
+      compactor: this.compactor,
+      memories: options.memories,
+      applicationInputBudgetTokens: validateApplicationInputBudget(
+        options.applicationInputBudgetTokens ?? DEFAULT_APPLICATION_INPUT_BUDGET_TOKENS
+      ),
+      toolHooks: options.toolHooks,
+      maxAssistantTextChars: options.maxAssistantTextChars,
+      maxAttempts: options.maxAttempts,
+      retryDelayMs: options.retryDelayMs
+    }
+    if (workspace) turnOptions.enterTurn = (cwd) => workspace.prepareSources(cwd)
+    this.executor = new TurnExecutor(turnOptions)
   }
 
   createSession(input: CreateSessionInput): SessionSummary {
@@ -91,6 +103,7 @@ class Conversations {
   }
 
   deleteSession(sessionId: string): void {
+    this.assertNoAdmission(sessionId)
     this.runtime.deleteSession(sessionId)
   }
 
@@ -99,6 +112,13 @@ class Conversations {
     emit: (event: TurnStreamEvent) => void,
     onTitleUpdated?: (update: SessionTitleUpdate) => void
   ): void {
+    if (
+      this.compactor.isCompacting(input.request.sessionId) &&
+      !this.executor.isSessionExecuting(input.request.sessionId)
+    )
+      throw new Error(
+        'A summary is running for this session. Wait for it to settle before sending.'
+      )
     this.executor.startTurn(input, emit, onTitleUpdated)
   }
 
@@ -114,8 +134,14 @@ class Conversations {
     this.executor.respondToPermission(ownerId, response)
   }
 
-  compact(sessionId: string): Promise<SessionCompactionOutcome> {
+  async compact(sessionId: string): Promise<SessionCompactionOutcome> {
+    this.assertNoAdmission(sessionId)
     return this.compactor.compact(sessionId)
+  }
+
+  private assertNoAdmission(sessionId: string): void {
+    if (this.executor.isSessionExecuting(sessionId))
+      throw new Error('Session has an active request. Wait for it to settle before continuing.')
   }
 
   cancelCompaction(sessionId: string): Promise<void> {

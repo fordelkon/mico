@@ -9,7 +9,7 @@ import type { ChatMessage } from '@shared/data/schemas/chat'
 import { type ChatProvider, type ChatProviderMessage, providerFinish } from '@mico/ai-providers'
 import { SessionDatabase } from '@main/data/session-database'
 import { sessionMigrations } from '@main/data/session-migrations'
-import { ModelLoop } from './model-loop'
+import { ModelLoop } from '../execution'
 import { SessionRuntimeService, type ExecutionProfileSnapshot } from './runtime'
 import type { TurnFailure } from '@shared/ai/turn-failure'
 

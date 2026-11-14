@@ -1,4 +1,5 @@
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
@@ -10,11 +11,49 @@ import {
 } from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
+import type { ContextMeasurement } from '@shared/ai/context-measurement'
+import { prepareProviderInput, type TurnInput } from '../context'
+import { createWorkspaceTools, type ToolRegistry, type WorkspaceToolOptions } from '../tools'
+import { Workspaces } from '../workspace'
+import type { ToolCall } from './contracts'
 import { ModelLoop } from './model-loop'
-import { type ToolCall, Workspaces } from '../workspace'
 
 type RunnerInput = Parameters<ModelLoop['run']>[0]
+
+interface RunnerOverrides extends Partial<Omit<RunnerInput, 'registry'>> {
+  registry?: ToolRegistry
+  prepareMessages?: TurnInput['prepareMessages']
+  onContextMeasurement?: (measurement: ContextMeasurement) => void
+}
+
+const temporaryPaths: string[] = []
+
+async function createTemporaryWorkspace(prefix: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), prefix))
+  temporaryPaths.push(directory)
+  return directory
+}
+
+async function removeTemporaryPaths(): Promise<void> {
+  await Promise.all(
+    temporaryPaths.splice(0).map((directory) =>
+      rm(directory, {
+        force: true,
+        recursive: true,
+        maxRetries: process.platform === 'win32' ? 10 : 0,
+        retryDelay: 100
+      })
+    )
+  )
+}
+
+async function createRegistry(
+  cwd: string,
+  options: WorkspaceToolOptions = {}
+): Promise<ToolRegistry> {
+  const sources = await Workspaces.prepareSources(cwd)
+  return createWorkspaceTools(cwd, { ...options, skills: sources.skills })
+}
 
 async function* streamFrom(chunks: ProviderStreamPart[]): AsyncIterable<ProviderStreamPart> {
   yield* chunks
@@ -37,16 +76,36 @@ function createScriptedProvider(
 function createRunInput(
   provider: ChatProvider,
   userText: string,
-  overrides: Partial<RunnerInput> = {}
+  overrides: RunnerOverrides = {}
 ): RunnerInput {
-  return {
+  const {
+    registry,
+    prepareMessages = (history) => [...history],
+    onContextMeasurement,
+    ...inputOverrides
+  } = overrides
+  const input: RunnerInput = {
     provider,
     messages: [{ role: 'user', parts: [{ type: 'text', text: userText }] }],
     thinkingEffort: 'none',
     signal: new AbortController().signal,
     emit: () => undefined,
-    ...overrides
+    ...inputOverrides
   }
+  if (registry) input.registry = registry
+  input.prepareStep ??= (history) => {
+    const { request, measurement } = prepareProviderInput({
+      purpose: 'turn',
+      history,
+      prepareMessages,
+      toolContext: registry,
+      thinkingEffort: input.thinkingEffort,
+      signal: input.signal
+    })
+    onContextMeasurement?.(measurement)
+    return request
+  }
+  return input
 }
 
 describe('ModelLoop', () => {
@@ -128,10 +187,13 @@ describe('ModelLoop', () => {
     const cwd = await createTemporaryWorkspace('mico-retry-tool-')
     await writeFile(join(cwd, 'a.txt'), 'contents')
     let requests = 0
+    const capturedRequests: ChatProviderStreamInput[] = []
+    const observations: ContextMeasurement[] = []
     const traces: string[] = []
     const provider: ChatProvider = {
       getModelCapabilities: async () => null,
-      stream: async () => {
+      stream: async (input) => {
+        capturedRequests.push(input)
         requests += 1
         if (requests === 1)
           return streamFrom([
@@ -149,14 +211,17 @@ describe('ModelLoop', () => {
     }
     const result = await new ModelLoop().run(
       createRunInput(provider, 'Read the file', {
-        registry: (await Workspaces.enterTurn(cwd)).registry,
+        registry: await createRegistry(cwd),
         retryDelayMs: 0,
+        onContextMeasurement: (measurement) => observations.push(measurement),
         onToolResult: (trace) => traces.push(trace.toolCallId)
       })
     )
     expect(result.assistantText).toBe('done')
     expect(traces).toEqual(['a'])
     expect(requests).toBe(3)
+    expect(observations).toHaveLength(2)
+    expect(capturedRequests[2]).toBe(capturedRequests[1])
   })
 
   it('user receives malformed tool arguments when the model finishes a call, then a failed pair is replayed without execution', async () => {
@@ -179,7 +244,7 @@ describe('ModelLoop', () => {
     )
     const result = await new ModelLoop().run(
       createRunInput(provider, 'Write safely', {
-        registry: (await Workspaces.enterTurn(cwd, { permissionMode: 'acceptEdits' })).registry
+        registry: await createRegistry(cwd, { permissionMode: 'acceptEdits' })
       })
     )
     await expect(access(join(cwd, 'output.txt'))).rejects.toThrow('ENOENT')
@@ -284,7 +349,7 @@ describe('ModelLoop', () => {
 
     const result = await new ModelLoop().run(
       createRunInput(provider, 'Read a.txt', {
-        registry: (await Workspaces.enterTurn(cwd)).registry,
+        registry: await createRegistry(cwd),
         emit: (chunk) => emitted.push(chunk),
         onStep: (step) => steps.push(step)
       })
@@ -382,7 +447,7 @@ describe('ModelLoop', () => {
 
     const result = await new ModelLoop().run(
       createRunInput(createScriptedProvider(turns, requests), 'Inspect the project.', {
-        registry: (await Workspaces.enterTurn(cwd)).registry,
+        registry: await createRegistry(cwd),
         emit: (chunk) => emitted.push(chunk)
       })
     )
@@ -418,7 +483,7 @@ describe('ModelLoop', () => {
     await expect(
       new ModelLoop().run(
         createRunInput(provider, 'Keep inspecting.', {
-          registry: (await Workspaces.enterTurn(cwd)).registry,
+          registry: await createRegistry(cwd),
           signal: controller.signal,
           onToolResult: () => {
             completed += 1
@@ -454,7 +519,7 @@ describe('ModelLoop', () => {
 
     await new ModelLoop().run(
       createRunInput(provider, 'Read the file.', {
-        registry: (await Workspaces.enterTurn(cwd)).registry
+        registry: await createRegistry(cwd)
       })
     )
 
@@ -498,7 +563,7 @@ describe('ModelLoop', () => {
 
       await new ModelLoop().run(
         createRunInput(provider, 'Load the skill.', {
-          registry: (await Workspaces.enterTurn(cwd)).registry
+          registry: await createRegistry(cwd)
         })
       )
 
@@ -536,7 +601,7 @@ describe('ModelLoop', () => {
 
     await new ModelLoop().run(
       createRunInput(provider, 'Read a.txt', {
-        registry: (await Workspaces.enterTurn(cwd)).registry,
+        registry: await createRegistry(cwd),
         onToolResult: (trace) => traces.push(trace)
       })
     )
@@ -583,7 +648,7 @@ describe('ModelLoop', () => {
 
     const result = await new ModelLoop().run(
       createRunInput(provider, 'Run a command.', {
-        registry: (await Workspaces.enterTurn(cwd, { requestApproval: async () => true })).registry,
+        registry: await createRegistry(cwd, { requestApproval: async () => true }),
         onStep: () => events.push('step'),
         onToolResult: () => events.push('tool')
       })

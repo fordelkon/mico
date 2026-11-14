@@ -9,6 +9,7 @@ import {
   ChatToolTracePartSchema
 } from '@shared/data/schemas/chat'
 import * as z from 'zod'
+import type { AgentStep } from '../../execution'
 
 import { parseToolTracePayload, toToolTracePart } from './tool-trace-presentation'
 
@@ -26,13 +27,6 @@ type VisibleMessage = {
     | ChatSkillInvocationPart
   >
   metadata?: { completionState?: 'complete' | 'stopped' }
-}
-/** One replayable model step: its response and the observations it caused. */
-type AgentStep = {
-  index: number
-  assistant: Extract<ChatProviderMessage, { role: 'assistant' }>
-  toolResults: ChatProviderToolResultPart[]
-  continuationPrompt?: string
 }
 /** Run-level tool activity totals appended once when a run reaches a terminal state. */
 type ToolTraceSummary = {

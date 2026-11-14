@@ -1,7 +1,9 @@
+import { join } from 'node:path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { app } from 'electron'
 import { Conversations } from './ai/conversation'
 import { Models } from './ai/models'
+import { Memories } from './ai/memory'
 import { Workspaces } from './ai/workspace'
 import { SessionDatabase } from './data/session-database'
 import { registerIpc } from './ipc'
@@ -38,7 +40,13 @@ async function createMainServices(): Promise<MainServices> {
   await sessionDatabase.initialize()
   await workspace.initialize()
 
-  const conversations = new Conversations({ database: sessionDatabase, models, workspace })
+  const memories = new Memories({ directory: join(app.getPath('userData'), 'memory') })
+  const conversations = new Conversations({
+    database: sessionDatabase,
+    models,
+    workspace,
+    memories
+  })
   conversations.recoverInterruptedRuns()
 
   // The tray is constructed after the window it monitors; the closure defers the

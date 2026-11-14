@@ -1,7 +1,6 @@
 import * as z from 'zod'
 
-import type { SkillSnapshot } from '../skills/snapshot'
-import { MAX_SKILL_DOCUMENT_BYTES } from '../skills/files'
+import { MAX_SKILL_DOCUMENT_BYTES, type SkillSnapshot } from '../skills'
 import { type AgentTool, defineAgentTool } from './contract'
 
 const SkillInputSchema = z.strictObject({
