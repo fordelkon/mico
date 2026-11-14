@@ -1,6 +1,6 @@
 # Testing Principles
 
-Use these rules when writing, changing, reviewing, or auditing tests. Tests earn their maintenance cost by protecting observable behavior, meaningful invariants, or independent contracts. Let lint carry the mechanical rules and review carry the judgment calls. The repository's verification procedures live in [CLAUDE.md](../CLAUDE.md); this document owns the testing standards.
+Use these rules when writing, changing, reviewing, or auditing tests. Tests earn their maintenance cost by protecting observable behavior, meaningful invariants, or independent contracts. Let lint carry the mechanical rules and review carry the judgment calls. The repository's verification procedures live in [the agent guide](agent-guide.md#verification); this document owns the testing standards.
 
 ## Authoring Gate
 
@@ -102,4 +102,4 @@ number. Provider thresholds already meet or exceed the target for all metrics.
 
 ## Verify the Changed Contract
 
-Apply the [repository verification requirements](../CLAUDE.md#verification), including the required lint, type, test, build, and UI checks for the change. After audit edits, also run `git diff --check` and review `git diff --numstat`, separating production/tooling from tests and test support. When removing source inspections, execute the script or build that owns the claimed contract where applicable. When changing a lint rule, confirm it fires on a real violation and stays silent on the passing pattern. Report which checks ran and any gaps; existing green checks do not prove every rule above is already satisfied.
+Apply the [repository verification requirements](agent-guide.md#verification), including the required lint, type, test, build, and UI checks for the change. After audit edits, also run `git diff --check` and review `git diff --numstat`, separating production/tooling from tests and test support. When removing source inspections, execute the script or build that owns the claimed contract where applicable. When changing a lint rule, confirm it fires on a real violation and stays silent on the passing pattern. Report which checks ran and any gaps; existing green checks do not prove every rule above is already satisfied.

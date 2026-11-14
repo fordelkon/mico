@@ -44,6 +44,11 @@ The shared contract lives in [the UI theme](../packages/ui/src/styles/theme.css)
 - Keep scroll and overflow ownership explicit. Allow flex/grid children to shrink where needed; contain wide content at its intended viewport rather than hiding application overflow to conceal a layout defect.
 - Animate only the properties needed for the effect. For added or changed motion, provide reduced-motion behavior that preserves state and usability. Keep platform drag regions separate from interactive controls.
 
+## UI Verification
+
+- For UI behavior or layout changes, inspect the affected flow in the running application. Verify relevant states and interactions, such as loading/error states, keyboard focus, window resizing, themes, streaming, and scrolling.
+- Check relevant runtime errors and report what was observed. If runtime inspection is unavailable, disclose the gap; passing static checks does not establish visual or interaction correctness.
+
 ## Verify the Changed Contract
 
-Apply the [repository verification requirements](../CLAUDE.md#verification). Inspect the affected interface in the running application: relevant appearances and presets, interaction states, resizing, and reduced motion. For shared changes, also check standalone UI rendering so renderer overrides do not hide missing defaults. Report which cases were inspected and any gaps; do not treat existing CSS as proof that every rule is already satisfied.
+Apply the [repository verification requirements](agent-guide.md#verification). Inspect the affected interface in the running application: relevant appearances and presets, interaction states, resizing, and reduced motion. For shared changes, also check standalone UI rendering so renderer overrides do not hide missing defaults. Report which cases were inspected and any gaps; do not treat existing CSS as proof that every rule is already satisfied.

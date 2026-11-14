@@ -1,5 +1,7 @@
 # Mico
 
+For AI-assisted contributions, start with [AGENTS.md](AGENTS.md). [The agent guide](docs/agent-guide.md) owns development and verification; [context loading](docs/agent-context-loading.md) explains optional project hooks and skills. Personal skills and plugins are not required.
+
 Mico is a desktop AI workspace and coding assistant built with Electron, React, and TypeScript.
 
 | Dark Theme | Light Theme |

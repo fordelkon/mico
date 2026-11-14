@@ -1,6 +1,27 @@
 # Design Principles
 
-Use these rules when designing, changing, or reviewing module boundaries. Tests verify today's behavior; they cannot answer whether this change made the next change harder. Watch the complexity of interactions between modules: how much detail of other modules a change must know, and how many cross-module conventions it must maintain. The repository's ownership boundaries live in [CLAUDE.md](../CLAUDE.md); this document owns how to judge and review them.
+Use these rules when designing, changing, or reviewing module boundaries. Tests verify today's behavior; they cannot answer whether this change made the next change harder. Watch the complexity of interactions between modules: how much detail of other modules a change must know, and how many cross-module conventions it must maintain. This document owns the repository's process and module boundaries and how to judge and review them.
+
+## Architecture and Ownership
+
+Mico follows Electron's three-process model. Keep domain state with its owner and communicate across processes only through the typed IPC surface.
+
+- `src/renderer/`: browser-only React product UI; consumes `window.api` and shared types, never Electron or Node APIs directly.
+- `src/preload/`: security boundary; exposes typed, task-focused capabilities and hides Electron transport details.
+- `src/main/`: native resources, application lifecycle, persistence, and service composition. IPC validates untrusted renderer input before delegating to the owning service.
+- `src/shared/`: environment-neutral domain schemas, IPC request/response schemas, and channel names; no browser, Node, or Electron dependencies.
+- `packages/ui/`: reusable UI primitives and composites. Keep product-specific compositions in the renderer.
+- `packages/ai-providers/`: provider adapters, protocol parsers, normalized stream parts, and model thinking-capability mappings. Keep application configuration and service composition in main.
+
+Fix limitations at the owning module rather than compensating in consumers. Proceed with root-cause fixes within scope; discuss changes that exceed the authorized contract or require restructuring the architecture.
+
+### Imports and Infrastructure
+
+- Use relative imports for siblings and private details within a feature or domain.
+- Use process-root aliases only for stable cross-domain imports: `@main/*`, `@renderer/*`, and `@shared/*`. Add aliases only for established boundaries with multiple consumers.
+- Consume workspace packages through their public APIs. Import `@mico/ai-providers` only from its public root; expose an intentional contract there before adding a new consumer.
+- Keep aliases consistent across affected Electron-Vite and TypeScript configurations. Keep build, type-check, and lint configuration process-aware and separate from application-domain code.
+- Prefer `@electron-toolkit/*` utilities and established library features over custom infrastructure.
 
 ## Ask Whether the Interface Isolates Change
 
@@ -73,4 +94,4 @@ Shared tool presentation owns environment-neutral facts used by multiple views. 
 - Tool intent is durable before dispatch; each known settlement stores its complete result and trace before display or model-context truncation. Cancellation notifies the renderer immediately, then persists its stopped snapshot after in-flight tools settle. Sending and deletion wait for the matching request's durable cancellation acknowledgement; an early SDK ready state does not release that gate. Started tools without a known result block recovery.
 - Native Quit waits for a bounded renderer draft-save attempt, aborts turns, and waits for a bounded execution drain before closing storage, then resumes native exit once. Timed-out execution callbacks cannot write to closed storage. Tray hiding does not trigger that drain. A settled acknowledgement is not a durability guarantee, and forced OS termination can bypass graceful shutdown.
 
-Apply the [repository verification requirements](../CLAUDE.md#verification). For design changes, check the trend, not a score: external adaptations after internal changes are shrinking, boundary conventions are moving from documentation into enforced checks, and shared interfaces are not accumulating business-specific cases. Report the evidence and any gaps; no metric replaces business judgment.
+Apply the [repository verification requirements](agent-guide.md#verification). For design changes, check the trend, not a score: external adaptations after internal changes are shrinking, boundary conventions are moving from documentation into enforced checks, and shared interfaces are not accumulating business-specific cases. Report the evidence and any gaps; no metric replaces business judgment.
