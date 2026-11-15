@@ -44,6 +44,47 @@ test('user continues a conversation when sending another turn, then each reply f
   await expect(assistantMessages(app.window)).toHaveCount(2)
 })
 
+for (const method of ['Enter', 'Send button'] as const) {
+  test(`user sends with ${method} when reading history, then follows the new reply to the end`, async ({
+    app,
+    provider
+  }) => {
+    const page = app.window
+    const history = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1}.`).join('\n\n')
+    provider.enqueue({ type: 'text', text: history })
+    await sendUserMessage(page, 'Write a long reply')
+
+    const viewport = page.getByRole('region', { name: 'Messages', exact: true })
+    const distanceToEnd = () =>
+      viewport.evaluate(
+        (element) => element.scrollHeight - element.clientHeight - element.scrollTop
+      )
+    await expect.poll(distanceToEnd).toBeLessThanOrEqual(1)
+    await viewport.hover()
+    await page.mouse.wheel(0, -700)
+    const jump = page.getByRole('button', { name: 'Scroll to end', includeHidden: true })
+    await expect(jump).toHaveCSS('opacity', '1')
+    const input = composer(page)
+    await input.fill('Continue the conversation')
+    await expect.poll(distanceToEnd).toBeGreaterThan(200)
+
+    const response = provider.enqueue({
+      type: 'text',
+      text: 'Starting the next reply.',
+      hold: true
+    })
+    if (method === 'Enter') await input.press('Enter')
+    else await page.getByRole('button', { name: 'Send message' }).click()
+    const reply = assistantMessages(page).last()
+    await expect(reply.getByTestId('answer-content')).toHaveText('Starting the next reply.')
+    await expect.poll(distanceToEnd).toBeLessThanOrEqual(1)
+    response.finish(`\n\n${history}`)
+    await waitForReply(page, reply)
+    await expect.poll(distanceToEnd).toBeLessThanOrEqual(1)
+    await expect(jump).toHaveCSS('opacity', '0')
+  })
+}
+
 test('user presses modified Enter when a model is selected, then only plain Enter sends the turn', async ({
   app,
   provider

@@ -6,7 +6,8 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-  Spinner
+  Spinner,
+  useMessageScroller
 } from '@mico/ui'
 import { type ConversationTranscriptSource, useConversationTranscript } from '@renderer/hooks/chat'
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
@@ -40,6 +41,7 @@ const OUTCOME_HEADINGS = {
 
 type ChatMessageListProps = {
   conversationId: string
+  scrollToEndRef?: React.Ref<() => void>
   errorMessage?: string
   failureCode?: TurnFailureCode
   isThinkingEnabled?: boolean
@@ -55,6 +57,12 @@ type SubscribedChatMessageListProps = Omit<ChatMessageListProps, 'messages'> & {
 }
 
 type RetryProgressStyle = React.CSSProperties & { '--retry-delay': string }
+
+function ConversationScrollHandle({ ref }: { ref?: React.Ref<() => void> }): null {
+  const { scrollToEnd } = useMessageScroller()
+  React.useImperativeHandle(ref, () => () => scrollToEnd({ behavior: 'instant' }), [scrollToEnd])
+  return null
+}
 
 /**
  * One compact live process row for a scheduled retry; the spinner is real work.
@@ -105,6 +113,7 @@ function ChatRetryStatus({ retry }: { retry: ChatRetryState }): React.JSX.Elemen
 
 function ChatMessageList({
   conversationId,
+  scrollToEndRef,
   errorMessage,
   failureCode,
   isThinkingEnabled = true,
@@ -122,6 +131,7 @@ function ChatMessageList({
 
   return (
     <MessageScrollerProvider key={conversationId} autoScroll defaultScrollPosition="end">
+      <ConversationScrollHandle ref={scrollToEndRef} />
       <MessageScroller
         className="chat-message-scroller"
         data-streaming={isResponding ? 'true' : undefined}

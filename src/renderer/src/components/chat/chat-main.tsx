@@ -125,6 +125,7 @@ function ChatCompactionStatus({
 
 function ChatMain({ session, responses, compactions }: ChatMainProps): React.JSX.Element {
   const { isTurnActive: isActiveResponse, composerMode, errorMessage, retry } = responses
+  const scrollToEndRef = React.useRef<(() => void) | null>(null)
   // Hide only the acknowledged state object. A newly published outcome becomes
   // visible even when its message matches an earlier dismissed failure.
   const [dismissedCompactions, setDismissedCompactions] = React.useState<
@@ -172,7 +173,13 @@ function ChatMain({ session, responses, compactions }: ChatMainProps): React.JSX
       onModelSelected={session.refreshCapabilities}
       selectedModelEntryId={session.activeConversation ? session.selectedModelEntryId : undefined}
       selectSessionModel={session.activeConversation ? session.setSessionModelEntry : undefined}
-      onSend={responses.sendMessage}
+      onSend={async (content) => {
+        // Keep the jump scoped to the conversation that submitted the draft.
+        const scrollToEnd = scrollToEndRef.current
+        const sent = await responses.sendMessage(content)
+        if (sent) scrollToEnd?.()
+        return sent
+      }}
       onCompact={
         conversationId ? () => void compactions.startCompaction(conversationId) : undefined
       }
@@ -221,6 +228,7 @@ function ChatMain({ session, responses, compactions }: ChatMainProps): React.JSX
                 }
               >
                 <SubscribedChatMessageList
+                  scrollToEndRef={scrollToEndRef}
                   source={session.transcript}
                   conversationId={session.activeConversation.id}
                   errorMessage={errorMessage}
