@@ -1,15 +1,21 @@
 import { createSessionSummaryInstructions } from '../prompt/summary-instructions'
-import type { ChatProvider } from '@mico/ai-providers'
+import { type ChatProvider, type ChatProviderMessage, ProviderError } from '@mico/ai-providers'
 import type { ExecutionProfileSnapshot } from '../contracts'
 import type { CompactionNoticeReason, SessionStore } from './session-store'
 import type { SessionModelProfile } from './model-profile'
-import { prepareTextInput, ProviderInputLimitExceeded } from '../context/provider-input'
+import { ProviderInputLimitExceeded } from '../context/provider-input'
+import { SummaryInputPlan } from '../context/summary-input'
 import { TextGeneration, TextGenerationRejected } from '@mico/agent-core'
+import { estimatePreparedContextTokens } from '../context/context-estimator'
 
 /** Hard ceiling for one accepted summary; accumulation stops here before memory can grow unbounded. */
 const DEFAULT_MAX_SUMMARY_CHARS = 20_000
 const MAX_NOTICE_MESSAGE_CHARS = 2_000
 const MAX_PERSISTENCE_FAILURE_SAMPLES = 10
+const MAX_RETAINED_TURN_TOKENS = 8_000
+const SUMMARY_INPUT_BUDGET_TOKENS = 32_000
+const MAX_SUMMARY_REQUESTS = 64
+const MAX_OVERFLOW_RETRIES = 4
 
 /**
  * What one manual summary operation ended as. `accepted` carries the durable
@@ -35,6 +41,7 @@ type SessionCompactorDependencies = {
   runtime: Pick<
     SessionStore,
     | 'getCompactionSource'
+    | 'getLatestCheckpointCoverage'
     | 'acceptContextCheckpoint'
     | 'getDefaultProfile'
     | 'beginCompaction'
@@ -48,6 +55,7 @@ type SessionCompactorDependencies = {
 interface CompactionOptions {
   trigger?: 'manual' | 'auto'
   signal?: AbortSignal
+  canRetainTail?: (tail: ChatProviderMessage[], maxSummaryChars: number) => boolean
 }
 
 type CompactionOperation = {
@@ -56,10 +64,9 @@ type CompactionOperation = {
 }
 
 /**
- * Bounded manual conversation summary orchestration. One operation per
- * session. It freezes the compaction source and the
- * session profile, runs exactly one dedicated provider request, validates the
- * bounded plain-text output, and durably records the outcome before answering.
+ * One bounded compaction per session. Completed evidence is summarized in order,
+ * with provisional checkpoints kept in memory. Only a complete handoff from the
+ * frozen source/profile is accepted; failure and cancellation preserve history.
  */
 class SessionCompactor {
   private readonly dependencies: SessionCompactorDependencies
@@ -84,7 +91,7 @@ class SessionCompactor {
     const controller = new AbortController()
     const abort = (): void => controller.abort(options.signal?.reason)
     options.signal?.addEventListener('abort', abort, { once: true })
-    const execution = this.runOperation(sessionId, controller, options.trigger ?? 'manual')
+    const execution = this.runOperation(sessionId, controller, options)
     const promise = execution
       .catch((error: Error) => {
         if (error instanceof CompactionPersistenceFailed) {
@@ -153,13 +160,18 @@ class SessionCompactor {
   private async runOperation(
     sessionId: string,
     controller: AbortController,
-    trigger: 'manual' | 'auto'
+    options: CompactionOptions
   ): Promise<SessionCompactionOutcome> {
     const signal = controller.signal
     this.dependencies.runtime.beginCompaction(sessionId)
     try {
-      const source = this.dependencies.runtime.getCompactionSource(sessionId)
-      if (!source) throw new CompactionRefused('No completed turns are available to summarize yet.')
+      const latest = this.dependencies.runtime.getCompactionSource(sessionId)
+      if (!latest) throw new CompactionRefused('No completed turns are available to summarize yet.')
+      if (
+        latest.throughSequence <= this.dependencies.runtime.getLatestCheckpointCoverage(sessionId)
+      )
+        throw new CompactionRefused('No new completed turns are available since the last summary.')
+      const source = this.selectSource(sessionId, latest, options.canRetainTail)
       const capturedProfile = this.dependencies.runtime.getDefaultProfile(sessionId)
       try {
         const selection = this.dependencies.modelProfile.resolveForSession(sessionId)
@@ -172,7 +184,7 @@ class SessionCompactor {
         )
         const summary = await this.generateSummary({ provider: selection.provider, source, signal })
         signal.throwIfAborted()
-        this.assertSourceUnchanged(sessionId, source)
+        this.assertSourceUnchanged(sessionId, latest)
         this.assertProfileUnchanged(sessionId, capturedProfile)
         const currentSelection = this.dependencies.modelProfile.resolveForSession(sessionId)
         if (
@@ -194,7 +206,7 @@ class SessionCompactor {
         const { checkpointEventId } = this.dependencies.runtime.acceptContextCheckpoint({
           sessionId,
           summary,
-          trigger,
+          trigger: options.trigger ?? 'manual',
           coverage: { throughSequence: source.throughSequence },
           sourceDigest: source.sourceDigest
         })
@@ -214,6 +226,30 @@ class SessionCompactor {
     }
   }
 
+  private selectSource(
+    sessionId: string,
+    latest: CompactionSource,
+    canRetainTail: CompactionOptions['canRetainTail']
+  ): CompactionSource {
+    const previous = this.dependencies.runtime.getCompactionSource(sessionId, {
+      beforeSequence: latest.throughSequence
+    })
+    if (
+      !previous ||
+      previous.throughSequence >= latest.throughSequence ||
+      previous.throughSequence <= this.dependencies.runtime.getLatestCheckpointCoverage(sessionId)
+    )
+      return latest
+    // Boundaries come from completed turns, so the retained suffix includes whole
+    // API rounds, signed reasoning and paired calls/results. Never split a round.
+    const tail = latest.messages.slice(previous.messages.length)
+    return tail.length &&
+      estimatePreparedContextTokens(tail).estimatedInputTokens <= MAX_RETAINED_TURN_TOKENS &&
+      (!canRetainTail || canRetainTail(tail, this.maxSummaryChars))
+      ? previous
+      : latest
+  }
+
   private async generateSummary({
     provider,
     source,
@@ -223,13 +259,50 @@ class SessionCompactor {
     source: CompactionSource
     signal: AbortSignal
   }): Promise<string> {
-    const request = prepareTextInput({
-      purpose: 'summary',
-      instructions: createSessionSummaryInstructions(this.maxSummaryChars),
-      history: source.messages,
-      signal
-    })
-    return this.textGeneration.generate({ provider, request, maxOutputChars: this.maxSummaryChars })
+    const plan = new SummaryInputPlan(
+      source.messages,
+      createSessionSummaryInstructions(this.maxSummaryChars)
+    )
+    let cursor = { index: 0, offset: 0 }
+    let summary: string | undefined
+    let budget = SUMMARY_INPUT_BUDGET_TOKENS
+    let overflowRetries = 0
+    let lastOverflow: { inputTokens: number; error: ProviderError } | undefined
+    let requests = 0
+    while (plan.hasRemaining(cursor)) {
+      signal.throwIfAborted()
+      if (requests >= MAX_SUMMARY_REQUESTS)
+        throw new ProviderInputLimitExceeded(
+          'The conversation could not be summarized within the 64-request safety limit. The history is unchanged. Start a new conversation with the relevant details.'
+        )
+      const batch = plan.next(cursor, summary, budget, signal)
+      const inputTokens = estimatePreparedContextTokens(batch.request.messages).estimatedInputTokens
+      if (lastOverflow && inputTokens >= lastOverflow.inputTokens) throw lastOverflow.error
+      requests += 1
+      try {
+        summary = await this.textGeneration.generate({
+          provider,
+          request: batch.request,
+          maxOutputChars: this.maxSummaryChars
+        })
+        // Failed attempts never consume source evidence or install a partial pin.
+        cursor = batch.next
+        lastOverflow = undefined
+      } catch (error) {
+        signal.throwIfAborted()
+        if (
+          !(error instanceof ProviderError) ||
+          error.kind !== 'context_overflow' ||
+          overflowRetries >= MAX_OVERFLOW_RETRIES
+        )
+          throw error
+        overflowRetries += 1
+        lastOverflow = { inputTokens, error }
+        budget = Math.floor(Math.min(budget, inputTokens) / 2)
+      }
+    }
+    if (!summary) throw new TextGenerationRejected('The model returned empty text.', 'empty')
+    return summary
   }
 
   private assertSourceUnchanged(sessionId: string, captured: CompactionSource): void {
@@ -237,7 +310,8 @@ class SessionCompactor {
     if (
       !current ||
       current.throughSequence !== captured.throughSequence ||
-      current.sourceDigest !== captured.sourceDigest
+      current.sourceDigest !== captured.sourceDigest ||
+      JSON.stringify(current.messages) !== JSON.stringify(captured.messages)
     )
       throw new CompactionSourceChanged(
         'The conversation changed while the summary was being generated. Start the summary again to cover the latest turns.'

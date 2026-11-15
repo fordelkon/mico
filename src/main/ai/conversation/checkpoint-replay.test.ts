@@ -186,6 +186,38 @@ describe('Checkpoint provider replay', () => {
     }
   )
 
+  it('user compacts again when a checkpoint exists, then covered history stays summarized', async () => {
+    const { service, session, begin } = await setup()
+    begin('covered').complete({ role: 'assistant', parts: [{ type: 'text', text: 'Old detail.' }] })
+    const original = service.getCompactionSource(session.id)
+    if (!original) throw new Error('Expected source.')
+    service.acceptContextCheckpoint({
+      sessionId: session.id,
+      summary: 'Current checkpoint.',
+      coverage: { throughSequence: original.throughSequence },
+      sourceDigest: original.sourceDigest
+    })
+
+    const repeated = service.getCompactionSource(session.id)
+    expect(repeated?.messages).toEqual([
+      {
+        role: 'user',
+        parts: [{ type: 'text', text: expect.stringContaining('Current checkpoint.') }]
+      }
+    ])
+    expect(repeated?.sourceDigest).toBe(original.sourceDigest)
+    begin('uncovered').complete({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'New detail.' }]
+    })
+    const incremental = service.getCompactionSource(session.id)
+    expect(incremental?.messages).toEqual([
+      ...repeated!.messages,
+      prompt,
+      { role: 'assistant', parts: [{ type: 'text', text: 'New detail.' }] }
+    ])
+  })
+
   it('user exceeds context after compaction when sending, then history and retry remain intact', async () => {
     const { database, service, session, begin } = await setup()
     begin('covered').complete({ role: 'assistant', parts: [{ type: 'text', text: 'Original.' }] })

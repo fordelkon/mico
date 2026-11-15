@@ -217,7 +217,7 @@ describe('Conversations', () => {
       }
     })
     expect(events.at(-1)?.type).toBe('finish')
-    expect(summaries).toHaveLength(1)
+    expect(summaries.length).toBeGreaterThan(1)
     const pendingInput = JSON.stringify(requests[1].messages)
     expect(pendingInput).toContain('The earlier facts remain relevant.')
     expect(pendingInput).toContain('Original skill evidence')
@@ -242,6 +242,39 @@ describe('Conversations', () => {
       text: 'A'.repeat(120_000)
     })
     await conversations.drain()
+  })
+
+  it('user continues within a small budget when recent history cannot fit, then compaction includes the recent turn', async () => {
+    let turns = 0
+    const models = await createModels(() => ({
+      getModelCapabilities: async () => null,
+      stream: async (input) => {
+        if (isTitleStream(input)) return response('Discussion')
+        if (isSummaryStream(input)) return response('Earlier facts.')
+        turns += 1
+        return response(turns === 2 ? 'A'.repeat(4_000) : 'Continued.')
+      }
+    }))
+    const { database } = await createRuntime()
+    const conversations = new Conversations({
+      database,
+      models,
+      applicationInputBudgetTokens: 1_000
+    })
+    const session = conversations.createSession({ title: 'Session', defaultProfile: null })
+    try {
+      for (const [index, text] of ['First', 'Second', 'Continue'].entries()) {
+        const events = await runTurn(conversations, {
+          sessionId: session.id,
+          requestId: `small-budget-${index}`,
+          userMessage: userMessage(text)
+        })
+        expect(events.at(-1)?.type).toBe('finish')
+      }
+      expect(turns).toBe(3)
+    } finally {
+      await conversations.drain()
+    }
   })
 
   it('user remains over budget when a summary is accepted, then one attempt leaves the new turn unaccepted', async () => {
@@ -437,7 +470,7 @@ describe('Conversations', () => {
           first?.type === 'text' &&
           first.text.includes('conversation summary generator')
         )
-          return response('Checkpoint summary of two turns.')
+          return response('Checkpoint summary of the earlier turn.')
         requests.push(input)
         return response(`Answer ${requests.length}.`)
       }
@@ -473,11 +506,13 @@ describe('Conversations', () => {
           {
             type: 'text',
             text: expect.stringMatching(
-              /^Historical conversation checkpoint:.*Checkpoint summary of two turns\./s
+              /^Historical conversation checkpoint:.*Checkpoint summary of the earlier turn\./s
             )
           }
         ]
       },
+      { role: 'user', parts: [{ type: 'text', text: 'Second question' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: 'Answer 2.' }] },
       { role: 'user', parts: [{ type: 'text', text: 'Continue' }] }
     ])
     expect(

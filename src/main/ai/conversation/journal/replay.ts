@@ -9,7 +9,10 @@ function getSessionReplay(
   database: SessionDatabase,
   eventLog: SessionEventLog,
   journal: SessionToolJournal,
-  target: RunRow | { sessionId: string; userMessage: ChatMessage }
+  target:
+    | RunRow
+    | { sessionId: string; userMessage: ChatMessage }
+    | { sessionId: string; throughSequence: number }
 ): ChatProviderMessage[] {
   const run = 'id' in target ? target : undefined
   const sessionId = 'id' in target ? target.session_id : target.sessionId
@@ -23,13 +26,14 @@ function getSessionReplay(
   // SAFETY: the column list matches the declared RunRow fields exactly.
   const relevant = database.connection
     .prepare(
-      `SELECT runs.id, runs.session_id, runs.turn_id, runs.attempt, runs.status FROM runs JOIN runtime_events e ON e.run_id = runs.id AND e.kind = 'run_started' WHERE runs.session_id = ? AND (runs.turn_id = ? AND runs.attempt < ? OR EXISTS (SELECT 1 FROM runs accepted JOIN runtime_events terminal ON terminal.run_id = accepted.id AND terminal.kind IN ('run_completed','run_cancelled') WHERE accepted.turn_id = runs.turn_id AND runs.attempt <= accepted.attempt AND terminal.session_sequence > ? AND terminal.session_sequence < COALESCE((SELECT session_sequence FROM runtime_events WHERE run_id = ? AND kind = 'run_started'), 9007199254740991))) ORDER BY e.session_sequence`
+      `SELECT runs.id, runs.session_id, runs.turn_id, runs.attempt, runs.status FROM runs JOIN runtime_events e ON e.run_id = runs.id AND e.kind = 'run_started' WHERE runs.session_id = ? AND (runs.turn_id = ? AND runs.attempt < ? OR EXISTS (SELECT 1 FROM runs accepted JOIN runtime_events terminal ON terminal.run_id = accepted.id AND terminal.kind IN ('run_completed','run_cancelled') WHERE accepted.turn_id = runs.turn_id AND runs.attempt <= accepted.attempt AND terminal.session_sequence > ? AND terminal.session_sequence < COALESCE(?, (SELECT session_sequence FROM runtime_events WHERE run_id = ? AND kind = 'run_started'), 9007199254740991))) ORDER BY e.session_sequence`
     )
     .all(
       sessionId,
       run?.turn_id ?? null,
       run?.attempt ?? 1,
       throughSequence,
+      'throughSequence' in target ? target.throughSequence + 1 : null,
       run?.id ?? null
     ) as RunRow[]
   // Legacy assembly remains authoritative unless a checkpoint requires per-run
@@ -38,6 +42,7 @@ function getSessionReplay(
   // because the runtime blocks retrying an earlier failure once a later turn completes.
   if (
     !checkpoint &&
+    !('throughSequence' in target) &&
     !relevant.some((prior) =>
       journal.rows(prior.id).some((row) => row.kind === 'model_step_accepted')
     )

@@ -4,7 +4,12 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type ChatProvider, type ProviderStreamPart, providerFinish } from '@mico/ai-providers'
+import {
+  type ChatProvider,
+  type ProviderStreamPart,
+  providerFinish,
+  ProviderError
+} from '@mico/ai-providers'
 import type { UIMessageChunk } from 'ai'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SessionDatabase } from '@main/data/session-database'
@@ -227,24 +232,96 @@ describe('Desktop compaction integration', () => {
     expect(checkpoints(database, session.id)).toEqual([])
   })
 
-  it('user summarizes oversized history when the input exceeds its byte budget, then history remains intact', async () => {
-    const { database, runtime, session, compactor, streamCalls } = await createHarness()
-    const output = '界'.repeat(400_000)
+  it('user summarizes large history when the provider rejects a batch, then smaller batches cover every byte before committing', async () => {
+    const acceptedRequests: Parameters<ChatProvider['stream']>[0][] = []
+    let rejectedRequest: Parameters<ChatProvider['stream']>[0] | undefined
+    const { database, runtime, session, compactor, streamCalls } = await createHarness({
+      stream: async (input) => {
+        const source = input.messages[1].parts[0]
+        if (source.type === 'text' && source.text.length > 30_000) {
+          rejectedRequest = input
+          throw new ProviderError('context_overflow')
+        }
+        acceptedRequests.push(input)
+        // Intermediate summaries must never be visible as durable checkpoints.
+        expect(checkpoints(database, session.id)).toEqual([])
+        return summaryStream('The test output still needs review.')
+      }
+    })
+    const output = `START${'界😀'.repeat(160_000)}END`
+    completeTurn(runtime, session.id, 'earlier')
     completeToolTurn(runtime, session.id, output)
+    const original = runtime.getCompactionSource(session.id)
+    const transcript = runtime.loadSession(session.id).messages
+
+    await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'accepted' })
+
+    const received: string[] = []
+    for (const input of acceptedRequests) {
+      const source = input.messages[1].parts[0]
+      if (source.type !== 'text') throw new Error('Expected summary evidence.')
+      const records = source.text
+        .split('<conversation>\n')[1]
+        .split('\n</conversation>')[0]
+        .split('\n')
+      for (const record of records) {
+        // SAFETY: summary records are JSON; the tool identity selects the original result.
+        const decoded = JSON.parse(record) as {
+          parts: { type: string; toolCallId?: string; output?: string }[]
+        }
+        for (const part of decoded.parts)
+          if (part.type === 'tool-result' && part.toolCallId === 'read')
+            received.push(part.output ?? '')
+      }
+    }
+    expect(streamCalls.length).toBeGreaterThan(2)
+    expect(rejectedRequest).toBeDefined()
+    const rejectedIndex = streamCalls.findIndex((input) => input === rejectedRequest)
+    expect(JSON.stringify(streamCalls[rejectedIndex + 1].messages).length).toBeLessThan(
+      JSON.stringify(streamCalls[rejectedIndex].messages).length
+    )
+    expect(received.join('')).toBe(output)
+    expect(checkpoints(database, session.id)).toEqual([
+      expect.objectContaining({
+        summary: 'The test output still needs review.',
+        coverage: { throughSequence: original?.throughSequence },
+        sourceDigest: original?.sourceDigest
+      })
+    ])
+    expect(notices(database, session.id)).toEqual([])
+    expect(runtime.loadSession(session.id).messages).toEqual(transcript)
+  })
+
+  it('user compacts short history when the provider has a smaller window, then reduced batches still complete', async () => {
+    const { database, runtime, session, compactor, streamCalls } = await createHarness({
+      stream: async (input) => {
+        const source = input.messages[1].parts[0]
+        if (source.type !== 'text') throw new Error('Expected evidence text.')
+        if (source.text.length > 10_000) throw new ProviderError('context_overflow')
+        return summaryStream('Completed using the smaller window.')
+      }
+    })
+    completeToolTurn(runtime, session.id, '界'.repeat(12_000))
+    await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'accepted' })
+    expect(streamCalls.length).toBeGreaterThan(2)
+    expect(checkpoints(database, session.id)).toEqual([
+      expect.objectContaining({ summary: 'Completed using the smaller window.' })
+    ])
+  })
+
+  it('user summarizes excessive history when the total source exceeds safety limits, then no request or checkpoint is created', async () => {
+    const { database, runtime, session, compactor, streamCalls } = await createHarness()
+    completeToolTurn(runtime, session.id, '界'.repeat(3_000_000))
     const original = runtime.getCompactionSource(session.id)
 
     await expect(compactor.compact(session.id)).resolves.toMatchObject({
       status: 'failed',
-      message: expect.stringContaining('1 MiB')
+      message: expect.stringContaining('8 MiB')
     })
-
-    expect(streamCalls).toHaveLength(0)
+    expect(streamCalls).toEqual([])
     expect(checkpoints(database, session.id)).toEqual([])
-    expect(notices(database, session.id)).toEqual([
-      expect.objectContaining({ reason: 'rejected', sourceDigest: original?.sourceDigest })
-    ])
+    expect(notices(database, session.id)).toEqual([expect.objectContaining({ reason: 'rejected' })])
     expect(runtime.getCompactionSource(session.id)?.messages).toEqual(original?.messages)
-    expect(() => beginTurn(runtime, session.id, 'after-refusal')).not.toThrow()
   })
 
   it('user changes covered history when a summary runs, then the stale summary is discarded with a durable notice', async () => {
@@ -329,12 +406,21 @@ describe('Desktop compaction integration', () => {
     const runtime = new SessionRuntimeService({ database })
     const session = runtime.createSession({ title: 'Session', defaultProfile: profile })
     completeTurn(runtime, session.id, 'first')
+    const covered = runtime.getCompactionSource(session.id)
+    completeToolTurn(runtime, session.id, 'Recent tool evidence.')
+    const tail = runtime.getCompactionSource(session.id)?.messages.slice(2) ?? []
     const transcript = runtime.loadSession(session.id).messages
     const compactor = await createCompactor({
       runtime,
-      stream: async () => summaryStream('Accepted summary.')
+      stream: async (input) => {
+        expect(JSON.stringify(input.messages)).not.toContain('Recent tool evidence.')
+        return summaryStream('Accepted summary.')
+      }
     })
     await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'accepted' })
+    expect(checkpoints(database, session.id)[0].coverage.throughSequence).toBe(
+      covered?.throughSequence
+    )
     database.close()
     const reopened = new SessionDatabase({ getUserDataPath: () => directory })
     databases.push(reopened)
@@ -346,6 +432,7 @@ describe('Desktop compaction integration', () => {
         role: 'user',
         parts: [{ type: 'text', text: expect.stringContaining('Accepted summary.') }]
       },
+      ...tail,
       userMessage
     ])
   })

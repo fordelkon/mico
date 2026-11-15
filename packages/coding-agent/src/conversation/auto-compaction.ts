@@ -2,6 +2,7 @@ import type { ThinkingSelection } from '@mico/ai-providers'
 import type { SessionCompactor } from './compaction'
 import type { SessionStore } from './session-store'
 import type { CapturedTurnContext } from './turn-context'
+import { toProviderCheckpointContext } from './provider-messages'
 
 const DEFAULT_APPLICATION_INPUT_BUDGET_TOKENS = 48_000
 
@@ -31,7 +32,7 @@ interface PendingContextOptions {
   signal: AbortSignal
 }
 
-/** At most one dedicated summary request; acceptance and pinning happen only after this returns. */
+/** At most one bounded compaction; acceptance and pinning happen only after this returns. */
 async function compactPendingContext(options: PendingContextOptions): Promise<void> {
   const { sessionId, budget, captured, replay, runtime, compactor, thinkingEffort, signal } =
     options
@@ -45,7 +46,21 @@ async function compactPendingContext(options: PendingContextOptions): Promise<vo
     source &&
     source.throughSequence > runtime.getLatestCheckpointCoverage(sessionId)
   ) {
-    const outcome = await compactor.compact(sessionId, { trigger: 'auto', signal })
+    const outcome = await compactor.compact(sessionId, {
+      trigger: 'auto',
+      signal,
+      canRetainTail: (tail, maxSummaryChars) => {
+        const projected = [
+          toProviderCheckpointContext(''),
+          ...tail,
+          ...replay().slice(source.messages.length)
+        ]
+        // JSON checkpoint escaping can expand one character to six ASCII bytes.
+        // Reserve its worst-case heuristic cost, plus all captured request context.
+        const summaryReserve = Math.ceil((maxSummaryChars * 6) / 4)
+        return captured.estimate(projected, thinkingEffort) + summaryReserve <= budget
+      }
+    })
     signal.throwIfAborted()
     if (outcome.status !== 'accepted')
       throw new ContextAdmissionError(

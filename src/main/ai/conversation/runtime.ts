@@ -209,7 +209,10 @@ class SessionRuntimeService implements SessionStore {
     return this.eventLog.getLatestCheckpoint(sessionId)?.coverage.throughSequence ?? 0
   }
 
-  getCompactionSource(sessionId: string): {
+  getCompactionSource(
+    sessionId: string,
+    options?: { beforeSequence: number }
+  ): {
     throughSequence: number
     sourceDigest: string
     events: import('./journal/event-log').CompactionEvent[]
@@ -219,9 +222,13 @@ class SessionRuntimeService implements SessionStore {
     // SAFETY: the query selects the declared boundary columns.
     const boundaries = this.dependencies.database.connection
       .prepare(
-        "SELECT session_sequence, run_id FROM runtime_events WHERE session_id = ? AND kind = 'run_completed' ORDER BY session_sequence DESC"
+        "SELECT session_sequence, run_id FROM runtime_events WHERE session_id = ? AND kind = 'run_completed' AND session_sequence < ? AND session_sequence >= ? ORDER BY session_sequence DESC"
       )
-      .all(sessionId) as { session_sequence: number; run_id: string }[]
+      .all(
+        sessionId,
+        options?.beforeSequence ?? Number.MAX_SAFE_INTEGER,
+        this.getLatestCheckpointCoverage(sessionId)
+      ) as { session_sequence: number; run_id: string }[]
     for (const boundary of boundaries) {
       try {
         this.eventLog.assertCheckpointBoundary(sessionId, boundary.session_sequence)
@@ -229,10 +236,12 @@ class SessionRuntimeService implements SessionStore {
         if (!(error instanceof CheckpointBoundaryRejected)) throw error
         continue
       }
-      const run = this.getRunRow(boundary.run_id)
-      // The terminal run's original pin is authoritative, including when preparing
-      // a repeated compaction. Append that turn's accepted attempt history once.
-      const messages = [...this.getReplayMessages(run.id), ...this.journal.replay(run.id)]
+      // A new compaction uses the latest checkpoint, while retries keep their
+      // original turn pin. Reopening an old pin here would resurrect covered logs.
+      const messages = getSessionReplay(this.dependencies.database, this.eventLog, this.journal, {
+        sessionId,
+        throughSequence: boundary.session_sequence
+      })
       return {
         throughSequence: boundary.session_sequence,
         sourceDigest: this.eventLog.getSourceDigest(sessionId, boundary.session_sequence),

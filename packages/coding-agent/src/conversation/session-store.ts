@@ -81,7 +81,11 @@ interface SessionStore {
   beginCompaction(sessionId: string): void
   endCompaction(sessionId: string): void
   getLatestCheckpointCoverage(sessionId: string): number
-  getCompactionSource(sessionId: string): CheckpointSource | null
+  /** Optionally select an earlier completed prefix; never go behind the latest checkpoint. */
+  getCompactionSource(
+    sessionId: string,
+    options?: { beforeSequence: number }
+  ): CheckpointSource | null
   acceptContextCheckpoint(
     input: CheckpointReference & {
       summary: string

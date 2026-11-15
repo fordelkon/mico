@@ -33,10 +33,17 @@ interface TextInput {
   signal: AbortSignal
 }
 
+interface SummarySourceMessage {
+  role: ChatProviderMessage['role']
+  parts: readonly ChatProviderMessage['parts'][number][]
+  fragment?: { messageIndex: number; partIndex: number; offset: number; totalChars: number }
+}
+
 interface SummaryInput {
   purpose: 'summary'
   instructions: string
-  history: readonly ChatProviderMessage[]
+  history: readonly SummarySourceMessage[]
+  previousSummary?: string
   signal: AbortSignal
 }
 
@@ -68,7 +75,7 @@ function prepareTextInput(input: TextInput | SummaryInput): ChatProviderStreamIn
   input.signal.throwIfAborted()
   const text =
     input.purpose === 'summary'
-      ? renderSummarySource(input.history, input.instructions)
+      ? renderSummarySource(input.history, input.instructions, input.previousSummary)
       : input.text
   return {
     messages: [
@@ -106,8 +113,9 @@ function projectToolResults(
 
 /** Keep all summary evidence or refuse before dispatch; never silently accept a partial source. */
 function renderSummarySource(
-  messages: readonly ChatProviderMessage[],
-  instructions: string
+  messages: readonly SummarySourceMessage[],
+  instructions: string,
+  previousSummary?: string
 ): string {
   const fragments: string[] = []
   let bytes = Buffer.byteLength(instructions)
@@ -119,6 +127,10 @@ function renderSummarySource(
       )
     fragments.push(fragment)
   }
+  if (previousSummary)
+    append(
+      `<previous-checkpoint>\n${JSON.stringify(previousSummary).replaceAll('<', '\\u003c')}\n</previous-checkpoint>\n`
+    )
   append('<conversation>\n')
   let hasContent = false
   for (const message of messages) {
@@ -129,11 +141,16 @@ function renderSummarySource(
     // JSON lines retain call IDs, roles and error flags without letting embedded
     // newlines or closing tags masquerade as transcript structure. Replay metadata
     // and private reasoning are deliberately outside the summarizer's evidence.
-    append(JSON.stringify({ role: message.role, parts }).replaceAll('<', '\\u003c'))
+    const record = { role: message.role, parts }
+    append(
+      JSON.stringify(
+        message.fragment ? { ...record, fragment: message.fragment } : record
+      ).replaceAll('<', '\\u003c')
+    )
   }
   append('\n</conversation>')
   return fragments.join('')
 }
 
 export { prepareTurnInput, prepareTextInput, ProviderInputLimitExceeded }
-export type { PreparedProviderInput }
+export type { PreparedProviderInput, SummarySourceMessage }

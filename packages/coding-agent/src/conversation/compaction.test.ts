@@ -1,4 +1,9 @@
-import { type ChatProvider, type ProviderStreamPart, providerFinish } from '@mico/ai-providers'
+import {
+  type ChatProvider,
+  type ProviderStreamPart,
+  providerFinish,
+  ProviderError
+} from '@mico/ai-providers'
 import { describe, expect, it, vi } from 'vitest'
 import type { ExecutionProfileSnapshot } from '../contracts'
 import { SessionCompactor } from './compaction'
@@ -33,6 +38,9 @@ function setup(options: { stream?: ChatProvider['stream']; maxSummaryChars?: num
       sourceDigest: 'source',
       messages: [{ role: 'user', parts: [{ type: 'text', text: 'Inspect the failing test' }] }]
     })),
+    getLatestCheckpointCoverage: vi.fn<Dependencies['runtime']['getLatestCheckpointCoverage']>(
+      () => 0
+    ),
     getDefaultProfile: vi.fn<Dependencies['runtime']['getDefaultProfile']>(() => profile),
     acceptContextCheckpoint: vi.fn<Dependencies['runtime']['acceptContextCheckpoint']>(() => {
       throw new Error('This rejected or cancelled summary must not create a checkpoint.')
@@ -111,6 +119,83 @@ describe('SessionCompactor', () => {
       expect.objectContaining({ reason: 'rejected' })
     )
     expect(runtime.acceptContextCheckpoint).not.toHaveBeenCalled()
+  })
+
+  it('user summarizes several batches when a later request fails, then provisional progress never becomes a checkpoint', async () => {
+    let requests = 0
+    const { compactor, runtime } = setup({
+      stream: async () => {
+        requests += 1
+        if (requests === 2) throw new Error('Provider unavailable during the next batch.')
+        return summaryStream('Provisional checkpoint.')
+      }
+    })
+    runtime.getCompactionSource.mockReturnValue({
+      throughSequence: 4,
+      sourceDigest: 'source',
+      messages: [{ role: 'user', parts: [{ type: 'text', text: '界'.repeat(80_000) }] }]
+    })
+
+    await expect(compactor.compact(sessionId)).resolves.toMatchObject({
+      status: 'failed',
+      message: 'Provider unavailable during the next batch.'
+    })
+    expect(requests).toBe(2)
+    expect(runtime.acceptContextCheckpoint).not.toHaveBeenCalled()
+    expect(runtime.recordCompactionNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'failed', coverage: { throughSequence: 4 } })
+    )
+  })
+
+  it('user compacts unchanged history when its checkpoint covers every turn, then no model request is spent', async () => {
+    const { compactor, runtime, stream } = setup()
+    runtime.getLatestCheckpointCoverage.mockReturnValue(4)
+    await expect(compactor.compact(sessionId)).rejects.toThrow(/no new completed turns/i)
+    expect(stream).not.toHaveBeenCalled()
+    expect(runtime.recordCompactionNotice).not.toHaveBeenCalled()
+    expect(runtime.endCompaction).toHaveBeenCalledWith(sessionId)
+  })
+
+  it.each([
+    { size: 80_000, requests: 5 },
+    { size: 10, requests: 1 }
+  ])(
+    'user summarizes $size characters when every request overflows, then attempts stop at $requests',
+    async ({ size, requests }) => {
+      const { compactor, runtime, stream } = setup({
+        stream: async () => {
+          throw new ProviderError('context_overflow')
+        }
+      })
+      runtime.getCompactionSource.mockReturnValue({
+        throughSequence: 4,
+        sourceDigest: 'source',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: '界'.repeat(size) }] }]
+      })
+      await expect(compactor.compact(sessionId)).resolves.toMatchObject({ status: 'failed' })
+      expect(stream).toHaveBeenCalledTimes(requests)
+      expect(runtime.acceptContextCheckpoint).not.toHaveBeenCalled()
+      expect(runtime.recordCompactionNotice).toHaveBeenCalledWith(
+        expect.objectContaining({ coverage: { throughSequence: 4 }, sourceDigest: 'source' })
+      )
+    }
+  )
+
+  it('user replaces a base summary when raw events stay unchanged, then the stale generated summary is discarded', async () => {
+    const released = Promise.withResolvers<AsyncIterable<ProviderStreamPart>>()
+    const { compactor, runtime } = setup({ stream: () => released.promise })
+    const pending = compactor.compact(sessionId)
+    runtime.getCompactionSource.mockReturnValue({
+      throughSequence: 4,
+      sourceDigest: 'source',
+      messages: [{ role: 'user', parts: [{ type: 'text', text: 'Revised base checkpoint.' }] }]
+    })
+    released.resolve(summaryStream())
+    await expect(pending).resolves.toMatchObject({ status: 'failed' })
+    expect(runtime.acceptContextCheckpoint).not.toHaveBeenCalled()
+    expect(runtime.recordCompactionNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'source_changed' })
+    )
   })
 
   it('user changes the session model when a summary runs, then the summary is discarded', async () => {
