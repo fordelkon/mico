@@ -20,6 +20,7 @@ import { AppearancePreferenceSchema } from '../data/schemas/preference'
 import {
   ModelEntrySchema,
   ProviderConfigurationSchema,
+  ProviderLibraryDraftSchema,
   ProviderLibrarySchema
 } from '../data/schemas/provider'
 import { ThemePreferencesSchema, ThemeStateSchema } from '../data/schemas/theme'
@@ -112,7 +113,7 @@ const taskSchemas = {
   [IpcChannel.Workspaces_Archive]: { input: ProjectIdSchema, output: completion },
   [IpcChannel.Providers_GetLibrary]: { input: empty, output: ProviderLibrarySchema },
   [IpcChannel.Providers_SaveLibrary]: {
-    input: ProviderLibrarySchema,
+    input: ProviderLibraryDraftSchema,
     output: ProviderLibrarySchema
   },
   [IpcChannel.Providers_DiscoverModels]: {

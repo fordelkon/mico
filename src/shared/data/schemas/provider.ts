@@ -87,21 +87,23 @@ const ModelEntrySchema = defineSchema(
     enabled: z.boolean().default(false)
   })
 )
+// Removal drafts can retain selections that main clears before persisting.
+const ProviderLibraryDraftSchema = defineSchema(
+  z.object({
+    configurations: z.array(ProviderConfigurationSchema),
+    customProviders: z.array(CustomProviderSchema).default([]),
+    enabledProviderIds: z.array(ModelProviderSchema).default([]),
+    models: z.array(ModelEntrySchema),
+    selectedModelId: ModelEntryIdSchema.nullable(),
+    selectedProviderId: ModelProviderSchema.nullable()
+  })
+)
 const ProviderLibrarySchema = defineSchema(
-  z
-    .object({
-      configurations: z.array(ProviderConfigurationSchema),
-      customProviders: z.array(CustomProviderSchema).default([]),
-      enabledProviderIds: z.array(ModelProviderSchema).default([]),
-      models: z.array(ModelEntrySchema),
-      selectedModelId: ModelEntryIdSchema.nullable(),
-      selectedProviderId: ModelProviderSchema.nullable()
-    })
-    .refine(
-      ({ models, selectedModelId }) =>
-        selectedModelId === null || models.some(({ id }) => id === selectedModelId),
-      { message: 'Selected model must exist in the library.', path: ['selectedModelId'] }
-    )
+  ProviderLibraryDraftSchema.refine(
+    ({ models, selectedModelId }) =>
+      selectedModelId === null || models.some(({ id }) => id === selectedModelId),
+    { message: 'Selected model must exist in the library.', path: ['selectedModelId'] }
+  )
 )
 
 const providerDataSchemas = {
@@ -142,6 +144,7 @@ export {
   ProviderHeadersSchema,
   ProviderIdSchema,
   ModelProviderSchema,
+  ProviderLibraryDraftSchema,
   ProviderLibrarySchema,
   ProviderMaxTokensSchema,
   ProviderModelIdSchema,

@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ModelReasoningCapabilities, TurnStreamEvent } from '@mico/coding-agent/contracts'
 import { IpcChannel } from '@shared/IpcChannel'
+import Database from 'better-sqlite3'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 import type { Conversations } from './ai/conversation'
-import type { Models } from './ai/models'
+import { Models } from './ai/models'
+import { ProviderDatabase } from './data/provider-database'
 import { Workspaces } from './ai/workspace'
 import { registerIpc } from './ipc'
 import type { MainWindowService } from './services/main-window-service'
@@ -220,6 +222,104 @@ const startTurnRequest = {
   requestId: 'request-1',
   userMessage: { role: 'user', parts: [{ type: 'text', text: 'Hello' }] }
 }
+
+describe('registerIpc provider library', () => {
+  const emptyLibrary = {
+    configurations: [],
+    customProviders: [],
+    enabledProviderIds: [],
+    models: [],
+    selectedModelId: null,
+    selectedProviderId: null
+  }
+
+  it.each([
+    ['model selection', { selectedModelId: '' }],
+    ['provider URL', { configurations: [{ provider: 'ollama', baseUrl: 'ftp://example.com' }] }]
+  ])('user saves an invalid %s when committing a draft, then it is rejected', (_field, invalid) => {
+    const harness = createHarness()
+    const save = harness.handlers.get(IpcChannel.Providers_SaveLibrary)!
+
+    expect(() => save(harness.event, { ...emptyLibrary, ...invalid })).toThrow(
+      'Invalid provider library'
+    )
+    expect(harness.provider.saveLibrary).not.toHaveBeenCalled()
+  })
+
+  it('user saves a draft when the result has a missing selected model, then it is rejected', async () => {
+    const harness = createHarness()
+    harness.provider.saveLibrary.mockResolvedValue({
+      ...emptyLibrary,
+      selectedModelId: 'missing-model'
+    })
+    const save = harness.handlers.get(IpcChannel.Providers_SaveLibrary)!
+
+    await expect(save(harness.event, emptyLibrary)).rejects.toThrow(
+      'Invalid response for providers:save-library'
+    )
+  })
+
+  it('user deletes providers in sequence when the second owns the selected model, then both removals persist', async () => {
+    const userDataPath = await mkdtemp(join(tmpdir(), 'mico-provider-removal-'))
+    const database = new ProviderDatabase({
+      getUserDataPath: () => userDataPath,
+      openDatabase: () => new Database(':memory:')
+    })
+    try {
+      const models = new Models({ database })
+      await models.initialize()
+      const harness = createHarness()
+      harness.provider.saveLibrary.mockImplementation((library) => models.saveLibrary(library))
+      const save = harness.handlers.get(IpcChannel.Providers_SaveLibrary)!
+      const initial = await save(harness.event, {
+        ...models.getLibrary(),
+        customProviders: ['first', 'second'].map((id) => ({
+          id,
+          name: id,
+          apiFormat: 'openai-compatible',
+          baseUrl: 'https://api.example.com/v1',
+          enabled: true,
+          headers: {},
+          icon: 'cloud'
+        })),
+        enabledProviderIds: ['first', 'second'],
+        models: ['first', 'second'].map((provider) => ({
+          id: `${provider}-model`,
+          provider,
+          modelId: 'example-model',
+          displayName: 'Example model',
+          enabled: true
+        })),
+        selectedModelId: 'second-model',
+        selectedProviderId: 'second'
+      })
+      const afterFirst = await save(harness.event, {
+        ...initial,
+        customProviders: initial.customProviders.filter(({ id }) => id !== 'first'),
+        models: initial.models.filter(({ provider }) => provider !== 'first')
+      })
+      expect(afterFirst.selectedModelId).toBe('second-model')
+
+      const afterSecond = await save(harness.event, {
+        ...afterFirst,
+        customProviders: [],
+        models: []
+      })
+
+      expect(afterSecond).toMatchObject({
+        customProviders: [],
+        enabledProviderIds: [],
+        models: [],
+        selectedModelId: null,
+        selectedProviderId: null
+      })
+      expect(models.getLibrary()).toEqual(afterSecond)
+    } finally {
+      database.connection.close()
+      await rm(userDataPath, { force: true, recursive: true })
+    }
+  })
+})
 
 describe('registerIpc skill catalog', () => {
   it('user browses a model-only skill when opening settings, then its source document is readable', async () => {
