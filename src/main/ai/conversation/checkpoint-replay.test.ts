@@ -136,7 +136,15 @@ describe('Checkpoint provider replay', () => {
       await send(current.replayMessages)
       expect(bodies[0]).toMatchObject({
         input: [
-          { role: 'user', content: [{ type: 'input_text', text: 'Summary.' }] },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: expect.stringMatching(/^Historical conversation checkpoint:.*"Summary\."$/s)
+              }
+            ]
+          },
           { role: 'user', content: [{ type: 'input_text', text: 'Read the file.' }] },
           { role: 'assistant', content: [{ type: 'input_text', text: 'Reasoning.' }] },
           { type: 'function_call', call_id: 'read', name: 'Read', arguments: '{"file_path":"a"}' },

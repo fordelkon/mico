@@ -390,7 +390,10 @@ describe('Manual context checkpoints', () => {
       retry: false
     })
     expect(next.replayMessages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Earlier turns summarized.' }] },
+      {
+        role: 'user',
+        parts: [{ type: 'text', text: expect.stringContaining('Earlier turns summarized.') }]
+      },
       prompt,
       toolCallAssistant,
       { role: 'tool', parts: [toolResult] },
@@ -415,7 +418,10 @@ describe('Manual context checkpoints', () => {
     acceptCheckpoint(service, session.id, 'Covered.')
     const retry = begin('retry', true)
     expect(retry.replayMessages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Original summary.' }] },
+      {
+        role: 'user',
+        parts: [{ type: 'text', text: expect.stringContaining('Original summary.') }]
+      },
       prompt,
       { role: 'assistant', parts: [{ type: 'text', text: 'First answer.' }] },
       prompt,
@@ -424,7 +430,7 @@ describe('Manual context checkpoints', () => {
     retry.complete({ role: 'assistant', parts: [{ type: 'text', text: 'Retry answer.' }] })
     const third = begin('third')
     expect(third.replayMessages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Covered.' }] },
+      { role: 'user', parts: [{ type: 'text', text: expect.stringContaining('Covered.') }] },
       prompt,
       { role: 'assistant', parts: [{ type: 'text', text: 'Partial.' }] },
       { role: 'assistant', parts: [{ type: 'text', text: 'Retry answer.' }] },
@@ -444,7 +450,7 @@ describe('Manual context checkpoints', () => {
       parts: [{ type: 'text', text: 'Final answer.' }]
     })
     expect(begin('next').replayMessages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Legacy covered.' }] },
+      { role: 'user', parts: [{ type: 'text', text: expect.stringContaining('Legacy covered.') }] },
       prompt,
       toolCallAssistant,
       { role: 'tool', parts: [toolResult] },
@@ -539,7 +545,7 @@ describe('Manual context checkpoints', () => {
     expect(source.events).toHaveLength(Number(rawCount))
     acceptCheckpoint(service, session.id, 'Second summary.')
     expect(begin('third').replayMessages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Second summary.' }] },
+      { role: 'user', parts: [{ type: 'text', text: expect.stringContaining('Second summary.') }] },
       prompt
     ])
   })
@@ -612,7 +618,7 @@ describe('Manual context checkpoints', () => {
       .run('renamed-source', session.id)
     expect(service.getCompactionSource(session.id)?.sourceDigest).toBe(expected)
     expect(begin('next').replayMessages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Summary.' }] },
+      { role: 'user', parts: [{ type: 'text', text: expect.stringContaining('Summary.') }] },
       prompt
     ])
     expect(checkpoint.checkpointEventId).toBeTruthy()
@@ -699,7 +705,7 @@ describe('Manual context checkpoints', () => {
     second.recordContext([])
     second.complete({ role: 'assistant', parts: [{ type: 'text', text: 'Tail answer' }] })
     expect(service.getCompactionSource(session.id)?.messages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'First summary.' }] },
+      { role: 'user', parts: [{ type: 'text', text: expect.stringContaining('First summary.') }] },
       userMessage,
       { role: 'assistant', parts: [{ type: 'text', text: 'Tail answer' }] }
     ])

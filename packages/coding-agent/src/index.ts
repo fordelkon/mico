@@ -7,7 +7,10 @@ export type {
   ProviderUserMessage,
   TurnRunHandle
 } from './conversation/session-store'
-export { toProviderReplayContext } from './conversation/provider-messages'
+export {
+  toProviderCheckpointContext,
+  toProviderReplayContext
+} from './conversation/provider-messages'
 export {
   parseToolTracePayload,
   toStoredToolTrace,

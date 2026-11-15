@@ -1,4 +1,4 @@
-import { SESSION_SUMMARY_INSTRUCTIONS } from '../prompt/summary-instructions'
+import { createSessionSummaryInstructions } from '../prompt/summary-instructions'
 import type { ChatProvider } from '@mico/ai-providers'
 import type { ExecutionProfileSnapshot } from '../contracts'
 import type { CompactionNoticeReason, SessionStore } from './session-store'
@@ -225,7 +225,7 @@ class SessionCompactor {
   }): Promise<string> {
     const request = prepareTextInput({
       purpose: 'summary',
-      instructions: SESSION_SUMMARY_INSTRUCTIONS,
+      instructions: createSessionSummaryInstructions(this.maxSummaryChars),
       history: source.messages,
       signal
     })

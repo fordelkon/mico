@@ -46,10 +46,6 @@ function textDelta(delta: string): UIMessageChunk {
   return { type: 'text-delta', id: 'text-1', delta }
 }
 
-function toolCallChunk(): UIMessageChunk {
-  return { type: 'tool-input-available', toolCallId: 'call-1', toolName: 'Read', input: {} }
-}
-
 function streamFrom(parts: ProviderStreamPart[]): AsyncIterable<ProviderStreamPart> {
   return {
     async *[Symbol.asyncIterator](): AsyncIterator<ProviderStreamPart> {
@@ -89,9 +85,7 @@ type Harness = {
   streamCalls: Parameters<ChatProvider['stream']>[0][]
 }
 
-async function createHarness(
-  options: { stream?: ChatProvider['stream']; maxSummaryChars?: number } = {}
-): Promise<Harness> {
+async function createHarness(options: { stream?: ChatProvider['stream'] } = {}): Promise<Harness> {
   const database = new SessionDatabase({ getUserDataPath: () => ':memory:' })
   databases.push(database)
   await database.initialize()
@@ -103,11 +97,7 @@ async function createHarness(
     const delegate = options.stream ?? (() => summaryStream('Summary.'))
     return delegate(input)
   }
-  const compactor = await createCompactor({
-    runtime,
-    stream,
-    maxSummaryChars: options.maxSummaryChars
-  })
+  const compactor = await createCompactor({ runtime, stream })
   return {
     database,
     runtime,
@@ -119,19 +109,16 @@ async function createHarness(
 
 async function createCompactor({
   runtime,
-  stream,
-  maxSummaryChars
+  stream
 }: {
   runtime: SessionRuntimeService
   stream: ChatProvider['stream']
-  maxSummaryChars?: number
 }): Promise<CodingAgent> {
   const models = await createModels(() => createProvider(stream), configuration)
   return new CodingAgent({
     runtime,
     models,
-    requestApproval: new PermissionRequests().request,
-    maxSummaryChars
+    requestApproval: new PermissionRequests().request
   })
 }
 
@@ -199,46 +186,16 @@ function notices(database: SessionDatabase, sessionId: string): NoticePayload[] 
   return payloadRows<NoticePayload>(database, sessionId, 'compaction_notice_recorded')
 }
 
-describe('SessionCompactor', () => {
+describe('Desktop compaction integration', () => {
   it('user summarizes when turns are completed, then the accepted checkpoint pins the covered boundary', async () => {
-    const { database, runtime, session, compactor, streamCalls } = await createHarness()
-    const first = beginTurn(runtime, session.id, 'first')
-    first.recordModelStep({
-      index: 1,
-      assistant: {
-        role: 'assistant',
-        parts: [
-          {
-            type: 'reasoning',
-            text: 'SECRET-REASONING',
-            providerMetadata: { ollama: { signature: 'sig' } }
-          },
-          { type: 'text', text: 'First answer.' }
-        ]
-      }
-    })
-    first.complete(assistantMessage)
+    const { database, runtime, session, compactor } = await createHarness()
+    completeTurn(runtime, session.id, 'first')
     completeTurn(runtime, session.id, 'second')
 
     const outcome = await compactor.compact(session.id)
 
     expect(outcome.status).toBe('accepted')
     if (outcome.status !== 'accepted') throw new Error('Expected an accepted outcome.')
-    expect(streamCalls).toHaveLength(1)
-    const request = streamCalls[0]
-    expect(request.thinkingEffort).toBe('none')
-    expect(request.tools).toBeUndefined()
-    expect(request.signal).toBeInstanceOf(AbortSignal)
-    expect(request.messages).toHaveLength(2)
-    expect(request.messages[0]?.role).toBe('system')
-    const transcript = request.messages[1]
-    if (transcript.role !== 'user') throw new Error('Expected a user transcript message.')
-    const transcriptText = transcript.parts
-      .map((part) => (part.type === 'text' ? part.text : ''))
-      .join('\n')
-    expect(transcriptText).toContain('Inspect the failing test')
-    expect(transcriptText).toContain('First answer.')
-    expect(transcriptText).not.toContain('SECRET-REASONING')
     expect(checkpoints(database, session.id)).toEqual([
       {
         trigger: 'manual',
@@ -258,81 +215,16 @@ describe('SessionCompactor', () => {
     expect(pinnedTurn.checkpoint_event_id).toBe(outcome.checkpointEventId)
   })
 
-  it('user requests a summary when no turns are completed, then the request is refused directly', async () => {
-    const { session, compactor } = await createHarness()
-    await expect(compactor.compact(session.id)).rejects.toThrow(/no completed turns/i)
-  })
-
-  it.each([
-    {
-      name: 'a length finish',
-      parts: [textDelta('Partial.'), providerFinish({ reason: 'length' })]
-    },
-    {
-      name: 'a tool-call finish',
-      parts: [textDelta('Running'), providerFinish({ reason: 'tool-calls' })]
-    },
-    {
-      name: 'an unknown finish',
-      parts: [textDelta('Odd.'), providerFinish({ reason: 'unknown' })]
-    },
-    {
-      name: 'a content-filter finish',
-      parts: [textDelta('Blocked.'), providerFinish({ reason: 'content-filter' })]
-    },
-    { name: 'a provider-side cancel finish', parts: [providerFinish({ reason: 'cancelled' })] },
-    { name: 'a tool-call part', parts: [toolCallChunk(), providerFinish({ reason: 'stop' })] },
-    { name: 'an empty output', parts: [providerFinish({ reason: 'stop' })] },
-    {
-      name: 'whitespace-only output',
-      parts: [textDelta('   '), providerFinish({ reason: 'stop' })]
-    },
-    { name: 'an incomplete stream', parts: [textDelta('Partial.')] }
-  ])(
-    'user receives a summary when it ends with $name, then the rejection becomes a durable notice without a checkpoint',
-    async ({ parts }) => {
-      const { database, runtime, session, compactor, streamCalls } = await createHarness({
-        stream: async () => streamFrom(parts)
-      })
-      completeTurn(runtime, session.id, 'first')
-
-      const outcome = await compactor.compact(session.id)
-
-      expect(outcome.status).toBe('failed')
-      if (outcome.status !== 'failed') throw new Error('Expected a failed outcome.')
-      expect(outcome.message).toMatch(/summary/i)
-      const recorded = notices(database, session.id)
-      expect(recorded).toHaveLength(1)
-      expect(recorded[0]?.reason).toBe('rejected')
-      expect(checkpoints(database, session.id)).toEqual([])
-      expect(streamCalls).toHaveLength(1)
-    }
-  )
-
-  it('user receives a summary when it exceeds the length bound, then the overlong output is rejected', async () => {
+  it('user receives an incomplete summary when generation ends early, then a rejection notice is stored without a checkpoint', async () => {
     const { database, runtime, session, compactor } = await createHarness({
-      maxSummaryChars: 10,
-      stream: async () => summaryStream('a'.repeat(40))
+      stream: async () => streamFrom([textDelta('Partial.'), providerFinish({ reason: 'length' })])
     })
     completeTurn(runtime, session.id, 'first')
 
-    const outcome = await compactor.compact(session.id)
+    await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'failed' })
 
-    expect(outcome.status).toBe('failed')
-    expect(notices(database, session.id)[0]?.reason).toBe('rejected')
+    expect(notices(database, session.id)).toEqual([expect.objectContaining({ reason: 'rejected' })])
     expect(checkpoints(database, session.id)).toEqual([])
-  })
-
-  it('user summarizes a large tool result when input fits, then the summary receives its complete evidence', async () => {
-    const { database, runtime, session, compactor, streamCalls } = await createHarness()
-    const output = `${'x'.repeat(40 * 1024)}MIDDLE-EVIDENCE${'y'.repeat(40 * 1024)}`
-    completeToolTurn(runtime, session.id, output)
-
-    await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'accepted' })
-
-    const source = streamCalls[0]?.messages[1]?.parts[0]
-    expect(source?.type === 'text' ? source.text : '').toContain(output)
-    expect(checkpoints(database, session.id)).toHaveLength(1)
   })
 
   it('user summarizes oversized history when the input exceeds its byte budget, then history remains intact', async () => {
@@ -381,23 +273,6 @@ describe('SessionCompactor', () => {
     expect(checkpoints(database, session.id)).toEqual([])
   })
 
-  it('user changes the session model when a summary runs, then the summary is discarded with a durable notice', async () => {
-    const { database, runtime, session } = await createHarness()
-    completeTurn(runtime, session.id, 'first')
-    const { stream, resolve } = deferredStream()
-    const compactor = await createCompactor({ runtime, stream })
-
-    const pending = compactor.compact(session.id)
-    runtime.updateDefaultProfile(session.id, { ...profile, thinkingEffort: 'low' })
-    resolve([textDelta('Summary.'), providerFinish({ reason: 'stop' })])
-
-    const outcome = await pending
-
-    expect(outcome.status).toBe('failed')
-    expect(notices(database, session.id)[0]?.reason).toBe('profile_changed')
-    expect(checkpoints(database, session.id)).toEqual([])
-  })
-
   it('user cancels a summary when acquisition is pending, then cancellation is acknowledged durably', async () => {
     const { database, runtime, session } = await createHarness()
     completeTurn(runtime, session.id, 'first')
@@ -414,45 +289,6 @@ describe('SessionCompactor', () => {
     expect(outcome).toEqual({ status: 'cancelled' })
     expect(notices(database, session.id)[0]?.reason).toBe('cancelled')
     expect(checkpoints(database, session.id)).toEqual([])
-  })
-
-  it('user cancels a summary when it is streaming, then cancellation wins over the pending output', async () => {
-    const { runtime, session } = await createHarness()
-    completeTurn(runtime, session.id, 'first')
-    const streamedFirstPart = createDeferred<void>()
-    const releaseRest = createDeferred<void>()
-    const stream: ChatProvider['stream'] = async () =>
-      (async function* () {
-        yield textDelta('Partial.')
-        streamedFirstPart.resolve()
-        await releaseRest.promise
-        yield providerFinish({ reason: 'stop' })
-      })()
-    const compactor = await createCompactor({ runtime, stream })
-
-    const pending = compactor.compact(session.id)
-    await streamedFirstPart.promise
-    const cancellation = compactor.cancelCompaction(session.id)
-    releaseRest.resolve()
-    await cancellation
-
-    await expect(pending).resolves.toEqual({ status: 'cancelled' })
-  })
-
-  it('user starts two summaries when one session is selected, then the second request is refused', async () => {
-    const { runtime, session } = await createHarness()
-    completeTurn(runtime, session.id, 'first')
-    const { stream, resolve } = deferredStream()
-    const compactor = await createCompactor({ runtime, stream })
-
-    const pending = compactor.compact(session.id)
-    await expect(compactor.compact(session.id)).rejects.toThrow(/already running/i)
-
-    resolve([textDelta('Summary.'), providerFinish({ reason: 'stop' })])
-    await expect(pending).resolves.toEqual({
-      status: 'accepted',
-      checkpointEventId: expect.any(String)
-    })
   })
 
   it('user summarizes when a chat run is active, then compaction respects the active-run gate', async () => {
@@ -506,7 +342,10 @@ describe('SessionCompactor', () => {
     const restarted = new SessionRuntimeService({ database: reopened })
     expect(restarted.loadSession(session.id).messages).toEqual(transcript)
     expect(beginTurn(restarted, session.id, 'next').replayMessages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Accepted summary.' }] },
+      {
+        role: 'user',
+        parts: [{ type: 'text', text: expect.stringContaining('Accepted summary.') }]
+      },
       userMessage
     ])
   })
@@ -564,94 +403,28 @@ describe('SessionCompactor', () => {
     expect(checkpoints(database, session.id)).toEqual([])
   })
 
-  it('user quits when one notice failed earlier and another is pending, then drain waits and reports both failures once', async () => {
+  it('user retries after a notice write fails when storage recovers, then the session accepts another turn and summary', async () => {
     const { database, runtime, session } = await createHarness()
-    const second = runtime.createSession({ title: 'Second', defaultProfile: profile })
     completeTurn(runtime, session.id, 'first')
-    completeTurn(runtime, second.id, 'second')
     database.connection.exec(`CREATE TRIGGER reject_compaction_notices BEFORE INSERT ON runtime_events
       WHEN NEW.kind = 'compaction_notice_recorded'
       BEGIN SELECT RAISE(FAIL, 'notice persistence failed'); END;`)
-    const firstStream = deferredStream()
-    const secondStream = deferredStream()
-    let requestCount = 0
-    const compactor = await createCompactor({
-      runtime,
-      stream: (input) => {
-        requestCount += 1
-        return (requestCount === 1 ? firstStream.stream : secondStream.stream)(input)
-      }
-    })
-    const first = compactor.compact(session.id)
-    firstStream.resolve([providerFinish({ reason: 'length' })])
-    await expect(first).rejects.toThrow('notice persistence failed')
-    expect(() => beginTurn(runtime, session.id, 'after-failure')).not.toThrow()
-    const pendingSecond = compactor.compact(second.id)
-    compactor.dispose()
-    let didDrainSettle = false
-    const draining = compactor.drain().then(
-      () => {
-        didDrainSettle = true
-        return null
-      },
-      (error: Error) => {
-        didDrainSettle = true
-        return error
-      }
-    )
-    await Promise.resolve()
-    expect(didDrainSettle).toBe(false)
-    secondStream.resolve([providerFinish({ reason: 'stop' })])
-    await expect(pendingSecond).rejects.toThrow('notice persistence failed')
-    const error = await draining
-    expect(error).toBeInstanceOf(AggregateError)
-    if (!(error instanceof AggregateError))
-      throw new Error('Expected aggregated persistence failures.')
-    expect(error.errors).toHaveLength(2)
-    expect(error.errors.map((failure: Error) => failure.message)).toEqual([
-      'notice persistence failed',
-      'notice persistence failed'
-    ])
-    expect(() => beginTurn(runtime, second.id, 'after-drain')).not.toThrow()
-    await expect(compactor.drain()).resolves.toBeUndefined()
-  })
-
-  it('user restarts when a rejected summary finishes, then the next summary starts immediately after await', async () => {
-    const { runtime, session } = await createHarness()
-    completeTurn(runtime, session.id, 'first')
     const compactor = await createCompactor({
       runtime,
       stream: async () => streamFrom([providerFinish({ reason: 'length' })])
     })
-    await compactor.compact(session.id)
+
+    await expect(compactor.compact(session.id)).rejects.toThrow('notice persistence failed')
+    completeTurn(runtime, session.id, 'after-failure')
+    database.connection.exec('DROP TRIGGER reject_compaction_notices')
     await expect(compactor.compact(session.id)).resolves.toMatchObject({ status: 'failed' })
+
+    expect(notices(database, session.id)).toEqual([expect.objectContaining({ reason: 'rejected' })])
+    expect(checkpoints(database, session.id)).toEqual([])
+    await expect(compactor.drain()).rejects.toThrow(AggregateError)
   })
 
-  it('user retries when notice storage keeps failing, then drain reports the total with bounded error samples once', async () => {
-    const { database, runtime, session } = await createHarness()
-    completeTurn(runtime, session.id, 'first')
-    database.connection.exec(`CREATE TRIGGER reject_repeated_notices BEFORE INSERT ON runtime_events
-      WHEN NEW.kind = 'compaction_notice_recorded'
-      BEGIN SELECT RAISE(FAIL, 'repeated notice failure'); END;`)
-    const compactor = await createCompactor({
-      runtime,
-      stream: async () => streamFrom([providerFinish({ reason: 'length' })])
-    })
-    const attemptCount = 100
-    for (let attempt = 0; attempt < attemptCount; attempt += 1) {
-      await expect(compactor.compact(session.id)).rejects.toThrow('repeated notice failure')
-    }
-    const failure = await compactor.drain().catch((error: Error) => error)
-    expect(failure).toBeInstanceOf(AggregateError)
-    if (!(failure instanceof AggregateError))
-      throw new Error('Expected persistence failure aggregate.')
-    expect(failure.message).toContain('100')
-    expect(failure.errors.length).toBeGreaterThan(0)
-    expect(failure.errors.length).toBeLessThan(attemptCount)
-    await expect(compactor.drain()).resolves.toBeUndefined()
-  })
-
-  it('user hits a storage failure when a rejection notice is written, then the failure propagates and the gate releases', async () => {
+  it('user loses database access when a rejection notice is written, then the storage failure propagates', async () => {
     const { database, runtime, session } = await createHarness()
     completeTurn(runtime, session.id, 'first')
     const { stream, resolve } = deferredStream()

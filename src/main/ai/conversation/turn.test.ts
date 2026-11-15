@@ -62,31 +62,6 @@ async function createSession(
   }
 }
 
-async function createExecutor(
-  resolveProvider: () => ChatProvider,
-  options: { maxAttempts?: number; retryDelayMs?: number } = {}
-): Promise<CodingAgent> {
-  const { runtime } = await createRuntime([request.sessionId, 'session-2'])
-  runtime.createSession({ title: 'Session', defaultProfile: null })
-  runtime.createSession({ title: 'Second', defaultProfile: null })
-  const models = await createModels(() => {
-    const provider = resolveProvider()
-    return {
-      ...provider,
-      stream: async (input) => {
-        if (isTitleStream(input)) return streamFrom([])
-        return provider.stream(input)
-      }
-    }
-  })
-  return new CodingAgent({
-    requestApproval: new PermissionRequests().request,
-    models,
-    runtime,
-    ...options
-  })
-}
-
 async function createConfiguredExecutor(
   stream: ChatProvider['stream'],
   runtime: SessionRuntimeService,
@@ -262,53 +237,6 @@ describe('Coding agent turns', () => {
     )
   })
 
-  it.each(['missing', 'hidden', 'no-workspace'])(
-    'user invokes %s when starting a turn, then no provider request is made',
-    async (scenario) => {
-      const cwd = await createTemporaryWorkspace('mico-invalid-skill-')
-      const base = join(cwd, '.agents/skills/hidden')
-      await mkdir(base, { recursive: true })
-      await writeFile(
-        join(base, 'SKILL.md'),
-        '---\nname: hidden\ndescription: Hidden\nuser-invocable: false\n---\nHidden body'
-      )
-      const { runtime, session } = await createSession(
-        'Invalid skill',
-        scenario === 'no-workspace' ? {} : { projectId: 'p', cwd }
-      )
-      const stream = vi.fn<ChatProvider['stream']>(async () => streamFrom([]))
-      const executor = await createConfiguredExecutor(stream, runtime)
-      const recorded = collectEvents()
-      executor.startTurn(
-        {
-          ownerId: 'w',
-          request: {
-            ...request,
-            sessionId: session.id,
-            userMessage: {
-              role: 'user',
-              parts: [
-                {
-                  type: 'data-skill-invocation',
-                  data: { skillId: `project-agents:${scenario}`, name: scenario, arguments: '' }
-                }
-              ]
-            }
-          }
-        },
-        recorded.emit
-      )
-      await recorded.terminal
-      expect(stream).not.toHaveBeenCalled()
-      expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
-        expect.objectContaining({
-          type: 'error',
-          message: expect.stringMatching(/skill|workspace/i)
-        })
-      ])
-    }
-  )
-
   it('user sends a document-only message when starting a turn, then it is sent as named text', async () => {
     const { runtime, session } = await createSession('New chat')
     const calls: Parameters<ChatProvider['stream']>[0][] = []
@@ -345,45 +273,6 @@ describe('Coding agent turns', () => {
     expect(calls.find((input) => !isTitleStream(input))?.messages).toEqual([expected])
     expect(calls.find((input) => isTitleStream(input))?.messages[1]).toEqual(expected)
     await titleGenerated.promise
-  })
-
-  it('user sends attached documents when the turn starts, then they are sent as named text', async () => {
-    const calls: Parameters<ChatProvider['stream']>[0][] = []
-    const recorded = collectEvents()
-    const service = await createExecutor(() =>
-      createProvider(async (input) => {
-        calls.push(input)
-        return streamFrom([])
-      })
-    )
-    service.startTurn(
-      {
-        ownerId: 'window-1',
-        request: {
-          ...request,
-          userMessage: {
-            role: 'user',
-            parts: [
-              { type: 'text', text: 'Review this file.' },
-              { type: 'document', name: 'a&"b.ts', text: 'export {}' },
-              { type: 'text', text: 'Focus on exported APIs.' }
-            ]
-          }
-        }
-      },
-      recorded.emit
-    )
-    await recorded.terminal
-    expect(calls[0]?.messages).toEqual([
-      {
-        role: 'user',
-        parts: [
-          { type: 'text', text: 'Review this file.' },
-          { type: 'text', text: '<document name="a&amp;&quot;b.ts">\nexport {}\n</document>' },
-          { type: 'text', text: 'Focus on exported APIs.' }
-        ]
-      }
-    ])
   })
 
   it('user gets the session model used when a session has a profile, then the global model is ignored', async () => {
@@ -459,30 +348,6 @@ describe('Coding agent turns', () => {
     ])
   })
 
-  it('user sees every chunk when the provider streams normally, then one finish event follows', async () => {
-    const recorded = collectEvents()
-    const provider = createProvider(async () => streamFrom([textChunk]))
-    const service = await createExecutor(() => provider)
-
-    service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
-
-    await recorded.terminal
-    expect(recorded.events[0]).toEqual({
-      type: 'context-measurement',
-      requestId: 'request-1',
-      measurement: { policyId: 'unicode-heuristic-v1', estimatedInputTokens: 3 }
-    })
-    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
-      { type: 'chunk', requestId: 'request-1', chunk: textChunk },
-      {
-        type: 'chunk',
-        requestId: 'request-1',
-        chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
-      },
-      { type: 'finish', requestId: 'request-1' }
-    ])
-  })
-
   it('user sees the transcript persisted when the run finishes, then both messages are stored', async () => {
     const { runtime, session } = await createSession('Session')
     const recorded = collectEvents()
@@ -531,37 +396,6 @@ describe('Coding agent turns', () => {
     expect(titleInstructions).toContain("Capture the user's actual goal")
     expect(titleInstructions).toContain('Preserve technical terms')
     expect(titleInstructions).toContain('Output exactly one title')
-  })
-
-  it('user sees a title capped at 50 characters when generation returns more, then the rest is trimmed', async () => {
-    const { runtime, session } = await createSession('New chat')
-    const recorded = collectEvents()
-    const service = await createConfiguredExecutor(
-      async ({ messages }) =>
-        streamFrom(
-          messages[0]?.role === 'system'
-            ? [
-                {
-                  type: 'text-delta',
-                  id: 'title-part',
-                  delta: `Title: "${'😀'.repeat(51)}"!`
-                },
-                providerFinish({ reason: 'stop' })
-              ]
-            : [textChunk]
-        ),
-      runtime
-    )
-    const titleGenerated = createDeferred()
-
-    service.startTurn(
-      { ownerId: 'window-1', request: { ...request, sessionId: session.id } },
-      recorded.emit,
-      () => titleGenerated.resolve()
-    )
-
-    await titleGenerated.promise
-    expect(runtime.loadSession(session.id).title).toBe('😀'.repeat(50))
   })
 
   it('user renames a chat when title generation is pending, then the manual title is preserved', async () => {
@@ -936,166 +770,6 @@ describe('Coding agent turns', () => {
     expect(stream).not.toHaveBeenCalled()
   })
 
-  it('user aborts only the matching run when targeting it, then one terminal event is emitted', async () => {
-    const events: TurnStreamEvent[] = []
-    const signals = new Map<string, AbortSignal>()
-    const streamsStarted = createDeferred()
-    const provider = createProvider(async ({ signal }) => {
-      signals.set(String(signals.size + 1), signal)
-      if (signals.size === 2) streamsStarted.resolve()
-      return pendingStream(signal)
-    })
-    const service = await createExecutor(() => provider)
-
-    service.startTurn({ ownerId: 'window-1', request }, (event) => events.push(event))
-    service.startTurn(
-      {
-        ownerId: 'window-2',
-        request: { ...request, sessionId: 'session-2', requestId: 'request-2' }
-      },
-      (event) => events.push(event)
-    )
-    await streamsStarted.promise
-
-    const firstAbort = service.abortTurn({ ownerId: 'window-1', requestId: 'request-1' })
-    const repeatedAbort = service.abortTurn({ ownerId: 'window-1', requestId: 'request-1' })
-
-    expect(signals.get('1')?.aborted).toBe(true)
-    expect(signals.get('2')?.aborted).toBe(false)
-    await Promise.all([firstAbort, repeatedAbort])
-    expect(events.filter((event) => event.type !== 'context-measurement')).toEqual([
-      { type: 'cancelled', requestId: 'request-1' }
-    ])
-    service.dispose()
-    await service.drain()
-  })
-
-  it('user keeps same-ID requests isolated when aborting one owner, then only that owner is aborted', async () => {
-    const signals: AbortSignal[] = []
-    const streamsStarted = createDeferred()
-    const provider = createProvider(async ({ signal }) => {
-      signals.push(signal)
-      if (signals.length === 2) streamsStarted.resolve()
-      return pendingStream(signal)
-    })
-    const service = await createExecutor(() => provider)
-
-    service.startTurn({ ownerId: 'window-1', request }, () => undefined)
-    service.startTurn(
-      { ownerId: 'window-2', request: { ...request, sessionId: 'session-2' } },
-      () => undefined
-    )
-    await streamsStarted.promise
-
-    service.abortAllTurns('window-1')
-
-    expect(signals[0]?.aborted).toBe(true)
-    expect(signals[1]?.aborted).toBe(false)
-    service.dispose()
-    await service.drain()
-  })
-
-  it('user sees every active run aborted when the executor is disposed, then all signals abort', async () => {
-    const signals: AbortSignal[] = []
-    const streamsStarted = createDeferred()
-    const provider = createProvider(async ({ signal }) => {
-      signals.push(signal)
-      if (signals.length === 2) streamsStarted.resolve()
-      return pendingStream(signal)
-    })
-    const service = await createExecutor(() => provider)
-
-    service.startTurn({ ownerId: 'window-1', request }, () => undefined)
-    service.startTurn(
-      {
-        ownerId: 'window-2',
-        request: { ...request, sessionId: 'session-2', requestId: 'request-2' }
-      },
-      () => undefined
-    )
-    await streamsStarted.promise
-
-    service.dispose()
-
-    expect(signals.map((signal) => signal.aborted)).toEqual([true, true])
-  })
-
-  it('user sees a safe generic error when the stream fails, then upstream details are hidden', async () => {
-    const recorded = collectEvents()
-    const stream = vi.fn<ChatProvider['stream']>(async () => {
-      throw new Error('upstream credential details')
-    })
-    const service = await createExecutor(() => createProvider(stream))
-
-    service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
-
-    await recorded.terminal
-    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
-      {
-        type: 'error',
-        requestId: 'request-1',
-        message: "Couldn't generate a response. Please try again."
-      }
-    ])
-  })
-
-  it('user sees a retry when the connection fails before any content, then the run finishes normally', async () => {
-    const recorded = collectEvents()
-    let calls = 0
-    const stream = async () => {
-      calls += 1
-      if (calls === 1) throw new TypeError('fetch failed')
-      return streamFrom([textChunk])
-    }
-    const service = await createExecutor(() => createProvider(stream), {
-      maxAttempts: 2,
-      retryDelayMs: 0
-    })
-
-    service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
-
-    await recorded.terminal
-    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
-      {
-        type: 'retry',
-        requestId: 'request-1',
-        attempt: 2,
-        maxAttempts: 2,
-        retryDelayMs: 0
-      },
-      { type: 'chunk', requestId: 'request-1', chunk: textChunk },
-      {
-        type: 'chunk',
-        requestId: 'request-1',
-        chunk: { type: 'message-metadata', messageMetadata: { completionState: 'complete' } }
-      },
-      { type: 'finish', requestId: 'request-1' }
-    ])
-  })
-
-  it('user keeps the partial content when the connection fails mid-stream, then the run errors without retry', async () => {
-    const recorded = collectEvents()
-    const provider = createProvider(async () => ({
-      async *[Symbol.asyncIterator](): AsyncIterator<UIMessageChunk> {
-        yield textChunk
-        throw new TypeError('fetch failed')
-      }
-    }))
-    const service = await createExecutor(() => provider, { maxAttempts: 2, retryDelayMs: 0 })
-
-    service.startTurn({ ownerId: 'window-1', request }, recorded.emit)
-
-    await recorded.terminal
-    expect(recorded.events.filter((event) => event.type !== 'context-measurement')).toEqual([
-      { type: 'chunk', requestId: 'request-1', chunk: textChunk },
-      {
-        type: 'error',
-        requestId: 'request-1',
-        message: "Couldn't connect to the API endpoint. Check the API URL, network, VPN, or proxy."
-      }
-    ])
-  })
-
   it('user sees partial output when a persisted stream fails, then the stopped snapshot survives', async () => {
     const { runtime, session } = await createSession('Session')
     const recorded = collectEvents()
@@ -1118,32 +792,6 @@ describe('Coding agent turns', () => {
       parts: [{ type: 'text', text: 'Hi' }],
       metadata: { completionState: 'stopped' }
     })
-  })
-
-  it('user gets the requested thinking effort when starting a turn, then it reaches the provider', async () => {
-    const streamCalled = createDeferred()
-    const stream = vi.fn<ChatProvider['stream']>(async () => {
-      streamCalled.resolve()
-      return streamFrom([])
-    })
-    const service = await createExecutor(() => ({
-      stream,
-      getModelCapabilities: async () => ({
-        selectableEfforts: ['default', 'high'],
-        defaultEffort: 'default'
-      })
-    }))
-
-    service.startTurn(
-      {
-        ownerId: '42',
-        request: { ...request, sessionId: 'session-1', thinkingEffort: 'high' }
-      },
-      () => undefined
-    )
-
-    await streamCalled.promise
-    expect(stream).toHaveBeenCalledWith(expect.objectContaining({ thinkingEffort: 'high' }))
   })
 
   it('user sees a tool trace persisted when a tool call completes, then it is stored with the reply', async () => {

@@ -47,9 +47,7 @@ function createProjectAgentInstructions(
   tools?: readonly ChatProviderTool[],
   skills?: PromptSkillCatalog
 ): string {
-  const toolContext = tools
-    ? tools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')
-    : ''
+  const toolContext = tools?.map((tool) => tool.name).join(', ')
   const catalog =
     boundedEntries(
       skills?.skills
@@ -99,8 +97,23 @@ observable behavior and run relevant tests, lint, and type checks. Preserve unre
 speculative refactors, and report concisely what changed, the verification evidence, and any remaining gap.
 Never claim a check passed or an outcome completed without observing its result.
 
+# Error recovery and continuation
+Read a failed tool's result before choosing a recovery. For a command, use its exit
+status and captured stdout/stderr to identify the failing step; fix the evidenced cause before
+retrying. Correct invalid tool arguments against the declared schema. Treat a failed or timed-out
+command as potentially partially executed: inspect the affected state before repeating a mutation,
+and never assume an error rolled back its effects. An unknown tool outcome requires inspection,
+not a claim of success or an automatic repeat.
+Continue from completed work and settled tool results. Preserve the latest user objective,
+corrections, constraints, and authorization limits when resuming; a historical plan or summary
+does not grant new permission. Recheck changeable workspace facts before acting on older context.
+The runtime owns provider retries and context compaction. Do not repeat completed tools to recover
+from a provider failure. If recovery remains blocked, report the observed cause, completed work,
+and the smallest action needed to continue; do not claim an unobserved retry or successful check.
+
 # Available tools
-${toolContext || 'Tool definitions supplied with this request are authoritative.'}
+${toolContext ? `Enabled tools: ${toolContext}.` : ''}
+Tool definitions supplied with this request are authoritative for parameters and operation details.
 
 # Skills
 Use a skill when the user names it or its description clearly matches the task. Call LoadSkill

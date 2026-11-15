@@ -122,23 +122,14 @@ function renderSummarySource(
   append('<conversation>\n')
   let hasContent = false
   for (const message of messages) {
-    for (const part of message.parts) {
-      if (part.type === 'reasoning') continue
-      if (hasContent) append('\n')
-      hasContent = true
-      if (part.type === 'text') {
-        append(`${message.role}: `)
-        append(part.text)
-      } else if (part.type === 'tool-call') {
-        append(`${message.role} tool call ${part.toolName}(`)
-        append(part.argumentsJson)
-        append(')')
-      } else {
-        append(`tool result for ${part.toolName} (${part.toolCallId}): `)
-        append(part.output)
-        if (part.isError) append(' [failed]')
-      }
-    }
+    const parts = message.parts.filter((part) => part.type !== 'reasoning')
+    if (!parts.length) continue
+    if (hasContent) append('\n')
+    hasContent = true
+    // JSON lines retain call IDs, roles and error flags without letting embedded
+    // newlines or closing tags masquerade as transcript structure. Replay metadata
+    // and private reasoning are deliberately outside the summarizer's evidence.
+    append(JSON.stringify({ role: message.role, parts }).replaceAll('<', '\\u003c'))
   }
   append('\n</conversation>')
   return fragments.join('')

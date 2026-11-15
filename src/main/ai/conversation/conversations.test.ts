@@ -467,7 +467,17 @@ describe('Conversations', () => {
     })
     expect(continued.at(-1)?.type).toBe('finish')
     expect(requests[2].messages).toEqual([
-      { role: 'user', parts: [{ type: 'text', text: 'Checkpoint summary of two turns.' }] },
+      {
+        role: 'user',
+        parts: [
+          {
+            type: 'text',
+            text: expect.stringMatching(
+              /^Historical conversation checkpoint:.*Checkpoint summary of two turns\./s
+            )
+          }
+        ]
+      },
       { role: 'user', parts: [{ type: 'text', text: 'Continue' }] }
     ])
     expect(
