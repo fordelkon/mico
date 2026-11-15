@@ -47,10 +47,14 @@ test('user edits an invocation when drafting, then completion, atomic deletion, 
   await app.window.getByRole('button', { name: 'Settings', exact: true }).click()
   await app.window.getByRole('button', { name: 'Back', exact: true }).click()
 
-  const main = app.window.getByRole('main', { name: 'Main content', exact: true })
   const input = composer(app.window)
-  await input.pressSequentially('$rev')
-  await expect(main.getByRole('option', { name: /review/ })).toBeVisible()
+  await app.window.getByRole('button', { name: 'Skills', exact: true }).click()
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('$')
+  await input.pressSequentially('rev')
+  const completions = app.window.getByRole('region', { name: 'Commands and skills' })
+  await expect(completions.getByRole('option', { name: /review/ })).toBeVisible()
+  await expect(completions.getByText('Navigate', { exact: false })).toBeInViewport()
 
   // Completion is one real browser edit transaction; the mirrored leading
   // token paints the colored text while the textarea glyphs stay transparent.

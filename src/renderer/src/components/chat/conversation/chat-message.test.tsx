@@ -62,6 +62,17 @@ describe('ChatMessage', () => {
           input: { command: 'echo first' }
         },
         {
+          type: 'text',
+          text: 'Checking another file.'
+        },
+        {
+          type: 'dynamic-tool',
+          toolCallId: 'read',
+          toolName: 'Read',
+          state: 'input-available',
+          input: { file_path: 'notes.txt' }
+        },
+        {
           type: 'data-tool-output-delta',
           data: { toolCallId: 'shell', toolName: 'Bash', stream: 'stdout', delta: 'first\n' }
         }

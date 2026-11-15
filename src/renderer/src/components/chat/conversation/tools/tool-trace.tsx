@@ -36,7 +36,12 @@ type ToolDescription = {
   fullDetail?: string
   title: string
 }
-type ToolOutputDelta = { preview: string; stderr: string; stdout: string }
+type ToolOutputDelta = {
+  preview: string
+  stderr: string
+  stdout: string
+  lastStream?: 'stdout' | 'stderr' | 'preview'
+}
 type ToolActivityPart = DynamicToolUIPart & {
   liveOutput?: ToolOutputDelta
   permission?: ToolPermissionData
@@ -53,7 +58,6 @@ type ToolActivityState =
 // Keep live summaries stable; full streaming output belongs to the disclosure.
 const MAX_SUMMARY_CHARACTERS = 2_000
 const MAX_COMMAND_CHARACTERS = 120
-const COMPACT_OUTPUT_LINES = 5
 const ToolOutputSchema = z.union([
   z.string(),
   z.object({ output: z.string() }).transform(({ output }) => output),
@@ -109,7 +113,7 @@ function firstErrorLine(errorText: string | undefined): string {
 type ToolSummary =
   | { detail: string | null; kind: 'failure'; text: string }
   | { kind: 'message'; isError: boolean; text: string }
-  | { kind: 'output'; meta: string | null; note: string | null; text: string }
+  | { kind: 'output'; text: string }
 
 function displayBashCommand(command: string): string {
   const firstLine = command.trim().split('\n')[0] ?? ''
@@ -130,20 +134,11 @@ function getFailureDetail(part: ToolActivityPart, headline: string): string | nu
 }
 
 function compactOutputSummary(text: string): Extract<ToolSummary, { kind: 'output' }> {
-  const lines = toLines(stripTerminalControlSequences(text))
-  while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
-  const visible = lines.slice(-COMPACT_OUTPUT_LINES)
-  const hiddenCount = Math.max(0, lines.length - visible.length)
-  const visibleText = visible.join('\n')
-  const summaryText =
-    visibleText.length > MAX_SUMMARY_CHARACTERS
-      ? `…${visibleText.slice(-(MAX_SUMMARY_CHARACTERS - 1))}`
-      : visibleText
+  const clean = stripTerminalControlSequences(text).trimEnd()
+  const lineStart = Math.max(clean.lastIndexOf('\n'), clean.lastIndexOf('\r')) + 1
   return {
     kind: 'output',
-    meta: null,
-    note: hiddenCount > 0 ? `+${countUnits(hiddenCount, 'earlier line')}` : null,
-    text: summaryText
+    text: truncateSummary(clean.slice(lineStart))
   }
 }
 
@@ -190,12 +185,10 @@ function getToolSummary(
   // summary line; ToolTrace never asks for a summary in those states.
 
   if (state === 'streaming-output' && part.toolName === 'Bash') {
-    const combined = [liveOutput?.stdout, liveOutput?.stderr].filter(Boolean).join('\n')
-    if (combined)
-      return {
-        ...compactOutputSummary(combined),
-        meta: `${countUnits(countOutputLines(combined), 'line')} · ${elapsedSeconds}s`
-      }
+    const latest = liveOutput?.lastStream
+      ? liveOutput[liveOutput.lastStream]
+      : liveOutput?.stdout || liveOutput?.stderr
+    if (latest) return compactOutputSummary(latest)
   }
 
   if (state === 'executing' || state === 'streaming-output') {
@@ -389,8 +382,6 @@ function ToolSummaryLine({ summary }: { summary: ToolSummary }): React.JSX.Eleme
   return (
     <div className="agent-activity__result agent-activity__result--output">
       <pre>{summary.text}</pre>
-      {summary.note ? <div className="agent-activity__result-note">{summary.note}</div> : null}
-      {summary.meta ? <div className="agent-activity__result-meta">{summary.meta}</div> : null}
     </div>
   )
 }
@@ -565,7 +556,9 @@ function ToolTrace({
         </div>
       )}
       {summary &&
-        (activityState === 'failed' || (part.toolName !== 'Bash' && !isStateWordSummary)) && (
+        (part.toolName !== 'Bash' ||
+          isFailed ||
+          (!isExpanded && summary.kind === 'output' && summary.text)) && (
           <ToolSummaryLine summary={summary} />
         )}
       {part.permission && (part.permission.state !== 'pending' || !isActive) && (
@@ -611,6 +604,5 @@ export {
   type ToolActivityPart,
   ToolNode,
   type ToolNodeState,
-  type ToolOutputDelta,
   ToolTrace
 }

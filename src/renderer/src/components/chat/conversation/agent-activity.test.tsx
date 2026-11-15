@@ -496,6 +496,8 @@ describe('ToolTrace', () => {
     await act(() => vi.advanceTimersByTimeAsync(2_100))
 
     expect(screen.getByText('2s')).toBeVisible()
+    expect(screen.getByText('running tests')).toBeVisible()
+    expect(screen.queryByText('checking')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Bash cargo test Live output' })).toHaveAttribute(
       'aria-expanded',
       'false'
@@ -884,6 +886,27 @@ describe('AgentActivityTimeline', () => {
     expect(run).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Output')).toBeVisible()
     expect(screen.getAllByText('Tests passed').length).toBeGreaterThan(0)
+  })
+
+  it('user finishes a long tool run when reading the answer, then one summary opens all commands', () => {
+    const commands = ['one', 'two', 'three', 'four'].map((command) => ({
+      type: 'dynamic-tool' as const,
+      toolName: 'Bash',
+      toolCallId: command,
+      input: { command },
+      state: 'output-available' as const,
+      output: 'ok'
+    }))
+    const { rerender } = render(
+      <AgentActivityTimeline id="long-run" isStreaming parts={commands} />
+    )
+    expect(screen.getByRole('button', { name: 'Bash two Output available' })).toBeVisible()
+    rerender(<AgentActivityTimeline id="long-run" isStreaming={false} parts={commands} />)
+    const summary = screen.getByRole('button', { name: 'Ran 4 commands' })
+    expect(summary).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'Bash two Output available' })).toBeNull()
+    fireEvent.click(summary)
+    expect(screen.getByRole('button', { name: 'Bash two Output available' })).toBeVisible()
   })
 })
 

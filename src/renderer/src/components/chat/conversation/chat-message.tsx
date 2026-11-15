@@ -22,13 +22,14 @@ import {
   type AgentActivityPart,
   AgentActivityTimeline,
   AgentLoadingIndicator,
-  type ToolOutputDelta
+  type ToolActivityPart
 } from './agent-activity'
 
 type ChatMessageProps = {
   message: MicoUIMessage
   isStreaming: boolean
   pendingLabel?: string
+  showActions?: boolean
 }
 
 const textEncoder = new TextEncoder()
@@ -52,53 +53,32 @@ function isToolOutputDeltaPart(part: AssistantSourcePart): part is ToolOutputDel
   return part.type === 'data-tool-output-delta'
 }
 
-function getFinalAnswerText(parts: MicoUIMessage['parts']): string {
-  return parts.reduce((answer, part, index) => {
-    if (
-      part.type !== 'text' ||
-      parts.slice(index + 1).some((nextPart) => isActivityPart(nextPart))
-    ) {
-      return answer
-    }
-
-    return answer + part.text
-  }, '')
-}
-
 function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): AssistantBlock[] {
+  const toolsById = new Map<string, ToolActivityPart>()
   return parts.reduce<AssistantBlock[]>((blocks, part) => {
     if (isActivityPart(part)) {
       const previous = blocks.at(-1)
       // Consecutive tool/reasoning events share one model step. Any text part is
       // body copy — interim or final — and closes the step before it.
       // Accumulated output belongs to this render, never to the provider's message object.
-      if (previous?.type === 'activity') previous.parts.push({ ...part })
-      else blocks.push({ parts: [{ ...part }], type: 'activity' })
+      const activityPart = { ...part }
+      if (activityPart.type === 'dynamic-tool') toolsById.set(activityPart.toolCallId, activityPart)
+      if (previous?.type === 'activity') previous.parts.push(activityPart)
+      else blocks.push({ parts: [activityPart], type: 'activity' })
     } else if (part.type === 'data-tool-permission') {
-      for (const block of blocks) {
-        if (block.type !== 'activity') continue
-        const target = block.parts.find(
-          (candidate) =>
-            candidate.type === 'dynamic-tool' && candidate.toolCallId === part.data.toolCallId
-        )
-        if (target?.type === 'dynamic-tool') target.permission = part.data
-      }
+      const target = toolsById.get(part.data.toolCallId)
+      if (target) target.permission = part.data
     } else if (isToolOutputDeltaPart(part)) {
-      const activity = blocks.findLast((block) => block.type === 'activity')
-      const target = activity?.parts.findLast(
-        (candidate): candidate is Extract<AgentActivityPart, { type: 'dynamic-tool' }> =>
-          candidate.type === 'dynamic-tool' && candidate.toolCallId === part.data.toolCallId
-      )
+      const target = toolsById.get(part.data.toolCallId)
       if (target) {
-        const liveOutput: ToolOutputDelta = target.liveOutput ?? {
+        const liveOutput = target.liveOutput ?? {
           preview: '',
           stderr: '',
           stdout: ''
         }
-        target.liveOutput = {
-          ...liveOutput,
-          [part.data.stream]: liveOutput[part.data.stream] + part.data.delta
-        }
+        liveOutput[part.data.stream] += part.data.delta
+        liveOutput.lastStream = part.data.stream
+        target.liveOutput = liveOutput
       }
     } else if (part.type === 'text') {
       // An empty text part (a block the model started but never filled) must not
@@ -116,12 +96,21 @@ function groupAssistantParts(parts: ReadonlyArray<AssistantSourcePart>): Assista
 function ChatMessageComponent({
   message,
   isStreaming,
-  pendingLabel
+  pendingLabel,
+  showActions = false
 }: ChatMessageProps): React.JSX.Element {
   const [copyState, setCopyState] = React.useState<'idle' | 'copied'>('idle')
-  const text = getFinalAnswerText(message.parts)
   const isUser = message.role === 'user'
-  const assistantBlocks = groupAssistantParts(message.parts)
+  const assistantBlocks = isUser ? [] : groupAssistantParts(message.parts)
+  const tail = assistantBlocks.at(-1)
+  const text = isUser
+    ? message.parts
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('')
+    : tail?.type === 'text'
+      ? tail.text
+      : ''
   const documents = message.parts
     .filter((part) => part.type === 'data-document')
     .map(({ data }) => {
@@ -137,7 +126,7 @@ function ChatMessageComponent({
   ]
     .filter(Boolean)
     .join('\n\n')
-  const canCopy = isUser || message.metadata?.completionState === 'complete'
+  const canCopy = Boolean(copyText) && (isUser || message.metadata?.completionState === 'complete')
 
   // Keep copy confirmation transient so repeated copies retain clear feedback.
   React.useEffect(() => {
@@ -233,7 +222,9 @@ function ChatMessageComponent({
           </div>
         ) : null}
         {canCopy && (
-          <MessageFooter className="min-h-6 text-text-tertiary opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100">
+          <MessageFooter
+            className={`min-h-6 text-text-secondary motion-safe:transition-opacity ${showActions ? '' : 'opacity-0 group-hover/message:opacity-100 focus-within:opacity-100'}`}
+          >
             <IconTooltipButton
               icon={
                 <IconSwap

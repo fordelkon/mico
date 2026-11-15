@@ -181,6 +181,15 @@
   margin-top: 0.125rem;
 }
 
+.agent-activity__item:not(:last-child)::before {
+  position: absolute;
+  inset: 1.5rem auto -0.5rem 0.875rem;
+  width: 1px;
+  background: var(--border-subtle);
+  content: "";
+  pointer-events: none;
+}
+
 .agent-activity[data-live="true"] .agent-activity__item {
   animation: agent-activity-item-fade-in 120ms var(--activity-disclosure-easing) both;
 }
@@ -302,12 +311,6 @@
   color: var(--text-secondary);
   font-size: 0.8125rem;
   line-height: 1.75;
-}
-
-.agent-activity__result-note,
-.agent-activity__result-meta {
-  padding-top: 0.125rem;
-  opacity: 0.8;
 }
 
 /* The active row stays legible without adding another pulse beside the live

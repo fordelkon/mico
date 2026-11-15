@@ -1,5 +1,7 @@
 import { getToolPresentation } from '@mico/coding-agent/contracts'
+import { Button } from '@mico/ui'
 import type { ReasoningUIPart } from 'ai'
+import { ChevronRightIcon, ListChecksIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ThinkingTrace } from './tools/thinking-trace'
@@ -7,7 +9,6 @@ import {
   getToolActivityLabel,
   getToolActivityState,
   type ToolActivityPart,
-  type ToolOutputDelta,
   ToolTrace
 } from './tools/tool-trace'
 import { ToolTraceGroup } from './tools/trace-group'
@@ -80,6 +81,9 @@ function AgentActivityTimeline({
   parts: AgentActivityPart[]
 }): React.JSX.Element {
   const isLive = isStreaming && !isSettled
+  const [keepDetailsOpen, setKeepDetailsOpen] = React.useState(false)
+  const timelineId = React.useId()
+  const segments = toTimelineSegments(parts)
   const tools = parts.filter((part): part is ToolActivityPart => part.type === 'dynamic-tool')
   const awaitingApproval = isLive && tools.some((part) => part.permission?.state === 'pending')
   const failed = tools.filter((part) => getToolActivityState(part, isLive) === 'failed').length
@@ -112,6 +116,11 @@ function AgentActivityTimeline({
   ]
     .filter(Boolean)
     .join(' · ')
+  // A long, successful run can yield the reading column to the answer. If the
+  // user inspected a row while it ran, keep that row and its viewport mounted.
+  const canFold =
+    !isLive && segments.length >= 4 && tools.length > 0 && completed.length === tools.length
+  const waitingForNextPart = isLive && liveLabel === 'Working'
   return (
     <section
       aria-label="Agent activity"
@@ -122,9 +131,34 @@ function AgentActivityTimeline({
       <span className="sr-only" role="status">
         {label}
       </span>
-      <div className="agent-activity__timeline">
+      {canFold && (
+        <Button
+          aria-controls={timelineId}
+          aria-expanded={keepDetailsOpen}
+          className="max-w-full justify-start gap-2 px-1.5 text-xs font-medium text-text-secondary"
+          onClick={() => setKeepDetailsOpen(!keepDetailsOpen)}
+          size="sm"
+          variant="ghost"
+        >
+          <ListChecksIcon aria-hidden="true" className="size-4" />
+          <span className="truncate" title={label}>
+            {label}
+          </span>
+          <ChevronRightIcon
+            aria-hidden="true"
+            className={keepDetailsOpen ? 'size-3.5 rotate-90' : 'size-3.5'}
+          />
+        </Button>
+      )}
+      <div
+        className="agent-activity__timeline"
+        hidden={canFold && !keepDetailsOpen}
+        id={timelineId}
+        onFocusCapture={() => setKeepDetailsOpen(true)}
+        onClickCapture={() => setKeepDetailsOpen(true)}
+      >
         <div className="agent-activity__body-inner" role="list">
-          {toTimelineSegments(parts).map((segment, index) => (
+          {segments.map((segment, index) => (
             <div
               className="agent-activity__item"
               key={
@@ -158,6 +192,12 @@ function AgentActivityTimeline({
           ))}
         </div>
       </div>
+      {waitingForNextPart && (
+        <div aria-hidden="true" className="agent-activity__live-status">
+          <span className="agent-activity__live-dot" />
+          Working
+        </div>
+      )}
     </section>
   )
 }
@@ -166,5 +206,5 @@ export {
   type AgentActivityPart,
   AgentActivityTimeline,
   AgentLoadingIndicator,
-  type ToolOutputDelta
+  type ToolActivityPart
 }

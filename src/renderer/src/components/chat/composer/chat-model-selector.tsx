@@ -75,7 +75,8 @@ function ChatModelSelector({
         trigger={
           <Button
             aria-label={selectedModel?.displayName ?? 'Select model'}
-            className="chat-model-selector__trigger h-7 min-w-0 max-w-40 shrink gap-1.5 px-2 text-xs font-normal text-text-secondary"
+            className="chat-model-selector__trigger h-7 min-w-0 max-w-[min(42cqw,18rem)] shrink gap-1.5 px-2 text-xs font-normal text-text-secondary"
+            title={selectedModel?.displayName}
             disabled={disabled || !library}
             type="button"
             variant="ghost"

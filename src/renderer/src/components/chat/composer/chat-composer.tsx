@@ -7,6 +7,10 @@ import {
   DropdownMenuTrigger,
   IconSwap,
   IconTooltipButton,
+  Kbd,
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
   Spinner,
   Textarea
 } from '@mico/ui'
@@ -151,7 +155,8 @@ function ChatComposer({
   }, [skills.isOpen, skills.selectedIndex, draft.text])
   const [isFocused, setIsFocused] = React.useState(false)
   const [permissionMenuOpen, setPermissionMenuOpen] = React.useState(false)
-  const skillsMenuRef = React.useRef<HTMLElement>(null)
+  const surfaceRef = React.useRef<HTMLDivElement>(null)
+  const skillsMenuRef = React.useRef<HTMLDivElement>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   // The mounted textarea element, so effects that render before the textarea
   // sibling (the highlight mirror) can depend on the element itself instead of
@@ -170,6 +175,7 @@ function ChatComposer({
   const previousModeRef = React.useRef(mode)
   const isDisabled = mode === 'disabled' || draft.isSending
   const configurationDisabled = mode !== 'send' || draft.isSending
+  const showCompletions = skills.isOpen && !configurationDisabled
   const hasSkills = skills.knownSkillNames.size > 0
   const hasCommands = onCompact !== undefined
   const capabilityHint =
@@ -377,7 +383,7 @@ function ChatComposer({
         {canAddProject ? (
           // The workspace control lives above the input surface as its own
           // row; existing conversations keep theirs in the conversation header.
-          <div className="mb-2 flex min-w-0 items-center">
+          <div className="mb-2 flex min-w-0 items-center gap-2">
             <ProjectSelector
               appearance="pill"
               canAddProject={canAddProject}
@@ -390,9 +396,28 @@ function ChatComposer({
               projectPath={projectPath}
               projects={projects}
             />
+            {hasSkills && !draft.text && (
+              <Button
+                className="h-7 gap-1.5 rounded-full px-2.5 text-xs font-normal text-text-secondary"
+                disabled={configurationDisabled}
+                onClick={() => {
+                  textareaRef.current?.focus()
+                  insertTextareaText('$')
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <span aria-hidden="true" className="font-mono">
+                  $
+                </span>
+                Skills
+              </Button>
+            )}
           </div>
         ) : null}
         <div
+          ref={surfaceRef}
           data-input-focused={isFocused ? 'true' : undefined}
           className="chat-composer__surface relative flex w-full flex-col gap-2 rounded-[var(--radius-composer)] border bg-chat-composer p-3 transition-colors"
           onClick={(event) => {
@@ -405,114 +430,166 @@ function ChatComposer({
               textareaRef.current?.focus()
           }}
         >
-          {skills.isOpen && !isDisabled && mode === 'send' ? (
-            <section
-              ref={skillsMenuRef}
-              aria-label="Commands and skills"
-              className="absolute bottom-full left-0 z-20 mb-2 max-h-72 w-full overflow-y-auto rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg"
-            >
-              {skills.status === 'loading' ? (
-                <p role="status" className="px-2 py-2 text-sm text-muted-foreground">
-                  Loading skills…
-                </p>
-              ) : null}
-              {skills.error ? (
-                <div className="px-2 py-2 text-sm">
-                  <p role="alert">{skills.error}</p>
-                  <button
-                    type="button"
-                    className="mt-2 rounded-md px-2 py-1 text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-                    onClick={skills.retry}
-                  >
-                    Retry skills
-                  </button>
-                </div>
-              ) : null}
-              <div id={skillMenuId} role="listbox" aria-label="Commands and skills">
-                {commandCount > 0 && (
-                  <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Commands</p>
-                )}
-                {skills.matches.map((item, index) => (
-                  <React.Fragment key={item.id}>
-                    {index === commandCount && (
-                      <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Skills</p>
-                    )}
-                    <button
-                      ref={index === skills.selectedIndex ? activeSkillRef : undefined}
-                      id={`${skillMenuId}-${index}`}
-                      type="button"
-                      role="option"
-                      aria-selected={index === skills.selectedIndex}
-                      tabIndex={-1}
-                      className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left aria-selected:bg-accent aria-selected:text-accent-foreground"
-                      onMouseEnter={() => skills.selectIndex(index)}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => selectCompletion(item)}
-                    >
-                      {item.kind === 'command' ? (
-                        <span className="flex w-full min-w-0 items-baseline gap-2">
-                          <span className="font-mono text-xs text-muted-foreground">
-                            /{item.name}
-                          </span>
-                          <span className="truncate text-sm font-medium">{item.label}</span>
-                        </span>
-                      ) : (
-                        <span className="w-full truncate text-sm font-medium">{item.name}</span>
-                      )}
-                      <span
-                        className="w-full truncate text-xs text-muted-foreground"
-                        title={item.description}
-                      >
-                        {item.kind === 'command'
-                          ? item.description
-                          : item.description.replace(/\s+/g, ' ').trim()}
-                      </span>
-                    </button>
-                  </React.Fragment>
-                ))}
-              </div>
-              {skills.status === 'ready' && !skills.matches.length ? (
-                skills.queryMode === 'dollar' ? (
-                  <>
-                    <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Skills</p>
-                    <p className="px-2 py-2 text-sm text-muted-foreground">
-                      {projectId ? 'No matching skills.' : 'Choose a workspace to use skills.'}
+          <Popover
+            open={showCompletions}
+            onOpenChange={(open) => {
+              if (!open) skills.dismiss()
+            }}
+          >
+            <PopoverAnchor virtualRef={surfaceRef} />
+            {showCompletions ? (
+              <PopoverContent
+                ref={skillsMenuRef}
+                role="region"
+                aria-label="Commands and skills"
+                align="start"
+                side={canAddProject ? 'bottom' : 'top'}
+                sideOffset={6}
+                collisionPadding={12}
+                onOpenAutoFocus={(event) => event.preventDefault()}
+                onCloseAutoFocus={(event) => event.preventDefault()}
+                onEscapeKeyDown={(event) => {
+                  // The textarea owns Escape while composing or navigating suggestions.
+                  if (document.activeElement === textareaRef.current || event.isComposing)
+                    event.preventDefault()
+                  else textareaRef.current?.focus()
+                }}
+                onInteractOutside={(event) => {
+                  if (event.target === textareaRef.current) event.preventDefault()
+                }}
+                className="max-h-[min(19rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) gap-0 overflow-hidden rounded-xl p-0 motion-reduce:animate-none"
+              >
+                <div className="min-h-0 overflow-y-auto overscroll-contain p-1.5">
+                  {skills.status === 'loading' ? (
+                    <p role="status" className="px-2 py-2 text-sm text-muted-foreground">
+                      Loading skills…
                     </p>
-                  </>
-                ) : (
-                  <p className="px-2 py-2 text-sm text-muted-foreground">No matching commands.</p>
-                )
-              ) : null}
-              {skills.diagnostics.length ? (
-                <div className="mt-1 border-t border-border px-2 pt-2 text-xs text-muted-foreground">
-                  <details>
-                    <summary className="cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
-                      {skills.diagnostics.length} skill discovery{' '}
-                      {skills.diagnostics.length === 1 ? 'warning' : 'warnings'}
-                    </summary>
-                    <ul
-                      aria-label="Skill discovery warnings"
-                      className="mt-2 max-h-32 space-y-3 overflow-y-auto overscroll-contain break-words pr-2 [overflow-wrap:anywhere]"
-                    >
-                      {skills.diagnostics.map(({ path, message, source }, index) => (
-                        <li key={`${source}:${path}:${index}`}>
-                          <p className="font-medium text-popover-foreground">{path}</p>
-                          <p>{message}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                  <button
-                    type="button"
-                    className="mt-1 rounded-md px-2 py-1 text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-                    onClick={skills.retry}
-                  >
-                    Retry skills
-                  </button>
+                  ) : null}
+                  {skills.error ? (
+                    <div className="px-2 py-2 text-sm">
+                      <p role="alert">{skills.error}</p>
+                      <button
+                        type="button"
+                        className="mt-2 rounded-md px-2 py-1 text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                        onClick={skills.retry}
+                      >
+                        Retry skills
+                      </button>
+                    </div>
+                  ) : null}
+                  <div id={skillMenuId} role="listbox" aria-label="Commands and skills">
+                    {commandCount > 0 && (
+                      <p className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                        Commands
+                      </p>
+                    )}
+                    {skills.matches.map((item, index) => (
+                      <React.Fragment key={item.id}>
+                        {index === commandCount && (
+                          <p className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                            Skills
+                          </p>
+                        )}
+                        <button
+                          ref={index === skills.selectedIndex ? activeSkillRef : undefined}
+                          id={`${skillMenuId}-${index}`}
+                          type="button"
+                          role="option"
+                          aria-selected={index === skills.selectedIndex}
+                          tabIndex={-1}
+                          className="flex min-w-0 w-full flex-col gap-1 rounded-lg px-2 py-2 text-left aria-selected:bg-accent aria-selected:text-accent-foreground"
+                          onMouseEnter={() => skills.selectIndex(index)}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectCompletion(item)}
+                        >
+                          {item.kind === 'command' ? (
+                            <span className="flex w-full min-w-0 items-baseline gap-2">
+                              <span className="font-mono text-xs text-muted-foreground">
+                                /{item.name}
+                              </span>
+                              <span className="truncate text-sm font-medium">{item.label}</span>
+                            </span>
+                          ) : (
+                            <span className="w-full truncate text-sm font-medium">{item.name}</span>
+                          )}
+                          <span
+                            className="w-full truncate text-xs text-muted-foreground"
+                            title={item.description}
+                          >
+                            {item.kind === 'command'
+                              ? item.description
+                              : item.description.replace(/\s+/g, ' ').trim()}
+                          </span>
+                        </button>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  {skills.status === 'ready' && !skills.matches.length ? (
+                    skills.queryMode === 'dollar' ? (
+                      <>
+                        <p className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                          Skills
+                        </p>
+                        <p className="px-2 py-2 text-sm text-muted-foreground">
+                          {projectId ? 'No matching skills.' : 'Choose a workspace to use skills.'}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="px-2 py-2 text-sm text-muted-foreground">
+                        No matching commands.
+                      </p>
+                    )
+                  ) : null}
+                  {skills.diagnostics.length ? (
+                    <div className="mt-1 border-t border-border px-2 pt-2 text-xs text-muted-foreground">
+                      <details>
+                        <summary className="cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                          {skills.diagnostics.length} skill discovery{' '}
+                          {skills.diagnostics.length === 1 ? 'warning' : 'warnings'}
+                        </summary>
+                        <ul
+                          aria-label="Skill discovery warnings"
+                          className="mt-2 max-h-32 space-y-3 overflow-y-auto overscroll-contain break-words pr-2 [overflow-wrap:anywhere]"
+                        >
+                          {skills.diagnostics.map(({ path, message, source }, index) => (
+                            <li key={`${source}:${path}:${index}`}>
+                              <p className="font-medium text-popover-foreground">{path}</p>
+                              <p>{message}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                      <button
+                        type="button"
+                        className="mt-1 rounded-md px-2 py-1 text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                        onClick={skills.retry}
+                      >
+                        Retry skills
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </section>
-          ) : null}
+                <div
+                  aria-hidden="true"
+                  className="flex shrink-0 flex-wrap gap-x-4 gap-y-1 border-t border-border-subtle px-3 py-1.5 text-xs text-text-secondary"
+                >
+                  {skills.matches.length > 0 && (
+                    <>
+                      <span>
+                        <Kbd>↑</Kbd> <Kbd>↓</Kbd> Navigate
+                      </span>
+                      <span>
+                        <Kbd>↵</Kbd> Select
+                      </span>
+                    </>
+                  )}
+                  <span>
+                    <Kbd>esc</Kbd> Close
+                  </span>
+                </div>
+              </PopoverContent>
+            ) : null}
+          </Popover>
           <ComposerAttachmentList
             disabled={configurationDisabled}
             documents={draft.documents}
@@ -542,9 +619,9 @@ function ChatComposer({
               textarea={textarea}
             />
             {/* The hint is a static overlay instead of the native placeholder:
-                Chromium lets a double-click on an empty textarea select the
-                placeholder text. It sits inert and unselectable, mirroring the
-                native placeholder's visibility (empty draft only). */}
+            Chromium lets a double-click on an empty textarea select the
+            placeholder text. It sits inert and unselectable, mirroring the
+            native placeholder's visibility (empty draft only). */}
             {capabilityHint && !draft.text ? (
               <span
                 aria-hidden="true"
@@ -563,10 +640,10 @@ function ChatComposer({
               // it replaces was announced).
               aria-describedby={capabilityHint && !draft.text ? capabilityHintId : undefined}
               data-composing={isComposing ? 'true' : undefined}
-              aria-controls={skills.isOpen ? skillMenuId : undefined}
+              aria-controls={showCompletions ? skillMenuId : undefined}
               aria-autocomplete="list"
               aria-activedescendant={
-                skills.isOpen && skills.matches.length
+                showCompletions && skills.matches.length
                   ? `${skillMenuId}-${skills.selectedIndex}`
                   : undefined
               }

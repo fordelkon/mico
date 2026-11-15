@@ -12,7 +12,7 @@ import {
 import { type ConversationTranscriptSource, useConversationTranscript } from '@renderer/hooks/chat'
 import type { ChatRetryState, MicoUIMessage } from '@renderer/types/chat'
 import type { TurnFailureCode } from '@mico/coding-agent/contracts'
-import { CircleAlertIcon } from 'lucide-react'
+import { ArrowDownIcon, CircleAlertIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { ChatMessage } from './chat-message'
@@ -147,6 +147,7 @@ function ChatMessageList({
                 <MessageScrollerItem key={message.id} messageId={message.id}>
                   <ChatMessage
                     message={message}
+                    showActions={message.role === 'assistant' && message.id === latestMessage?.id}
                     pendingLabel={pendingLabel}
                     isStreaming={
                       isResponding &&
@@ -190,9 +191,13 @@ function ChatMessageList({
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton
-          className="bottom-5 size-8 rounded-full border-border-subtle bg-surface-primary shadow-sm"
+          aria-label="Scroll to end"
+          className="bottom-5 h-8 w-auto gap-1.5 rounded-full border-border-subtle bg-surface-primary px-3 text-xs shadow-sm"
           data-streaming={isResponding ? 'true' : undefined}
-        />
+        >
+          <ArrowDownIcon aria-hidden="true" className="size-3.5" />
+          Latest
+        </MessageScrollerButton>
       </MessageScroller>
     </MessageScrollerProvider>
   )
