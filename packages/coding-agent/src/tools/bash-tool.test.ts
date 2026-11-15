@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createBashTool } from './bash-tool'
 import { createTemporaryWorkspace, removeTemporaryPaths } from './test-helpers'
@@ -9,6 +9,7 @@ describe('bash tool', () => {
   const commandCleanups: Array<() => Promise<void>> = []
   afterEach(async () => {
     await Promise.all(commandCleanups.splice(0).map((cleanup) => cleanup()))
+    vi.useRealTimers()
     await removeTemporaryPaths()
   })
 
@@ -113,13 +114,58 @@ describe('bash tool', () => {
     expect(result.output).toContain('err')
   })
 
-  it('user sees a failure when a command exits non-zero, then the code is reported', async () => {
+  it('user diagnoses a failed command when it exits non-zero, then both streams and the code remain available', async () => {
     const context = await createContext()
-    const command = 'node -e "process.exit(7)"'
+    const command =
+      "node -e \"console.log('Running project checks'); console.error('src/app.ts:12: Type mismatch'); process.exitCode = 7\""
 
-    await expect(createBashTool().execute({ command }, context)).rejects.toThrow(
-      'Command exited with code 7'
+    const result = createBashTool().execute({ command }, context)
+
+    await expect(result).rejects.toThrow('Command exited with code 7')
+    await expect(result).rejects.toThrow('Running project checks')
+    await expect(result).rejects.toThrow('src/app.ts:12: Type mismatch')
+  })
+
+  it('user diagnoses a timeout when a command stalls, then its captured output remains available', async () => {
+    const context = await createStreamingContext()
+    const observed = Promise.withResolvers<void>()
+    const collect = context.onOutputDelta
+    context.onOutputDelta = (delta) => {
+      collect(delta)
+      if (
+        context.deltas.some(
+          (part) => part.stream === 'stdout' && part.delta.includes('Starting checks')
+        ) &&
+        context.deltas.some(
+          (part) => part.stream === 'stderr' && part.delta.includes('Waiting for service')
+        )
+      )
+        observed.resolve()
+    }
+    vi.useFakeTimers()
+    const pending = createBashTool().execute(
+      {
+        command:
+          "node -e \"console.log('Starting checks'); console.error('Waiting for service'); setInterval(() => {}, 1000)\"",
+        timeout: 1000
+      },
+      context
     )
+    const drained = pending.catch(() => undefined)
+    const cleanup = async () => {
+      context.controller.abort()
+      await drained
+    }
+    commandCleanups.push(cleanup)
+    try {
+      await Promise.race([observed.promise, pending])
+      await vi.advanceTimersByTimeAsync(1000)
+      await expect(pending).rejects.toThrow('Command timed out after 1000 milliseconds')
+      await expect(pending).rejects.toThrow('Starting checks')
+      await expect(pending).rejects.toThrow('Waiting for service')
+    } finally {
+      await cleanup()
+    }
   })
 
   it('user stops a running command when cancelling, then execution rejects with an abort error', async () => {

@@ -130,7 +130,13 @@ function executeShell(
       if (settled || aborted || timedOut) return
       timedOut = true
       void terminate().then(() =>
-        settle(() => reject(new Error(`Command timed out after ${timeoutMs} milliseconds`)))
+        settle(() =>
+          reject(
+            new Error(
+              `Command timed out after ${timeoutMs} milliseconds\n\n${truncateOutput(output)}`
+            )
+          )
+        )
       )
     }, timeoutMs)
     child.stdout.on('data', (chunk: Buffer) => append('stdout', chunk))
@@ -141,7 +147,13 @@ function executeShell(
     child.once('close', (exitCode) => {
       if (aborted || timedOut) return
       if (exitCode !== 0)
-        return settle(() => reject(new Error(`Command exited with code ${exitCode ?? 'unknown'}`)))
+        return settle(() =>
+          reject(
+            new Error(
+              `Command exited with code ${exitCode ?? 'unknown'}\n\n${truncateOutput(output)}`
+            )
+          )
+        )
       settle(() => resolve(truncateOutput(output)))
     })
     signal.addEventListener('abort', stop, { once: true })
