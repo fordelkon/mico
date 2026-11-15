@@ -224,7 +224,11 @@ function ChatComposer({
     previousFocusKeyRef.current = focusKey
     previousModeRef.current = mode
 
-    if ((focusKeyChanged || becameSendable || shouldFocusOnMount) && mode === 'send') {
+    const focusAvailable = !document.activeElement || document.activeElement === document.body
+    if (
+      (focusKeyChanged || (becameSendable && focusAvailable) || shouldFocusOnMount) &&
+      mode === 'send'
+    ) {
       textareaRef.current?.focus()
     }
   }, [focusKey, mode])

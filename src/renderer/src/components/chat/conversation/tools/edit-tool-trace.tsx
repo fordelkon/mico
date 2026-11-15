@@ -45,6 +45,7 @@ function EditToolTrace({
             edit={edit}
             index={index}
             isDraft={isDraft}
+            isStreaming={isStreaming}
             key={index}
             language={language}
           />
@@ -63,11 +64,13 @@ function DiffPreview({
   edit,
   index,
   isDraft,
+  isStreaming,
   language
 }: {
   edit: ReturnType<typeof editPreview>
   index: number
   isDraft: boolean
+  isStreaming: boolean
   language: string
 }): React.JSX.Element {
   const lines = [
@@ -79,7 +82,7 @@ function DiffPreview({
   const code = lines.map(({ text }) => text).join('\n')
   const { isFallback, source, tokenLines } = useStreamingCodeHighlight({
     code,
-    isStreaming: false,
+    isStreaming,
     language
   })
   const highlighted = !isFallback && source.code === code && source.language === language

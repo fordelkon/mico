@@ -87,6 +87,7 @@ function AgentActivityTimeline({
   const tools = parts.filter((part): part is ToolActivityPart => part.type === 'dynamic-tool')
   const awaitingApproval = isLive && tools.some((part) => part.permission?.state === 'pending')
   const failed = tools.filter((part) => getToolActivityState(part, isLive) === 'failed').length
+  const denied = tools.filter((part) => getToolActivityState(part, isLive) === 'denied').length
   const incomplete = tools.filter(
     (part) => getToolActivityState(part, isLive) === 'incomplete'
   ).length
@@ -111,6 +112,7 @@ function AgentActivityTimeline({
           : 'Working'
   const label = [
     isLive ? liveLabel : summary,
+    denied ? `${denied} ${denied === 1 ? 'call' : 'calls'} denied` : null,
     failed ? `${failed} ${failed === 1 ? 'tool' : 'tools'} failed` : null,
     incomplete ? `${incomplete} ${incomplete === 1 ? 'call' : 'calls'} interrupted` : null
   ]

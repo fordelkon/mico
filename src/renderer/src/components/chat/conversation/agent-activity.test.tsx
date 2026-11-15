@@ -134,7 +134,7 @@ describe('ToolTrace', () => {
       />
     )
     expect(screen.queryByRole('log')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByRole('button')).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText('Applying changes…')).toBeVisible()
     rerender(
       <ToolTrace part={{ ...part, state: 'output-available', output: 'Updated index.ts.' }} />
@@ -525,22 +525,29 @@ describe('ToolTrace', () => {
     expect(within(results).queryByText('Found 2 file(s).')).not.toBeInTheDocument()
   })
 
-  it('user sees a write stay compact when running, then its content stays hidden', () => {
-    render(
+  it('user opens a proposed write when arguments stream, then sees the file grow and finish in place', () => {
+    const part = {
+      type: 'dynamic-tool' as const,
+      toolCallId: 'write-draft-1',
+      toolName: 'Write',
+      state: 'input-streaming' as const,
+      input: { file_path: 'sample.txt', content: 'first' }
+    }
+    const { rerender } = render(<ToolTrace part={part} />)
+    expect(screen.queryByText('first')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Drafting 1 line/ }))
+    const input = { ...part.input, content: 'first\nsecond' }
+    rerender(<ToolTrace part={{ ...part, input }} />)
+    expect(screen.getByText('Drafting 2 lines…')).toBeVisible()
+    expect(screen.getByText('Proposed file content')).toBeVisible()
+    expect(screen.getByText('second')).toBeVisible()
+    rerender(
       <ToolTrace
-        part={{
-          type: 'dynamic-tool',
-          toolCallId: 'write-draft-1',
-          toolName: 'Write',
-          state: 'input-available',
-          input: { file_path: 'src/index.ts', content: 'export const answer = 42' }
-        }}
+        part={{ ...part, state: 'output-available', input, output: 'Created sample.txt.' }}
       />
     )
-
-    expect(screen.getByText('Writing file…')).toBeVisible()
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
-    expect(screen.queryByText('Preparing file')).not.toBeInTheDocument()
+    expect(screen.getByText('File preview')).toBeVisible()
+    expect(screen.getByText('second')).toBeVisible()
   })
 
   it('user sees a read as a single summary line when it runs, then no panel competes with it', () => {
@@ -1251,7 +1258,7 @@ describe('Tool row status words and failure disclosure', () => {
     )
 
     expect(
-      screen.getByRole('group', { name: 'Write src/index.ts Awaiting approval' })
+      screen.getByRole('button', { name: 'Write src/index.ts Awaiting approval' })
     ).toBeVisible()
     expect(screen.queryByText('Waiting for your approval.')).not.toBeInTheDocument()
   })

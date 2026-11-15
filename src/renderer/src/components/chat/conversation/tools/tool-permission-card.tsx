@@ -52,7 +52,12 @@ function ToolPermissionCard({
       </p>
       {pending && (
         <>
-          <div className="max-h-[min(20rem,40vh)] space-y-3 overflow-y-auto overscroll-contain">
+          <div
+            className="max-h-[min(13rem,24vh)] space-y-2 overflow-y-auto overscroll-contain"
+            tabIndex={0}
+            aria-label="Approval details"
+            role="region"
+          >
             <p className="text-xs text-muted-foreground">{permission.reason}</p>
             <p className="break-all font-mono text-xs">{permission.cwd}</p>
             {input?.file_path !== undefined && (
@@ -61,21 +66,21 @@ function ToolPermissionCard({
             {input?.command !== undefined ? (
               <pre
                 aria-label="Command"
-                className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
+                className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
               >
                 {input.command}
               </pre>
             ) : input?.content !== undefined ? (
               <pre
                 aria-label="Proposed file content"
-                className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
+                className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
               >
                 {input.content || '(Empty file)'}
               </pre>
             ) : (
               <pre
                 aria-label="Tool arguments"
-                className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
+                className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
               >
                 {JSON.stringify(permission.input, null, 2)}
               </pre>

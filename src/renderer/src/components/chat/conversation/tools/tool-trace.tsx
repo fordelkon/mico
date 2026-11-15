@@ -47,6 +47,7 @@ type ToolActivityPart = DynamicToolUIPart & {
   permission?: ToolPermissionData
 }
 type ToolActivityState =
+  | 'denied'
   | 'incomplete'
   | 'completed'
   | 'executing'
@@ -67,8 +68,9 @@ const ToolOutputSchema = z.union([
 ])
 
 function getToolActivityState(part: ToolActivityPart, isActive = true): ToolActivityState {
-  if (part.state === 'output-error' || part.state === 'output-denied') return 'failed'
   if (part.state === 'output-available') return 'completed'
+  if (part.state === 'output-denied' || part.permission?.state === 'denied') return 'denied'
+  if (part.state === 'output-error') return 'failed'
   if (!isActive) return 'incomplete'
   if (part.permission?.state === 'pending') return 'awaiting-approval'
   if (part.state === 'input-streaming') return 'preparing'
@@ -180,7 +182,14 @@ function getToolSummary(
     const text = firstErrorLine(part.errorText)
     return { detail: getFailureDetail(part, text), kind: 'failure', text }
   }
-  if (state === 'preparing') return { kind: 'message', isError: false, text: 'Preparing…' }
+  if (state === 'preparing') {
+    const draft = part.toolName === 'Write' ? input?.content : input?.new_string
+    return {
+      kind: 'message',
+      isError: false,
+      text: draft ? `Drafting ${countUnits(countLines(draft), 'line')}…` : 'Preparing…'
+    }
+  }
   // Approval and interruption read through the row's status word instead of a
   // summary line; ToolTrace never asks for a summary in those states.
 
@@ -289,7 +298,7 @@ function describeTool(toolName: string, input: ToolTraceInput): ToolDescription 
 type ToolNodeState = 'error' | 'incomplete' | 'running' | 'success'
 
 function getToolNodeState(state: ToolActivityState): ToolNodeState {
-  if (state === 'awaiting-approval') return 'incomplete'
+  if (state === 'awaiting-approval' || state === 'denied') return 'incomplete'
   if (state === 'failed') return 'error'
   if (state === 'completed') return 'success'
   // An interrupted call must neither claim success nor pulse like it is still running.
@@ -303,6 +312,7 @@ function getToolNodeState(state: ToolActivityState): ToolNodeState {
  * action, the target, and the summary line.
  */
 function getToolStateWord(state: ToolActivityState): string | null {
+  if (state === 'denied') return 'Not run · permission denied'
   if (state === 'failed') return 'Failed'
   if (state === 'awaiting-approval') return 'Awaiting approval'
   if (state === 'incomplete') return 'Interrupted'
@@ -312,6 +322,8 @@ function getToolStateWord(state: ToolActivityState): string | null {
 /** Bash rows speak in past-tense verbs instead of the generic state words. */
 function getBashActionVerb(state: ToolActivityState): string {
   switch (state) {
+    case 'denied':
+      return 'Not run · permission denied'
     case 'completed':
       return 'Ran'
     case 'awaiting-approval':
@@ -452,7 +464,10 @@ function ToolTrace({
   const elapsedSeconds = useElapsedSeconds(isRunning && part.toolName === 'Bash')
   // The bare status words cover the whole summary for approval and interruption;
   // repeating both would make a screen reader announce the same state twice.
-  const isStateWordSummary = activityState === 'awaiting-approval' || activityState === 'incomplete'
+  const isStateWordSummary =
+    activityState === 'awaiting-approval' ||
+    activityState === 'incomplete' ||
+    activityState === 'denied'
   const summary: ToolSummary | null = isStateWordSummary
     ? null
     : getToolSummary(
@@ -468,11 +483,13 @@ function ToolTrace({
   const isFileTool = ['Read', 'Edit', 'Write', 'LoadSkill', 'ReadSkillResource'].includes(
     part.toolName
   )
+  const liveProposal = isActive && (presentation?.type === 'write' || presentation?.type === 'edit')
   const hasPanel =
-    (presentation != null &&
+    activityState !== 'denied' &&
+    ((presentation != null &&
       (activityState !== 'failed' || part.toolName === 'Bash') &&
-      (!isFileTool || activityState === 'completed')) ||
-    genericDetails != null
+      (!isFileTool || liveProposal || activityState === 'completed')) ||
+      genericDetails != null)
   const contentId = `tool-trace-${part.toolCallId}`
   const stateWord =
     part.toolName === 'Bash' ? getBashActionVerb(activityState) : getToolStateWord(activityState)
@@ -561,13 +578,15 @@ function ToolTrace({
           (!isExpanded && summary.kind === 'output' && summary.text)) && (
           <ToolSummaryLine summary={summary} />
         )}
-      {part.permission && (part.permission.state !== 'pending' || !isActive) && (
-        <ToolPermissionCard
-          permission={part.permission}
-          isActive={isActive}
-          onRespond={(response) => window.api.chat.respondToPermission(response)}
-        />
-      )}
+      {part.permission &&
+        activityState !== 'denied' &&
+        (part.permission.state !== 'pending' || !isActive) && (
+          <ToolPermissionCard
+            permission={part.permission}
+            isActive={isActive}
+            onRespond={(response) => window.api.chat.respondToPermission(response)}
+          />
+        )}
       {hasPanel ? (
         <div className="thinking-block__panel">
           <div

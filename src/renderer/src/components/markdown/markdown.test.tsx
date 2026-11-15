@@ -51,6 +51,39 @@ describe('Markdown', () => {
     expect(screen.getByText('const answer = 42').closest('code')).toBeInTheDocument()
   })
 
+  it('user reads two referenced snippets when the last fence is open, then only that snippet is writing', () => {
+    const text = [
+      'See [guide][doc].',
+      '[doc]: https://example.org',
+      '~~~~js\nconst done = 1\n~~~~',
+      '```js\nconst live ='
+    ].join('\n\n')
+    const { rerender } = render(<Markdown isStreaming text={text} />)
+    expect(screen.getAllByTestId('code-block').map((block) => block.dataset.state)).toEqual([
+      'complete',
+      'streaming'
+    ])
+    rerender(<Markdown isStreaming text={text + ' 2\n```'} />)
+    expect(screen.getAllByText('Ready')).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'guide' })).toHaveAttribute(
+      'href',
+      'https://example.org/'
+    )
+  })
+
+  it('user reads a closed fence when more prose streams, then its copy control keeps focus through completion', () => {
+    const code = '```ts\nconst first = 1\n'
+    const { rerender } = render(<Markdown isStreaming text={code} />)
+    const copy = screen.getByRole('button', { name: 'Copy code' })
+    copy.focus()
+    const final = code + '```\n\nThe first value is ready.'
+    rerender(<Markdown isStreaming text={final} />)
+    expect(screen.getByText('Ready')).toBeVisible()
+    rerender(<Markdown isStreaming={false} text={final} />)
+    expect(copy).toHaveFocus()
+    expect(screen.getByText('The first value is ready.')).toBeVisible()
+  })
+
   it('user sees math delimiters stay literal when they appear inside code, then no math renders', () => {
     render(<Markdown isStreaming={false} text={'`$x^2$`\n\n```tex\n$$x$$\n```'} />)
 

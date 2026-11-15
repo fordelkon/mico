@@ -1,6 +1,7 @@
 import { Button } from '@mico/ui'
 import { LightbulbIcon, ChevronDownIcon } from 'lucide-react'
 import * as React from 'react'
+import { useTraceScroll } from './use-trace-scroll'
 
 type ThinkingTraceProps = {
   excerptText?: string
@@ -22,6 +23,7 @@ function ThinkingTrace({
   // label follows the reasoning-end chunk instead of list position.
   const isThinking = isStreaming
   const [expanded, setExpanded] = React.useState(false)
+  const { contentRef, viewportRef, onScroll } = useTraceScroll(expanded && isThinking)
   const [animateDisclosure, setAnimateDisclosure] = React.useState(false)
   const contentId = `thinking-${id}`
   const label = labelOverride ?? (isThinking ? 'Thinking' : 'Thought')
@@ -73,8 +75,14 @@ function ThinkingTrace({
           id={contentId}
           inert={!expanded}
         >
-          <div className="thinking-block__reading" aria-label="Reasoning" tabIndex={0}>
-            {text}
+          <div
+            className="thinking-block__reading"
+            aria-label="Reasoning"
+            ref={viewportRef}
+            onScroll={onScroll}
+            tabIndex={0}
+          >
+            <div ref={contentRef}>{text}</div>
           </div>
         </div>
       </div>

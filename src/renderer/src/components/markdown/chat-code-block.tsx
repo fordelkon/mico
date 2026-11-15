@@ -228,7 +228,7 @@ function ChatCodeBlock({
           <code>
             {lines.map((line, index) => (
               <span
-                key={`${index}-${line}`}
+                key={index}
                 className={cn(
                   'grid min-h-5',
                   showLineNumbers

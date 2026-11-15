@@ -55,6 +55,8 @@ test('user denies then approves a write when reviewing operations, then only the
   ).toBe(true)
   await approval.getByRole('button', { name: 'Deny', exact: true }).click()
   await waitForReply(app.window, assistantMessages(app.window).last())
+  await expect(app.window.getByText('Not run · permission denied', { exact: true })).toBeVisible()
+  await expect(app.window.getByText('Failed', { exact: true })).toHaveCount(0)
   await expect(readFile(join(app.workspaceDir, 'denied.txt'), 'utf8')).rejects.toThrow('ENOENT')
 
   provider.enqueue({

@@ -310,7 +310,10 @@ test('user asks for a file when a workspace is selected, then the file and tool 
   await composer(app.window).fill('Create result.txt in this workspace.')
   await app.window.getByRole('button', { name: 'Send message' }).click()
   await write.received
-  await expect(app.window.getByRole('group', { name: 'Write result.txt Preparing…' })).toBeVisible()
+  const draft = app.window.getByRole('button', { name: 'Write result.txt Drafting 1 line…' })
+  await draft.click()
+  await expect(app.window.getByText('Proposed file content', { exact: true })).toBeVisible()
+  await expect(app.window.getByTestId('code-block')).toContainText('MICO_TOOL_RESULT')
   await expect(readFile(join(app.workspaceDir, 'result.txt'), 'utf8')).rejects.toThrow('ENOENT')
   await expect(app.window.getByText(/Invalid tool input/)).toHaveCount(0)
   write.finishArguments()

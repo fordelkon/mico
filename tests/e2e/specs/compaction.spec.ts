@@ -22,7 +22,8 @@ const conversationRow = (window: Page) =>
 /** Complete the /compact slash command through the composer autocomplete. */
 const runCompactCommand = async (window: Page): Promise<void> => {
   await composer(window).fill('/comp')
-  await expect(main(window).getByRole('option', { name: /Compact context/ })).toBeVisible()
+  const commands = window.getByRole('region', { name: 'Commands and skills' })
+  await expect(commands.getByRole('option', { name: /Compact context/ })).toBeVisible()
   await composer(window).press('Tab')
   await expect(composer(window)).toHaveValue('/compact ')
   await composer(window).press('Enter')

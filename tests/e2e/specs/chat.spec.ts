@@ -126,7 +126,7 @@ test('user reads fenced code when a reply streams, then blocks fill the message 
 }) => {
   const response = provider.enqueue({
     type: 'text',
-    text: '```ts\nconst ready = true\n',
+    text: '```ts\nconst ready = true\n' + '// A long source line '.repeat(40),
     hold: true
   })
   await composer(app.window).fill('Show a code example')
@@ -165,9 +165,22 @@ test('user reads fenced code when a reply streams, then blocks fill the message 
   await expect
     .poll(geometry)
     .toEqual({ messageGap: 0, contentGap: 0, blockGap: 0, pageOverflow: false })
-  response.finish(`${'// A long source line '.repeat(40)}\n\`\`\``)
+  const copy = codeBlock.getByRole('button', { name: 'Copy code' })
+  await copy.focus()
+  const horizontalOffset = await codeBlock.locator('pre').evaluate((pre) => {
+    const viewport = pre.parentElement
+    if (!viewport) throw new Error('The code viewport is missing.')
+    viewport.scrollLeft = 100
+    return viewport.scrollLeft
+  })
+  expect(horizontalOffset).toBeGreaterThan(0)
+  response.finish('\n```\n\nThe example is complete.')
   await waitForReply(app.window, reply)
   await expect(codeBlock).toHaveAttribute('data-state', 'complete')
+  await expect(copy).toBeFocused()
+  expect(await codeBlock.locator('pre').evaluate((pre) => pre.parentElement?.scrollLeft)).toBe(
+    horizontalOffset
+  )
   await expect
     .poll(geometry)
     .toEqual({ messageGap: 0, contentGap: 0, blockGap: 0, pageOverflow: false })

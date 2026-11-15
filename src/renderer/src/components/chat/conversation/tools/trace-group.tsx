@@ -38,21 +38,23 @@ function ToolTraceGroup({
   const incomplete = states.filter((state) => state === 'incomplete').length
   const failed = states.filter((state) => state === 'failed').length
   const awaiting = states.filter((state) => state === 'awaiting-approval').length
+  const denied = states.filter((state) => state === 'denied').length
   const nodeState: ToolNodeState = hasError
     ? 'error'
     : isRunning || awaiting
       ? 'running'
-      : incomplete
+      : incomplete || denied
         ? 'incomplete'
         : 'success'
   const fileCount = `${parts.length} ${parts.length === 1 ? 'file' : 'files'}`
   const awaitingSummary = awaiting ? `${awaiting} awaiting approval` : null
   const label = isRunning
     ? ['Reading', `${fileCount}…`, awaitingSummary].filter(Boolean).join(' ')
-    : failed || incomplete || awaiting
+    : failed || incomplete || awaiting || denied
       ? [
           `${parts.length} ${parts.length === 1 ? 'file read' : 'file reads'}`,
           failed ? `${failed} failed` : null,
+          denied ? `${denied} denied` : null,
           incomplete ? `${incomplete} interrupted` : null,
           awaitingSummary
         ]
